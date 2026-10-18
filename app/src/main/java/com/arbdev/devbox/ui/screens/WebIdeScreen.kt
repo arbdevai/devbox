@@ -22,6 +22,8 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.filled.Code
 import androidx.compose.material.icons.filled.Fullscreen
 import androidx.compose.material.icons.filled.FullscreenExit
@@ -95,7 +97,27 @@ fun WebIdeScreen() {
                     )
                 }
 
-                Row {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    IconButton(
+                        onClick = { webViewRef?.goBack() },
+                        enabled = webViewRef?.canGoBack() == true
+                    ) {
+                        Icon(
+                            imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                            contentDescription = "Kembali",
+                            tint = if (webViewRef?.canGoBack() == true) Color.White else Color.DarkGray
+                        )
+                    }
+                    IconButton(
+                        onClick = { webViewRef?.goForward() },
+                        enabled = webViewRef?.canGoForward() == true
+                    ) {
+                        Icon(
+                            imageVector = Icons.AutoMirrored.Filled.ArrowForward,
+                            contentDescription = "Maju",
+                            tint = if (webViewRef?.canGoForward() == true) Color.White else Color.DarkGray
+                        )
+                    }
                     IconButton(onClick = { webViewRef?.reload() }) {
                         Icon(
                             imageVector = Icons.Default.Refresh,

@@ -1,5 +1,12 @@
 package com.arbdev.devbox.ui.screens
 
+import android.graphics.Typeface
+import android.text.SpannableStringBuilder
+import android.text.Spanned
+import android.text.style.ForegroundColorSpan
+import android.util.Base64
+import android.widget.ScrollView
+import android.widget.TextView
 import android.widget.Toast
 import androidx.compose.foundation.background
 import androidx.compose.foundation.horizontalScroll
@@ -10,21 +17,17 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.ContentPaste
 import androidx.compose.material.icons.filled.DeleteSweep
@@ -62,15 +65,14 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.viewinterop.AndroidView
 import com.arbdev.devbox.data.ChrootManager
 import com.arbdev.devbox.data.RootExecutor
 import com.arbdev.devbox.ui.theme.DevPrimary
 import com.arbdev.devbox.ui.theme.TerminalBackground
 import com.arbdev.devbox.ui.theme.TerminalCyan
 import com.arbdev.devbox.ui.theme.TerminalGreen
-import com.arbdev.devbox.ui.theme.TerminalRed
 import com.arbdev.devbox.ui.theme.TerminalText
-import com.arbdev.devbox.ui.theme.TerminalYellow
 import kotlinx.coroutines.launch
 
 data class TerminalLine(
@@ -92,7 +94,6 @@ fun TerminalScreen(
     val context = LocalContext.current
     val clipboardManager = LocalClipboardManager.current
     val scope = rememberCoroutineScope()
-    val listState = rememberLazyListState()
     val focusRequester = remember { FocusRequester() }
 
     var currentDir by remember { mutableStateOf("/home/coder") }
@@ -107,8 +108,8 @@ fun TerminalScreen(
     val logLines = remember {
         mutableStateListOf(
             TerminalLine("DevBox Terminal [Ubuntu 24.04 Chroot Engine]", LineType.SYSTEM),
-            TerminalLine("Tekan lama pada teks log untuk memunculkan menu copy khas Android.", LineType.SYSTEM),
-            TerminalLine("Extra keys lengkap (CTRL, TAB, ESC, ALT, arah panah) tersedia di bawah.", LineType.SYSTEM),
+            TerminalLine("Tekan lama pada teks mana saja untuk seleksi & copy khas Android.", LineType.SYSTEM),
+            TerminalLine("Extra keys: CTRL, TAB, ESC, SHIFT, ALT, panah kiri/kanan/atas/bawah.", LineType.SYSTEM),
             TerminalLine("------------------------------------------------------------", LineType.SYSTEM)
         )
     }
@@ -118,18 +119,23 @@ fun TerminalScreen(
     var inputState by remember { mutableStateOf(TextFieldValue("")) }
     var isRunning by remember { mutableStateOf(false) }
 
-    // Modifier keys state
+    // Modifier states
     var isCtrlActive by remember { mutableStateOf(false) }
     var isAltActive by remember { mutableStateOf(false) }
+    var isShiftActive by remember { mutableStateOf(false) }
+
+    var textViewRef by remember { mutableStateOf<TextView?>(null) }
+    var scrollViewRef by remember { mutableStateOf<ScrollView?>(null) }
 
     fun insertTextAtCursor(insert: String) {
+        val toInsert = if (isShiftActive) insert.uppercase() else insert
         val cur = inputState.text
         val pos = inputState.selection.start
         val before = cur.substring(0, pos)
         val after = cur.substring(pos)
         inputState = inputState.copy(
-            text = "$before$insert$after",
-            selection = TextRange(pos + insert.length)
+            text = "$before$toInsert$after",
+            selection = TextRange(pos + toInsert.length)
         )
         focusRequester.requestFocus()
     }
@@ -152,22 +158,30 @@ fun TerminalScreen(
                 return@launch
             }
 
-            // Ensure mounts are available
+            // Ensure mounts are available before execution
             ChrootManager.mountAll()
 
-            // Construct command with currentDir and retrieve updated pwd
-            val escapedCmd = trimmed.replace("'", "'\\''")
+            // Safe Base64-encoded execution script to preserve working directory (cd) without shell escaping bugs
+            val scriptContent = """
+cd "$currentDir" || exit 1
+$trimmed
+__code=$?
+printf "\n___DEVBOX_PWD:%s\n" "${'$'}(pwd)"
+exit ${'$'}__code
+""".trimIndent()
+
+            val b64Script = Base64.encodeToString(scriptContent.toByteArray(Charsets.UTF_8), Base64.NO_WRAP)
             val envPrefix = "env -i HOME=/home/coder USER=coder LOGNAME=coder SHELL=/bin/bash TERM=xterm-256color PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 
             val executionCmd = if (trimmed.startsWith("ub ") || trimmed == "ub") {
                 "su -c '/data/data/com.termux/files/usr/bin/ub $trimmed'"
             } else {
-                "su -c \"chroot ${ChrootManager.DEFAULT_ROOTFS} /usr/bin/$envPrefix /usr/sbin/runuser -u coder -- /bin/bash -c 'cd \\\"$currentDir\\\" && ($escapedCmd); __p__=\\\$(pwd); printf \\\"\\n__DEVBOX_PWD__:%s\\n\\\" \\\"\\\$__p__\\\"'\""
+                "su -c \"echo '$b64Script' | base64 -d | chroot ${ChrootManager.DEFAULT_ROOTFS} /usr/bin/$envPrefix /usr/sbin/runuser -u coder -- /bin/bash\""
             }
 
             RootExecutor.executeStream(executionCmd) { outputLine ->
-                if (outputLine.startsWith("__DEVBOX_PWD__:")) {
-                    val newPath = outputLine.removePrefix("__DEVBOX_PWD__:").trim()
+                if (outputLine.startsWith("___DEVBOX_PWD:")) {
+                    val newPath = outputLine.substringAfter("___DEVBOX_PWD:").trim()
                     if (newPath.isNotEmpty() && newPath.startsWith("/")) {
                         currentDir = newPath
                     }
@@ -183,7 +197,11 @@ fun TerminalScreen(
             }
 
             isRunning = false
-            listState.animateScrollToItem(logLines.size)
+
+            // Auto-scroll to bottom
+            scrollViewRef?.post {
+                scrollViewRef?.fullScroll(ScrollView.FOCUS_DOWN)
+            }
         }
     }
 
@@ -194,8 +212,8 @@ fun TerminalScreen(
     }
 
     LaunchedEffect(logLines.size) {
-        if (logLines.isNotEmpty()) {
-            listState.animateScrollToItem(logLines.size - 1)
+        scrollViewRef?.post {
+            scrollViewRef?.fullScroll(ScrollView.FOCUS_DOWN)
         }
     }
 
@@ -229,7 +247,7 @@ fun TerminalScreen(
                 )
             }
             Row(verticalAlignment = Alignment.CenterVertically) {
-                // Paste Button (Pastes clipboard directly into prompt cursor)
+                // Paste Button
                 IconButton(
                     onClick = {
                         val clip = clipboardManager.getText()?.text
@@ -279,37 +297,49 @@ fun TerminalScreen(
             }
         }
 
-        // Terminal Log History with NATIVE Long-Press Selection (No clickable interference)
-        SelectionContainer(
+        // Terminal Log Area using Native Android TextView with REAL setTextIsSelectable(true)
+        // This guarantees native Android long-press selection handles and floating Copy/Share/Select All action mode
+        AndroidView(
+            factory = { ctx ->
+                ScrollView(ctx).apply {
+                    isFillViewport = true
+                    val tv = TextView(ctx).apply {
+                        setTextIsSelectable(true)
+                        typeface = Typeface.MONOSPACE
+                        textSize = 12f
+                        setTextColor(android.graphics.Color.parseColor("#C9D1D9"))
+                        setBackgroundColor(android.graphics.Color.BLACK)
+                        setPadding(24, 16, 24, 16)
+                    }
+                    addView(tv)
+                    textViewRef = tv
+                    scrollViewRef = this
+                }
+            },
+            update = { _ ->
+                textViewRef?.let { tv ->
+                    val ssb = SpannableStringBuilder()
+                    logLines.forEach { line ->
+                        val start = ssb.length
+                        ssb.append(line.text).append("\n")
+                        val end = ssb.length
+                        val color = when (line.type) {
+                            LineType.INPUT -> android.graphics.Color.parseColor("#7EE787")
+                            LineType.OUTPUT -> android.graphics.Color.parseColor("#C9D1D9")
+                            LineType.ERROR -> android.graphics.Color.parseColor("#FFA198")
+                            LineType.SYSTEM -> android.graphics.Color.parseColor("#D29922")
+                        }
+                        ssb.setSpan(ForegroundColorSpan(color), start, end, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+                    }
+                    tv.text = ssb
+                }
+            },
             modifier = Modifier
                 .weight(1f)
                 .fillMaxWidth()
-        ) {
-            LazyColumn(
-                state = listState,
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(horizontal = 12.dp, vertical = 6.dp)
-            ) {
-                items(logLines) { line ->
-                    val color = when (line.type) {
-                        LineType.INPUT -> TerminalGreen
-                        LineType.OUTPUT -> TerminalText
-                        LineType.ERROR -> TerminalRed
-                        LineType.SYSTEM -> TerminalYellow
-                    }
-                    Text(
-                        text = line.text,
-                        fontFamily = FontFamily.Monospace,
-                        fontSize = 12.sp,
-                        lineHeight = 16.sp,
-                        color = color
-                    )
-                }
-            }
-        }
+        )
 
-        // Native Inline Prompt Input (Connected directly to currentDir)
+        // Native Inline Prompt Input Line
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -359,13 +389,28 @@ fun TerminalScreen(
                     }
                 }
             )
+
+            if (inputState.text.isNotEmpty()) {
+                Spacer(modifier = Modifier.width(6.dp))
+                IconButton(
+                    onClick = { runCommand(inputState.text) },
+                    modifier = Modifier.size(28.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.AutoMirrored.Filled.Send,
+                        contentDescription = "Kirim",
+                        tint = DevPrimary,
+                        modifier = Modifier.size(18.dp)
+                    )
+                }
+            }
         }
 
-        // Termux-Style Complete Extra Keys Bar (CTRL, TAB, ESC, ALT, Arrows, Symbols)
+        // Termux Extra Keys Bar (CTRL, TAB, ESC, SHIFT, ALT, Arrows, Symbols)
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .background(Color(0xFF0F0F0F))
+                .background(Color(0xFF0D0D0D))
                 .horizontalScroll(rememberScrollState())
                 .padding(horizontal = 6.dp, vertical = 4.dp),
             horizontalArrangement = Arrangement.spacedBy(4.dp),
@@ -394,6 +439,11 @@ fun TerminalScreen(
             // ALT Key Toggle
             TerminalToggleKey(label = "ALT", isActive = isAltActive) {
                 isAltActive = !isAltActive
+            }
+
+            // SHIFT Key Toggle (Requested by user)
+            TerminalToggleKey(label = "SHIFT", isActive = isShiftActive) {
+                isShiftActive = !isShiftActive
             }
 
             // Arrow Left ◀
@@ -434,13 +484,17 @@ fun TerminalScreen(
                 focusRequester.requestFocus()
             }
 
-            // Symbol Keys
+            // Symbols
             TerminalModifierKey(label = "~") { insertTextAtCursor("~") }
             TerminalModifierKey(label = "/") { insertTextAtCursor("/") }
             TerminalModifierKey(label = "-") { insertTextAtCursor("-") }
+            TerminalModifierKey(label = "_") { insertTextAtCursor("_") }
             TerminalModifierKey(label = "|") { insertTextAtCursor("|") }
+            TerminalModifierKey(label = "=") { insertTextAtCursor("=") }
+            TerminalModifierKey(label = ":") { insertTextAtCursor(":") }
+            TerminalModifierKey(label = "$") { insertTextAtCursor("$") }
 
-            // Ctrl+C Quick Action
+            // Ctrl+C
             TerminalModifierKey(label = "Ctrl+C") {
                 logLines.add(TerminalLine("$currentPrompt^C", LineType.SYSTEM))
                 inputState = TextFieldValue("")
