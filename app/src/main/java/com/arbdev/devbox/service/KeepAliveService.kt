@@ -12,16 +12,23 @@ import android.os.IBinder
 import android.os.PowerManager
 import androidx.core.app.NotificationCompat
 import com.arbdev.devbox.MainActivity
+import com.arbdev.devbox.data.ChrootManager
+import com.arbdev.devbox.terminal.TerminalSessionManager
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 
 class KeepAliveService : Service() {
 
     private var wakeLock: PowerManager.WakeLock? = null
+    private val serviceScope = CoroutineScope(Dispatchers.IO)
 
     companion object {
         const val CHANNEL_ID = "devbox_keepalive_channel"
         const val NOTIFICATION_ID = 1001
         const val ACTION_START = "com.arbdev.devbox.ACTION_START_KEEPALIVE"
         const val ACTION_STOP = "com.arbdev.devbox.ACTION_STOP_KEEPALIVE"
+        const val ACTION_KILL_ALL = "com.arbdev.devbox.ACTION_KILL_ALL"
 
         var isRunning = false
             private set
@@ -43,6 +50,13 @@ class KeepAliveService : Service() {
             }
             context.startService(intent)
         }
+
+        fun killAllAndExit(context: Context) {
+            val intent = Intent(context, KeepAliveService::class.java).apply {
+                action = ACTION_KILL_ALL
+            }
+            context.startService(intent)
+        }
     }
 
     override fun onCreate() {
@@ -51,12 +65,26 @@ class KeepAliveService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        if (intent?.action == ACTION_STOP) {
-            releaseWakeLock()
-            stopForeground(STOP_FOREGROUND_REMOVE)
-            stopSelf()
-            isRunning = false
-            return START_NOT_STICKY
+        when (intent?.action) {
+            ACTION_KILL_ALL -> {
+                serviceScope.launch {
+                    TerminalSessionManager.terminateAll()
+                    ChrootManager.killDevboxProcessesAndUnmount()
+                    releaseWakeLock()
+                    stopForeground(STOP_FOREGROUND_REMOVE)
+                    stopSelf()
+                    isRunning = false
+                    android.os.Process.killProcess(android.os.Process.myPid())
+                }
+                return START_NOT_STICKY
+            }
+            ACTION_STOP -> {
+                releaseWakeLock()
+                stopForeground(STOP_FOREGROUND_REMOVE)
+                stopSelf()
+                isRunning = false
+                return START_NOT_STICKY
+            }
         }
 
         acquireWakeLock()
@@ -107,20 +135,36 @@ class KeepAliveService : Service() {
         val openAppIntent = Intent(this, MainActivity::class.java).apply {
             flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
         }
-        val pendingIntent = PendingIntent.getActivity(
+        val pendingOpenIntent = PendingIntent.getActivity(
             this,
             0,
             openAppIntent,
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
         )
 
+        // Action Intent "Matikan & Keluar"
+        val killIntent = Intent(this, KeepAliveService::class.java).apply {
+            action = ACTION_KILL_ALL
+        }
+        val pendingKillIntent = PendingIntent.getService(
+            this,
+            1,
+            killIntent,
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+        )
+
         return NotificationCompat.Builder(this, CHANNEL_ID)
             .setContentTitle("DevBox Chroot Aktif")
-            .setContentText("CPU WakeLock aktif. Proses Linux dan server berjalan di latar belakang.")
+            .setContentText("CPU WakeLock aktif. Container Linux & AI Agent berjalan.")
             .setSmallIcon(android.R.drawable.ic_dialog_info)
             .setOngoing(true)
-            .setContentIntent(pendingIntent)
+            .setContentIntent(pendingOpenIntent)
             .setPriority(NotificationCompat.PRIORITY_LOW)
+            .addAction(
+                android.R.drawable.ic_menu_close_clear_cancel,
+                "Matikan & Keluar",
+                pendingKillIntent
+            )
             .build()
     }
 

@@ -1,7 +1,6 @@
 package com.arbdev.devbox.ui.screens
 
 import android.app.Activity
-import android.content.Context
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
@@ -21,11 +20,11 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Build
 import androidx.compose.material.icons.filled.Code
 import androidx.compose.material.icons.filled.Dns
 import androidx.compose.material.icons.filled.PowerSettingsNew
 import androidx.compose.material.icons.filled.Refresh
-import androidx.compose.material.icons.filled.Security
 import androidx.compose.material.icons.filled.Terminal
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -112,7 +111,7 @@ fun DashboardScreen(
                     color = MaterialTheme.colorScheme.onBackground
                 )
                 Text(
-                    text = "Linux Chroot & Dev Environment",
+                    text = "Standalone Linux Container & AI Agent CLI",
                     fontSize = 14.sp,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -151,6 +150,30 @@ fun DashboardScreen(
 
         // Status Card
         StatusCard(state = state)
+
+        // Bootstrap Rootfs Button if not present
+        if (!state.isRootfsExists && state.isRootGranted) {
+            Spacer(modifier = Modifier.height(12.dp))
+            Button(
+                onClick = {
+                    scope.launch {
+                        actionMessage = "Menginisialisasi direktori rootfs di ${ChrootManager.DEFAULT_ROOTFS}..."
+                        val res = ChrootManager.initDevboxRootfs()
+                        actionMessage = res.getOrNull() ?: res.exceptionOrNull()?.message
+                        refreshState()
+                    }
+                },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(48.dp),
+                shape = RoundedCornerShape(12.dp),
+                colors = ButtonDefaults.buttonColors(containerColor = DevWarning)
+            ) {
+                Icon(Icons.Default.Build, contentDescription = null, tint = Color.Black)
+                Spacer(modifier = Modifier.width(8.dp))
+                Text("Inisialisasi Direktori Rootfs DevBox", color = Color.Black, fontWeight = FontWeight.Bold)
+            }
+        }
 
         Spacer(modifier = Modifier.height(16.dp))
 
@@ -212,7 +235,7 @@ fun DashboardScreen(
                     isChecked = state.isMounted,
                     onCheckedChange = { enable ->
                         scope.launch {
-                            actionMessage = if (enable) "Memasang mount chroot..." else "Membersihkan mount chroot..."
+                            actionMessage = if (enable) "Memasang mount chroot DevBox..." else "Membersihkan mount chroot DevBox..."
                             if (enable) ChrootManager.mountAll() else ChrootManager.unmountAll()
                             refreshState()
                             actionMessage = null
@@ -244,7 +267,7 @@ fun DashboardScreen(
                 ControlRow(
                     icon = Icons.Default.PowerSettingsNew,
                     title = "Background CPU WakeLock",
-                    subtitle = if (wakeLockActive) "CPU aktif saat layar mati" else "Hemat baterai (CPU sleep)",
+                    subtitle = if (wakeLockActive) "CPU aktif saat layar mati (ada tombol exit di notifikasi)" else "Hemat baterai (CPU sleep)",
                     isChecked = wakeLockActive,
                     onCheckedChange = { enable ->
                         if (enable) {
@@ -280,15 +303,15 @@ fun DashboardScreen(
                 Spacer(modifier = Modifier.height(8.dp))
                 MetricRow(label = "Swap Terpakai", value = "${state.swapUsedMb} MB")
                 Spacer(modifier = Modifier.height(8.dp))
-                MetricRow(label = "Proses Chroot", value = "${state.activeProcesses} proses")
+                MetricRow(label = "Proses DevBox", value = "${state.activeProcesses} proses")
                 Spacer(modifier = Modifier.height(8.dp))
-                MetricRow(label = "Rootfs Path", value = ChrootManager.DEFAULT_ROOTFS)
+                MetricRow(label = "Rootfs Path Mandiri", value = ChrootManager.DEFAULT_ROOTFS)
             }
         }
 
         Spacer(modifier = Modifier.height(20.dp))
 
-        // Quick Shell Shortcuts
+        // Standalone Terminal Shortcuts
         Text(
             text = "Pintasan Perintah Cepat",
             fontSize = 16.sp,
@@ -303,33 +326,32 @@ fun DashboardScreen(
             horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
             OutlinedButton(
-                onClick = { onNavigateToTerminal("ub status") },
+                onClick = { onNavigateToTerminal("uname -a") },
                 shape = RoundedCornerShape(8.dp)
             ) {
-                Text("ub status", fontSize = 12.sp, fontFamily = FontFamily.Monospace)
+                Text("uname -a", fontSize = 12.sp, fontFamily = FontFamily.Monospace)
             }
             OutlinedButton(
-                onClick = { onNavigateToTerminal("ub scan") },
+                onClick = { onNavigateToTerminal("df -h") },
                 shape = RoundedCornerShape(8.dp)
             ) {
-                Text("ub scan", fontSize = 12.sp, fontFamily = FontFamily.Monospace)
+                Text("df -h", fontSize = 12.sp, fontFamily = FontFamily.Monospace)
             }
             OutlinedButton(
-                onClick = { onNavigateToTerminal("ub stop") },
+                onClick = { onNavigateToTerminal("ps aux") },
                 shape = RoundedCornerShape(8.dp)
             ) {
-                Text("ub stop", fontSize = 12.sp, fontFamily = FontFamily.Monospace)
+                Text("ps aux", fontSize = 12.sp, fontFamily = FontFamily.Monospace)
             }
         }
 
         Spacer(modifier = Modifier.height(28.dp))
 
-        // Exit & Stop Background Service Button
+        // Exit & Stop Container Button
         OutlinedButton(
             onClick = {
-                KeepAliveService.stopService(context)
+                KeepAliveService.killAllAndExit(context)
                 (context as? Activity)?.finishAffinity()
-                android.os.Process.killProcess(android.os.Process.myPid())
             },
             modifier = Modifier
                 .fillMaxWidth()
@@ -340,7 +362,7 @@ fun DashboardScreen(
         ) {
             Icon(Icons.Default.PowerSettingsNew, contentDescription = null, tint = DevError)
             Spacer(modifier = Modifier.width(8.dp))
-            Text("Tutup Aplikasi & Hentikan Layanan", fontWeight = FontWeight.SemiBold)
+            Text("Matikan DevBox & Keluar Total", fontWeight = FontWeight.SemiBold)
         }
     }
 }
@@ -355,18 +377,18 @@ fun StatusCard(state: ChrootState) {
         )
         !state.isRootfsExists -> Triple(
             DevWarning,
-            "Rootfs Tidak Ditemukan",
-            "Direktori /data/local/ubuntu-chroot belum ada di penyimpanan."
+            "Rootfs DevBox Belum Terpasang",
+            "Direktori ${ChrootManager.DEFAULT_ROOTFS} belum ada di penyimpanan lokal."
         )
         state.isMounted -> Triple(
             DevSuccess,
-            "Container Aktif & Siap",
-            "Ubuntu chroot berjalan normal dan siap digunakan."
+            "Container DevBox Aktif",
+            "Rootfs mandiri berjalan normal dan terisolasi dari chroot lain."
         )
         else -> Triple(
             DevPrimary,
-            "Container Siap (Standby)",
-            "Rootfs terverifikasi. Klik tombol Terminal untuk mulai sesi."
+            "Container DevBox Siap (Standby)",
+            "Rootfs mandiri terverifikasi. Masuk ke Terminal untuk memulai sesi."
         )
     }
 
@@ -400,76 +422,5 @@ fun StatusCard(state: ChrootState) {
                 )
             }
         }
-    }
-}
-
-@Composable
-fun ControlRow(
-    icon: ImageVector,
-    title: String,
-    subtitle: String,
-    isChecked: Boolean,
-    onCheckedChange: (Boolean) -> Unit
-) {
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.SpaceBetween,
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Row(
-            modifier = Modifier.weight(1f),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Icon(
-                imageVector = icon,
-                contentDescription = null,
-                tint = DevPrimary,
-                modifier = Modifier.size(24.dp)
-            )
-            Spacer(modifier = Modifier.width(12.dp))
-            Column {
-                Text(
-                    text = title,
-                    fontSize = 14.sp,
-                    fontWeight = FontWeight.Medium,
-                    color = MaterialTheme.colorScheme.onSurface
-                )
-                Text(
-                    text = subtitle,
-                    fontSize = 12.sp,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            }
-        }
-        Switch(
-            checked = isChecked,
-            onCheckedChange = onCheckedChange,
-            colors = SwitchDefaults.colors(
-                checkedThumbColor = Color.Black,
-                checkedTrackColor = DevPrimary
-            )
-        )
-    }
-}
-
-@Composable
-fun MetricRow(label: String, value: String) {
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.SpaceBetween,
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Text(
-            text = label,
-            fontSize = 13.sp,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
-        )
-        Text(
-            text = value,
-            fontSize = 13.sp,
-            fontFamily = FontFamily.Monospace,
-            fontWeight = FontWeight.SemiBold,
-            color = MaterialTheme.colorScheme.onSurface
-        )
     }
 }
