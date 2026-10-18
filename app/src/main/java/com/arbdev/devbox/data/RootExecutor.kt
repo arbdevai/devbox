@@ -3,7 +3,6 @@ package com.arbdev.devbox.data
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.BufferedReader
-import java.io.InputStreamReader
 
 data class CommandResult(
     val exitCode: Int,
@@ -27,7 +26,11 @@ object RootExecutor {
     }
 
     suspend fun execute(command: String): Result<CommandResult> = withContext(Dispatchers.IO) {
-        try {
+        executeSync(command)
+    }
+
+    fun executeSync(command: String): Result<CommandResult> {
+        return try {
             val process = ProcessBuilder("su", "-c", command).start()
             val stdout = process.inputStream.bufferedReader().use(BufferedReader::readText)
             val stderr = process.errorStream.bufferedReader().use(BufferedReader::readText)

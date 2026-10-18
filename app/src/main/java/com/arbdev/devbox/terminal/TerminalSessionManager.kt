@@ -105,7 +105,7 @@ class TerminalSession(
                 } finally {
                     isAlive = false
                     // Shell keluar (exit). Bersihkan semua sisa proses agent/container
-                    ChrootManager.killDevboxProcessesAndUnmount()
+                    ChrootManager.killDevboxProcessesAndUnmountSync()
                     val exitMsg = "\r\n\r\n\u001b[1;31m[Sesi DevBox Berakhir - Semua Proses Container Ditutup]\u001b[0m\r\n"
                     synchronized(bufferLock) {
                         outputBuffer.append(exitMsg)
@@ -161,7 +161,7 @@ class TerminalSession(
         process = null
         outputStream = null
         inputStream = null
-        ChrootManager.killDevboxProcessesAndUnmount()
+        ChrootManager.killDevboxProcessesAndUnmountSync()
     }
 }
 
@@ -210,6 +210,6 @@ object TerminalSessionManager {
         sessions.forEach { it.terminate() }
         sessions.clear()
         activeIndex.intValue = 0
-        ChrootManager.killDevboxProcessesAndUnmount()
+        ChrootManager.killDevboxProcessesAndUnmountSync()
     }
 }

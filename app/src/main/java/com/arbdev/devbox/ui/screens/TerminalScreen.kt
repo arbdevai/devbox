@@ -214,9 +214,7 @@ fun TerminalScreen(
                     val s = TerminalSessionManager.getActiveSession()
                     s.setListener { b64 -> dispatchOutputToXterm(b64) }
                 },
-                modifier = Modifier
-                    .size(36.dp)
-                    .align(Alignment.CenterVertically)
+                modifier = Modifier.size(36.dp)
             ) {
                 Icon(
                     imageVector = Icons.Default.Add,
@@ -484,6 +482,32 @@ fun TerminalKeyButton(
         },
         colors = FilterChipDefaults.filterChipColors(
             containerColor = Color(0xFF1C1C1C)
+        )
+    )
+}
+
+@Composable
+fun TerminalToggleKey(
+    label: String,
+    isActive: Boolean,
+    onClick: () -> Unit
+) {
+    FilterChip(
+        selected = isActive,
+        onClick = onClick,
+        shape = RoundedCornerShape(6.dp),
+        label = {
+            Text(
+                text = label,
+                fontSize = 11.sp,
+                fontWeight = FontWeight.Bold,
+                fontFamily = FontFamily.Monospace,
+                color = if (isActive) Color.Black else Color.White
+            )
+        },
+        colors = FilterChipDefaults.filterChipColors(
+            containerColor = Color(0xFF1C1C1C),
+            selectedContainerColor = DevPrimary
         )
     )
 }

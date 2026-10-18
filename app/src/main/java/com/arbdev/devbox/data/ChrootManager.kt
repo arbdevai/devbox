@@ -123,7 +123,7 @@ object ChrootManager {
         }
     }
 
-    suspend fun killDevboxProcessesAndUnmount(rootfs: String = DEFAULT_ROOTFS): Result<String> {
+    fun killDevboxProcessesAndUnmountSync(rootfs: String = DEFAULT_ROOTFS): Result<String> {
         val script = """
             fuser -k -9 '$rootfs' 2>/dev/null || true
             ps -eo pid,args | grep 'chroot $rootfs' | grep -v grep | awk '{print ${'$'}1}' | xargs -r kill -9 2>/dev/null || true
@@ -135,12 +135,16 @@ object ChrootManager {
             echo 'TERMINATED'
         """.trimIndent()
 
-        val res = RootExecutor.execute(script)
+        val res = RootExecutor.executeSync(script)
         return if (res.getOrNull()?.isSuccess == true) {
             Result.success("Semua proses dan container DevBox berhasil dihentikan total.")
         } else {
             Result.failure(Exception(res.getOrNull()?.stderr ?: "Gagal mematikan container DevBox."))
         }
+    }
+
+    suspend fun killDevboxProcessesAndUnmount(rootfs: String = DEFAULT_ROOTFS): Result<String> {
+        return killDevboxProcessesAndUnmountSync(rootfs)
     }
 
     suspend fun toggleCodeServer(enable: Boolean, rootfs: String = DEFAULT_ROOTFS): Result<Unit> {
