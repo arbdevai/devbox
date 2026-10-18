@@ -52,7 +52,7 @@ fun WebPreviewScreen() {
     var urlInput by remember { mutableStateOf("http://127.0.0.1:3000") }
     var currentUrl by remember { mutableStateOf("http://127.0.0.1:3000") }
     var webViewRef by remember { mutableStateOf<WebView?>(null) }
-    val focusManager = LocalFocusManager()
+    val focusManager = LocalFocusManager.current
 
     fun navigateTo(url: String) {
         val target = if (!url.startsWith("http://") && !url.startsWith("https://")) {

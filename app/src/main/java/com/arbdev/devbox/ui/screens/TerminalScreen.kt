@@ -77,7 +77,7 @@ fun TerminalScreen(
     initialCommand: String? = null
 ) {
     val scope = rememberCoroutineScope()
-    val focusManager = LocalFocusManager()
+    val focusManager = LocalFocusManager.current
     val listState = rememberLazyListState()
 
     val logLines = remember {
