@@ -1,9 +1,9 @@
 package com.arbdev.devbox.ui.screens
 
+import android.widget.Toast
 import androidx.compose.foundation.background
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -20,8 +20,10 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Send
+import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.DeleteSweep
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -29,7 +31,6 @@ import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Text
@@ -44,7 +45,10 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
@@ -76,6 +80,8 @@ enum class LineType {
 fun TerminalScreen(
     initialCommand: String? = null
 ) {
+    val context = LocalContext.current
+    val clipboardManager = LocalClipboardManager.current
     val scope = rememberCoroutineScope()
     val focusManager = LocalFocusManager.current
     val listState = rememberLazyListState()
@@ -83,7 +89,7 @@ fun TerminalScreen(
     val logLines = remember {
         mutableStateListOf(
             TerminalLine("DevBox Terminal [Ubuntu 24.04 Chroot Engine]", LineType.SYSTEM),
-            TerminalLine("Ketik perintah Linux atau gunakan tombol aksi cepat di bawah.", LineType.SYSTEM),
+            TerminalLine("Teks output dapat dipilih dan disalin. Gunakan ikon copy untuk salin semua.", LineType.SYSTEM),
             TerminalLine("------------------------------------------------------------", LineType.SYSTEM)
         )
     }
@@ -108,13 +114,16 @@ fun TerminalScreen(
                 return@launch
             }
 
-            // Route execution: If it's a native host command like ub
+            // Ensure mounts are available before command execution
+            ChrootManager.mountAll()
+
+            // Explicitly set PATH and environment so commands like ls, ps, htop work
             val executionCmd = if (trimmed.startsWith("ub ") || trimmed == "ub") {
                 "su -c '/data/data/com.termux/files/usr/bin/ub $trimmed'"
             } else {
-                // Execute inside ubuntu chroot as user coder
                 val escapedCmd = trimmed.replace("'", "'\\''")
-                "su -c \"chroot ${ChrootManager.DEFAULT_ROOTFS} /usr/sbin/runuser -u coder -- /bin/bash -lc '$escapedCmd'\""
+                val envPrefix = "env -i HOME=/home/coder USER=coder LOGNAME=coder SHELL=/bin/bash TERM=xterm-256color PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+                "su -c \"chroot ${ChrootManager.DEFAULT_ROOTFS} /usr/bin/$envPrefix /usr/sbin/runuser -u coder -- /bin/bash -lc 'cd /home/coder && $escapedCmd'\""
             }
 
             RootExecutor.executeStream(executionCmd) { outputLine ->
@@ -149,11 +158,11 @@ fun TerminalScreen(
             .background(TerminalBackground)
             .imePadding()
     ) {
-        // Terminal Header Bar
+        // Terminal Header Bar (Vantablack OLED)
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .background(Color(0xFF161B22))
+                .background(Color(0xFF000000))
                 .padding(horizontal = 12.dp, vertical = 8.dp),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
@@ -172,39 +181,59 @@ fun TerminalScreen(
                     color = TerminalCyan
                 )
             }
-            IconButton(
-                onClick = { logLines.clear() }
-            ) {
-                Icon(
-                    imageVector = Icons.Default.DeleteSweep,
-                    contentDescription = "Bersihkan Layar",
-                    tint = TerminalText
-                )
+            Row {
+                IconButton(
+                    onClick = {
+                        val allText = logLines.joinToString("\n") { it.text }
+                        clipboardManager.setText(AnnotatedString(allText))
+                        Toast.makeText(context, "Semua teks terminal berhasil disalin", Toast.LENGTH_SHORT).show()
+                    }
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.ContentCopy,
+                        contentDescription = "Salin Semua Log",
+                        tint = TerminalText
+                    )
+                }
+                IconButton(
+                    onClick = { logLines.clear() }
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.DeleteSweep,
+                        contentDescription = "Bersihkan Layar",
+                        tint = TerminalText
+                    )
+                }
             }
         }
 
-        // Terminal Output Area
-        LazyColumn(
-            state = listState,
+        // Terminal Output Area with SelectionContainer for text selection & copying
+        SelectionContainer(
             modifier = Modifier
                 .weight(1f)
                 .fillMaxWidth()
-                .padding(horizontal = 12.dp, vertical = 6.dp)
         ) {
-            items(logLines) { line ->
-                val color = when (line.type) {
-                    LineType.INPUT -> TerminalGreen
-                    LineType.OUTPUT -> TerminalText
-                    LineType.ERROR -> TerminalRed
-                    LineType.SYSTEM -> TerminalYellow
+            LazyColumn(
+                state = listState,
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(horizontal = 12.dp, vertical = 6.dp)
+            ) {
+                items(logLines) { line ->
+                    val color = when (line.type) {
+                        LineType.INPUT -> TerminalGreen
+                        LineType.OUTPUT -> TerminalText
+                        LineType.ERROR -> TerminalRed
+                        LineType.SYSTEM -> TerminalYellow
+                    }
+                    Text(
+                        text = line.text,
+                        fontFamily = FontFamily.Monospace,
+                        fontSize = 12.sp,
+                        lineHeight = 16.sp,
+                        color = color
+                    )
                 }
-                Text(
-                    text = line.text,
-                    fontFamily = FontFamily.Monospace,
-                    fontSize = 12.sp,
-                    lineHeight = 16.sp,
-                    color = color
-                )
             }
         }
 
@@ -212,12 +241,14 @@ fun TerminalScreen(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .background(Color(0xFF161B22))
+                .background(Color(0xFF0A0A0A))
                 .horizontalScroll(rememberScrollState())
                 .padding(horizontal = 8.dp, vertical = 4.dp),
             horizontalArrangement = Arrangement.spacedBy(6.dp)
         ) {
             TerminalKeyChip(label = "ls -la") { runCommand("ls -la") }
+            TerminalKeyChip(label = "pwd") { runCommand("pwd") }
+            TerminalKeyChip(label = "whoami") { runCommand("whoami") }
             TerminalKeyChip(label = "htop") { runCommand("htop") }
             TerminalKeyChip(label = "df -h") { runCommand("df -h") }
             TerminalKeyChip(label = "ps aux") { runCommand("ps aux") }
@@ -229,7 +260,7 @@ fun TerminalScreen(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .background(Color(0xFF161B22))
+                .background(Color(0xFF0A0A0A))
                 .padding(8.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
@@ -250,9 +281,11 @@ fun TerminalScreen(
                 enabled = !isRunning,
                 colors = OutlinedTextFieldDefaults.colors(
                     focusedBorderColor = DevPrimary,
-                    unfocusedBorderColor = Color(0xFF30363D),
+                    unfocusedBorderColor = Color(0xFF222222),
                     focusedTextColor = Color.White,
-                    unfocusedTextColor = Color.White
+                    unfocusedTextColor = Color.White,
+                    focusedContainerColor = Color(0xFF050505),
+                    unfocusedContainerColor = Color(0xFF050505)
                 ),
                 keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
                 keyboardActions = KeyboardActions(onSend = { runCommand(inputText) })
@@ -292,6 +325,6 @@ fun TerminalKeyChip(
                 color = Color.White
             )
         },
-        colors = FilterChipDefaults.filterChipColors(containerColor = Color(0xFF21262D))
+        colors = FilterChipDefaults.filterChipColors(containerColor = Color(0xFF141414))
     )
 }

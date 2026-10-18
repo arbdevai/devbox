@@ -18,12 +18,12 @@ val DevOnTertiary = Color(0xFF3B0764)
 val DevTertiaryContainer = Color(0xFF581C87)
 val DevOnTertiaryContainer = Color(0xFFF3E8FF)
 
-// Dark Background & Surfaces
-val DevBackground = Color(0xFF0B0F19)    // Deep Midnight
+// Dark Background & Surfaces (Pure OLED Vantablack)
+val DevBackground = Color(0xFF000000)    // Pure Vantablack
 val DevOnBackground = Color(0xFFF1F5F9)
-val DevSurface = Color(0xFF111827)       // Card Surface
+val DevSurface = Color(0xFF0A0A0A)       // Deep Vantablack Surface
 val DevOnSurface = Color(0xFFF3F4F6)
-val DevSurfaceVariant = Color(0xFF1F2937)// Elevated Surface
+val DevSurfaceVariant = Color(0xFF141414)// Subtle Elevated Surface
 val DevOnSurfaceVariant = Color(0xFF9CA3AF)
 
 // Status Colors
@@ -33,7 +33,7 @@ val DevError = Color(0xFFEF4444)
 val DevOnError = Color(0xFFFFFFFF)
 
 // Terminal Palette
-val TerminalBackground = Color(0xFF0D1117)
+val TerminalBackground = Color(0xFF000000)
 val TerminalText = Color(0xFFC9D1D9)
 val TerminalGreen = Color(0xFF7EE787)
 val TerminalBlue = Color(0xFF79C0FF)

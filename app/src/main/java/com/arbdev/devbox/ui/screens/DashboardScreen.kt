@@ -1,7 +1,9 @@
 package com.arbdev.devbox.ui.screens
 
+import android.app.Activity
 import android.content.Context
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -318,6 +320,27 @@ fun DashboardScreen(
             ) {
                 Text("ub stop", fontSize = 12.sp, fontFamily = FontFamily.Monospace)
             }
+        }
+
+        Spacer(modifier = Modifier.height(28.dp))
+
+        // Exit & Stop Background Service Button
+        OutlinedButton(
+            onClick = {
+                KeepAliveService.stopService(context)
+                (context as? Activity)?.finishAffinity()
+                android.os.Process.killProcess(android.os.Process.myPid())
+            },
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(52.dp),
+            shape = RoundedCornerShape(12.dp),
+            colors = ButtonDefaults.outlinedButtonColors(contentColor = DevError),
+            border = BorderStroke(1.dp, DevError.copy(alpha = 0.5f))
+        ) {
+            Icon(Icons.Default.PowerSettingsNew, contentDescription = null, tint = DevError)
+            Spacer(modifier = Modifier.width(8.dp))
+            Text("Tutup Aplikasi & Hentikan Layanan", fontWeight = FontWeight.SemiBold)
         }
     }
 }

@@ -122,7 +122,8 @@ object ChrootManager {
     suspend fun toggleCodeServer(enable: Boolean, rootfs: String = DEFAULT_ROOTFS): Result<Unit> {
         return if (enable) {
             mountAll(rootfs)
-            val cmd = "chroot '$rootfs' runuser -u coder -- /bin/bash -lc 'nohup code-server --bind-addr 127.0.0.1:8080 >/tmp/code-server.log 2>&1 &'"
+            val envPrefix = "env -i HOME=/home/coder USER=coder LOGNAME=coder SHELL=/bin/bash TERM=xterm-256color PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+            val cmd = "chroot '$rootfs' /usr/bin/$envPrefix /usr/sbin/runuser -u coder -- /bin/bash -lc 'nohup code-server --bind-addr 127.0.0.1:8080 >/tmp/code-server.log 2>&1 &'"
             RootExecutor.execute(cmd)
             Result.success(Unit)
         } else {
