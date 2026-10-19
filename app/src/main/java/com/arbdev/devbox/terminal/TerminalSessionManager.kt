@@ -126,11 +126,23 @@ exit ${'$'}__code
                 val envPrefix = "env -i HOME=/home/coder USER=coder LOGNAME=coder SHELL=/bin/bash TERM=xterm-256color PATH=/home/coder/.local/bin:/home/coder/.cargo/bin:/home/coder/go/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 
                 val executionCmd = """
+echo '$b64Script' | base64 -d > '$targetRootfs/tmp/.devbox_cmd.sh'
+chmod 755 '$targetRootfs/tmp/.devbox_cmd.sh'
+
 if chroot '$targetRootfs' id -u coder >/dev/null 2>&1; then
-    echo '$b64Script' | base64 -d | chroot '$targetRootfs' /usr/bin/$envPrefix /usr/sbin/runuser -u coder -- /bin/bash 2>&1
+    if [ -x '$targetRootfs/usr/bin/script' ]; then
+        chroot '$targetRootfs' /usr/bin/$envPrefix /usr/bin/script -e -q -c "/usr/sbin/runuser -u coder -- /bin/bash /tmp/.devbox_cmd.sh" /dev/null 2>&1
+    else
+        chroot '$targetRootfs' /usr/bin/$envPrefix /usr/sbin/runuser -u coder -- /bin/bash /tmp/.devbox_cmd.sh 2>&1
+    fi
 else
-    echo '$b64Script' | base64 -d | chroot '$targetRootfs' /usr/bin/$envPrefix /bin/bash 2>&1
+    if [ -x '$targetRootfs/usr/bin/script' ]; then
+        chroot '$targetRootfs' /usr/bin/$envPrefix /usr/bin/script -e -q -c "/bin/bash /tmp/.devbox_cmd.sh" /dev/null 2>&1
+    else
+        chroot '$targetRootfs' /usr/bin/$envPrefix /bin/bash /tmp/.devbox_cmd.sh 2>&1
+    fi
 fi
+rm -f '$targetRootfs/tmp/.devbox_cmd.sh'
 """.trimIndent()
 
                 val process = ProcessBuilder("su", "-c", executionCmd)
@@ -141,7 +153,8 @@ fi
                 process.inputStream.bufferedReader().use { reader ->
                     var line: String?
                     while (reader.readLine().also { line = it } != null) {
-                        val l = line ?: continue
+                        val raw = line ?: continue
+                        val l = raw.replace("\r", "")
                         if (l.contains("___DEVBOX_PWD:")) {
                             val newPath = l.substringAfter("___DEVBOX_PWD:").trim()
                             if (newPath.isNotEmpty() && newPath.startsWith("/")) {

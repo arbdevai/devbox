@@ -126,6 +126,28 @@ object ChrootManager {
             mountpoint -q '$rootfs/mnt/sdcard' || mount --bind /sdcard '$rootfs/mnt/sdcard'
             grep -qE '^127\.0\.0\.1[[:space:]]+localhost' '$rootfs/etc/hosts' 2>/dev/null || echo '127.0.0.1 localhost' >> '$rootfs/etc/hosts' 2>/dev/null || true
             grep -q 'nameserver' '$rootfs/etc/resolv.conf' 2>/dev/null || echo 'nameserver 8.8.8.8' >> '$rootfs/etc/resolv.conf' 2>/dev/null || true
+            if [ ! -f '$rootfs/usr/local/bin/xdg-open' ]; then
+                mkdir -p '$rootfs/usr/local/bin'
+                cat <<'XDG_EOF' > '$rootfs/usr/local/bin/xdg-open'
+#!/bin/bash
+TARGET="${'$'}1"
+if [ -z "${'$'}TARGET" ]; then exit 0; fi
+echo ""
+echo "=================================================="
+echo " [DevBox Browser / Open URL]"
+echo " URL: ${'$'}TARGET"
+echo "=================================================="
+echo ""
+echo "${'$'}TARGET" > /tmp/devbox_latest_url 2>/dev/null || true
+if [ -x /system/bin/am ]; then
+    /system/bin/am start -a android.intent.action.VIEW -d "${'$'}TARGET" >/dev/null 2>&1 || true
+fi
+exit 0
+XDG_EOF
+                chmod 755 '$rootfs/usr/local/bin/xdg-open' 2>/dev/null || true
+                ln -sf /usr/local/bin/xdg-open '$rootfs/usr/bin/xdg-open' 2>/dev/null || true
+                ln -sf /usr/local/bin/xdg-open '$rootfs/usr/bin/x-www-browser' 2>/dev/null || true
+            fi
             echo 'SUCCESS'
         """.trimIndent()
 
