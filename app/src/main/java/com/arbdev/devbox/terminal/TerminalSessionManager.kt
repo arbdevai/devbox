@@ -1,219 +1,200 @@
 package com.arbdev.devbox.terminal
 
 import android.util.Base64
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateListOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import com.arbdev.devbox.data.ChrootManager
 import com.arbdev.devbox.util.AppLogger
+import com.arbdev.devbox.util.LineType
+import com.arbdev.devbox.util.TerminalLine
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
-import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
-import java.io.InputStream
-import java.io.OutputStream
+import kotlinx.coroutines.withContext
 import java.util.UUID
 
-class TerminalSession(
+class NativeTerminalSession(
     val id: String = UUID.randomUUID().toString().take(8),
-    val name: String = "Sesi 1"
+    var name: String = "Sesi 1"
 ) {
-    private var process: Process? = null
-    private var outputStream: OutputStream? = null
-    private var inputStream: InputStream? = null
-    private var readerJob: Job? = null
+    var currentDir: String by mutableStateOf("/home/coder")
+    val logLines = mutableStateListOf<TerminalLine>()
+    val history = mutableListOf<String>()
+    var historyIndex: Int = -1
+    var isRunning: Boolean by mutableStateOf(false)
+    var currentProcess: Process? = null
+    var runningJob: Job? = null
 
-    private val outputBuffer = StringBuilder()
-    private val bufferLock = Any()
-    private val maxBufferLength = 120_000
+    init {
+        logLines.add(TerminalLine("DevBox Native Terminal [Ubuntu 24.04 Chroot Engine]", LineType.SYSTEM))
+        logLines.add(TerminalLine("Tekan lama pada teks mana saja untuk seleksi & copy khas Android.", LineType.SYSTEM))
+        logLines.add(TerminalLine("Mendukung ANSI escape colors, multi-sesi, dan Termux extra keys.", LineType.SYSTEM))
+        logLines.add(TerminalLine("------------------------------------------------------------", LineType.SYSTEM))
+    }
 
-    var isAlive: Boolean = false
-        private set
-
-    private var outputListener: ((String) -> Unit)? = null
-
-    fun setListener(listener: ((String) -> Unit)?) {
-        outputListener = listener
-        if (listener != null) {
-            val snapshot = synchronized(bufferLock) { outputBuffer.toString() }
-            if (snapshot.isNotEmpty()) {
-                val b64 = Base64.encodeToString(snapshot.toByteArray(Charsets.UTF_8), Base64.NO_WRAP)
-                listener(b64)
-            }
+    fun getDisplayDir(): String {
+        return when {
+            currentDir == "/home/coder" -> "~"
+            currentDir.startsWith("/home/coder/") -> "~" + currentDir.removePrefix("/home/coder")
+            else -> currentDir
         }
     }
 
-    fun start(scope: CoroutineScope) {
-        if (isAlive) return
-        val targetRootfs = ChrootManager.activeRootfs
-        AppLogger.i("TerminalSession", "Memulai sesi $name pada rootfs: $targetRootfs")
-
+    fun cancelActiveProcess() {
         try {
-            val pb = ProcessBuilder("su")
-            pb.redirectErrorStream(true)
-            val proc = pb.start()
-            process = proc
-            outputStream = proc.outputStream
-            inputStream = proc.inputStream
-            isAlive = true
+            currentProcess?.destroy()
+        } catch (_: Exception) {}
+        runningJob?.cancel()
+        isRunning = false
+        currentProcess = null
+        logLines.add(TerminalLine("^C", LineType.SYSTEM))
+    }
 
-            // Inisialisasi mount container mandiri devbox-chroot dan jalankan shell interaktif
-            val initScript = """
-                mkdir -p '$targetRootfs/dev' '$targetRootfs/dev/pts' '$targetRootfs/proc' '$targetRootfs/sys' '$targetRootfs/mnt/sdcard' '$targetRootfs/tmp'
-                chmod 1777 '$targetRootfs/tmp' 2>/dev/null || true
-                mountpoint -q '$targetRootfs/dev' || mount --bind /dev '$targetRootfs/dev'
-                mountpoint -q '$targetRootfs/dev/pts' || mount -t devpts devpts '$targetRootfs/dev/pts'
-                mountpoint -q '$targetRootfs/proc' || mount -t proc proc '$targetRootfs/proc'
-                mountpoint -q '$targetRootfs/sys' || mount -t sysfs sysfs '$targetRootfs/sys'
-                mountpoint -q '$targetRootfs/mnt/sdcard' || mount --bind /sdcard '$targetRootfs/mnt/sdcard'
-                grep -qE '^127\.0\.0\.1[[:space:]]+localhost' '$targetRootfs/etc/hosts' 2>/dev/null || echo '127.0.0.1 localhost' >> '$targetRootfs/etc/hosts' 2>/dev/null || true
-                
-                if [ -x '$targetRootfs/bin/bash' ] || [ -x '$targetRootfs/usr/bin/bash' ]; then
-                    chroot '$targetRootfs' /usr/bin/env -i HOME=/home/coder USER=coder LOGNAME=coder SHELL=/bin/bash TERM=xterm-256color PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin /usr/bin/script -q -c "/usr/sbin/runuser -u coder -- /bin/bash -l" /dev/null 2>/dev/null || chroot '$targetRootfs' /bin/bash -i
-                elif [ -x '$targetRootfs/bin/sh' ]; then
-                    chroot '$targetRootfs' /usr/bin/env -i HOME=/home/coder USER=coder LOGNAME=coder SHELL=/bin/sh TERM=xterm-256color PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin /bin/sh -i
-                else
-                    echo -e "\r\n\033[1;33m[DevBox Container Notice]\033[0m"
-                    echo -e "Direktori rootfs di \033[1;36m$targetRootfs\033[0m belum dipasang binary sistem."
-                    echo -e "Silakan buka tab \033[1;32mStatus\033[0m untuk kloning atau unduh Ubuntu resmi."
-                    echo -e "Menyediakan emergency shell host...\r\n"
-                    /bin/sh -i
-                fi
-                exit $?
-            """.trimIndent() + "\n"
+    fun runCommand(cmd: String, scope: CoroutineScope) {
+        val trimmed = cmd.trim()
+        if (trimmed.isEmpty() || isRunning) return
 
-            outputStream?.write(initScript.toByteArray(Charsets.UTF_8))
-            outputStream?.flush()
+        history.add(trimmed)
+        historyIndex = history.size
+        val promptStr = "coder@devbox:${getDisplayDir()}$ "
+        logLines.add(TerminalLine("$promptStr$trimmed", LineType.INPUT))
 
-            readerJob = scope.launch(Dispatchers.IO) {
-                val buffer = ByteArray(4096)
-                val stream = inputStream ?: return@launch
-                try {
-                    while (isActive) {
-                        val readBytes = stream.read(buffer)
-                        if (readBytes == -1) break
-                        if (readBytes > 0) {
-                            val chunk = String(buffer, 0, readBytes, Charsets.UTF_8)
-                            synchronized(bufferLock) {
-                                outputBuffer.append(chunk)
-                                if (outputBuffer.length > maxBufferLength) {
-                                    outputBuffer.delete(0, outputBuffer.length - maxBufferLength)
+        if (trimmed == "clear") {
+            logLines.clear()
+            return
+        }
+
+        if (trimmed == "exit") {
+            TerminalSessionManager.closeActiveSession()
+            return
+        }
+
+        val targetRootfs = ChrootManager.activeRootfs
+        runningJob = scope.launch(Dispatchers.IO) {
+            isRunning = true
+            AppLogger.i("NativeTerminal", "Menjalankan perintah di [$name]: $trimmed (cwd: $currentDir)")
+            try {
+                ChrootManager.mountAll(targetRootfs)
+
+                val scriptContent = """
+cd "$currentDir" 2>/dev/null || cd /home/coder 2>/dev/null || cd /
+$trimmed
+__code=$?
+printf "\n___DEVBOX_PWD:%s\n" "${'$'}(pwd)"
+exit ${'$'}__code
+""".trimIndent()
+
+                val b64Script = Base64.encodeToString(scriptContent.toByteArray(Charsets.UTF_8), Base64.NO_WRAP)
+                val envPrefix = "env -i HOME=/home/coder USER=coder LOGNAME=coder SHELL=/bin/bash TERM=xterm-256color PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+
+                val executionCmd = """
+if chroot '$targetRootfs' id -u coder >/dev/null 2>&1; then
+    echo '$b64Script' | base64 -d | chroot '$targetRootfs' /usr/bin/$envPrefix /usr/sbin/runuser -u coder -- /bin/bash 2>&1
+else
+    echo '$b64Script' | base64 -d | chroot '$targetRootfs' /usr/bin/$envPrefix /bin/bash 2>&1
+fi
+""".trimIndent()
+
+                val process = ProcessBuilder("su", "-c", executionCmd)
+                    .redirectErrorStream(true)
+                    .start()
+                currentProcess = process
+
+                process.inputStream.bufferedReader().use { reader ->
+                    var line: String?
+                    while (reader.readLine().also { line = it } != null) {
+                        val l = line ?: continue
+                        if (l.startsWith("___DEVBOX_PWD:")) {
+                            val newPath = l.substringAfter("___DEVBOX_PWD:").trim()
+                            if (newPath.isNotEmpty() && newPath.startsWith("/")) {
+                                currentDir = newPath
+                            }
+                        } else {
+                            val type = when {
+                                l.contains("[ERROR]", ignoreCase = true) || l.contains("Permission denied", ignoreCase = true) -> LineType.ERROR
+                                l.contains("[WARN]", ignoreCase = true) -> LineType.SYSTEM
+                                else -> LineType.OUTPUT
+                            }
+                            withContext(Dispatchers.Main) {
+                                logLines.add(TerminalLine(l, type))
+                                if (logLines.size > 2000) {
+                                    logLines.removeRange(0, 500)
                                 }
                             }
-                            val b64 = Base64.encodeToString(buffer.copyOf(readBytes), Base64.NO_WRAP)
-                            outputListener?.invoke(b64)
                         }
                     }
-                } catch (e: Exception) {
-                    AppLogger.w("TerminalSession", "Reader exception: ${e.message}")
-                } finally {
-                    isAlive = false
-                    AppLogger.i("TerminalSession", "Sesi $name keluar. Membersihkan sisa container...")
-                    ChrootManager.killDevboxProcessesAndUnmountSync()
-                    val exitMsg = "\r\n\r\n\u001b[1;31m[Sesi DevBox Berakhir - Semua Proses Container Ditutup]\u001b[0m\r\n"
-                    synchronized(bufferLock) {
-                        outputBuffer.append(exitMsg)
-                    }
-                    val b64 = Base64.encodeToString(exitMsg.toByteArray(Charsets.UTF_8), Base64.NO_WRAP)
-                    outputListener?.invoke(b64)
                 }
+
+                val exitCode = process.waitFor()
+                if (exitCode != 0) {
+                    AppLogger.w("NativeTerminal", "Perintah selesai dengan kode exit: $exitCode")
+                }
+            } catch (e: Exception) {
+                withContext(Dispatchers.Main) {
+                    logLines.add(TerminalLine("Error eksekusi: ${e.message}", LineType.ERROR))
+                }
+            } finally {
+                isRunning = false
+                currentProcess = null
             }
-        } catch (e: Exception) {
-            isAlive = false
-            AppLogger.e("TerminalSession", "Gagal memulai root shell", e)
-            val errorMsg = "\r\n\u001b[1;31mGagal menjalankan root shell: ${e.message}\u001b[0m\r\n"
-            synchronized(bufferLock) {
-                outputBuffer.append(errorMsg)
-            }
-            val b64 = Base64.encodeToString(errorMsg.toByteArray(Charsets.UTF_8), Base64.NO_WRAP)
-            outputListener?.invoke(b64)
         }
-    }
-
-    fun writeInput(data: String) {
-        if (!isAlive || outputStream == null) return
-        try {
-            outputStream?.write(data.toByteArray(Charsets.UTF_8))
-            outputStream?.flush()
-        } catch (_: Exception) {
-            isAlive = false
-        }
-    }
-
-    fun resize(cols: Int, rows: Int) {
-        if (!isAlive) return
-        try {
-            val sttyCmd = "stty cols $cols rows $rows 2>/dev/null\n"
-            outputStream?.write(sttyCmd.toByteArray(Charsets.UTF_8))
-            outputStream?.flush()
-        } catch (_: Exception) {
-        }
-    }
-
-    fun terminate() {
-        isAlive = false
-        readerJob?.cancel()
-        try {
-            outputStream?.write("exit\n".toByteArray(Charsets.UTF_8))
-            outputStream?.flush()
-        } catch (_: Exception) {
-        }
-        try {
-            process?.destroy()
-        } catch (_: Exception) {
-        }
-        process = null
-        outputStream = null
-        inputStream = null
-        ChrootManager.killDevboxProcessesAndUnmountSync()
     }
 }
 
 object TerminalSessionManager {
-    val sessions = mutableStateListOf<TerminalSession>()
+    val sessions = mutableStateListOf<NativeTerminalSession>()
     val activeIndex = mutableIntStateOf(0)
-    private val scope = CoroutineScope(Dispatchers.IO)
 
-    fun getActiveSession(): TerminalSession {
-        if (sessions.isEmpty()) {
-            val session = TerminalSession(name = "Sesi 1")
-            sessions.add(session)
-            session.start(scope)
-            return session
-        }
-        val safeIdx = activeIndex.intValue.coerceIn(0, sessions.size - 1)
-        val current = sessions[safeIdx]
-        if (!current.isAlive) {
-            current.start(scope)
-        }
-        return current
+    init {
+        sessions.add(NativeTerminalSession(name = "Sesi 1"))
     }
 
-    fun createNewSession(): TerminalSession {
-        val nextNum = sessions.size + 1
-        val session = TerminalSession(name = "Sesi $nextNum")
+    fun getActiveSession(): NativeTerminalSession {
+        if (sessions.isEmpty()) {
+            sessions.add(NativeTerminalSession(name = "Sesi 1"))
+            activeIndex.intValue = 0
+        }
+        val idx = activeIndex.intValue.coerceIn(0, sessions.size - 1)
+        return sessions[idx]
+    }
+
+    fun createNewSession(): NativeTerminalSession {
+        val newName = "Sesi ${sessions.size + 1}"
+        val session = NativeTerminalSession(name = newName)
         sessions.add(session)
         activeIndex.intValue = sessions.size - 1
-        session.start(scope)
+        AppLogger.i("TerminalManager", "Sesi baru dibuat: $newName (Total: ${sessions.size})")
         return session
     }
 
     fun closeSession(index: Int) {
         if (index in sessions.indices) {
             val session = sessions.removeAt(index)
-            session.terminate()
+            session.cancelActiveProcess()
+            AppLogger.i("TerminalManager", "Menutup ${session.name}")
             if (sessions.isEmpty()) {
-                createNewSession()
+                ChrootManager.killDevboxProcessesAndUnmountSync()
+                sessions.add(NativeTerminalSession(name = "Sesi 1"))
+                activeIndex.intValue = 0
             } else {
-                activeIndex.intValue = activeIndex.intValue.coerceIn(0, sessions.size - 1)
+                activeIndex.intValue = (index - 1).coerceAtLeast(0)
             }
         }
     }
 
+    fun closeActiveSession() {
+        closeSession(activeIndex.intValue)
+    }
+
     fun terminateAll() {
-        sessions.forEach { it.terminate() }
+        AppLogger.i("TerminalManager", "Mematikan semua sesi aktif...")
+        sessions.forEach { it.cancelActiveProcess() }
         sessions.clear()
+        sessions.add(NativeTerminalSession(name = "Sesi 1"))
         activeIndex.intValue = 0
-        ChrootManager.killDevboxProcessesAndUnmountSync()
     }
 }
