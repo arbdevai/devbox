@@ -293,12 +293,19 @@ fun DashboardScreen(
 
                     Spacer(modifier = Modifier.height(14.dp))
 
-                    // Option 1: Clone from existing local chroot
+                    if (isOperating) {
+                        LinearProgressIndicator(
+                            modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp),
+                            color = DevPrimary
+                        )
+                    }
+
+                    // Option 1: Clone from existing local chroot (Recommended)
                     Button(
                         onClick = {
                             scope.launch {
                                 isOperating = true
-                                actionMessage = "Menyalin dari /data/local/ubuntu-chroot ke ${ChrootManager.activeRootfs}..."
+                                actionMessage = "Menyalin direktori sistem dari /data/local/ubuntu-chroot ke ${ChrootManager.activeRootfs}... (20-30 detik)"
                                 val res = ChrootManager.cloneExistingChroot(
                                     sourceChroot = "/data/local/ubuntu-chroot",
                                     targetRootfs = ChrootManager.activeRootfs
@@ -315,7 +322,7 @@ fun DashboardScreen(
                     ) {
                         Icon(Icons.Default.ContentCopy, contentDescription = null, tint = Color.Black)
                         Spacer(modifier = Modifier.width(8.dp))
-                        Text("1. Kloning dari /data/local/ubuntu-chroot", color = Color.Black, fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                        Text("1. Kloning dari /data/local/ubuntu-chroot (Direkomendasikan - Instan)", color = Color.Black, fontWeight = FontWeight.Bold, fontSize = 12.sp)
                     }
 
                     Spacer(modifier = Modifier.height(8.dp))

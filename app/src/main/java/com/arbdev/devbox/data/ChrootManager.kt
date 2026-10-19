@@ -194,25 +194,34 @@ object ChrootManager {
         sourceChroot: String = "/data/local/ubuntu-chroot",
         targetRootfs: String = activeRootfs
     ): Result<String> = withContext(Dispatchers.IO) {
-        AppLogger.i("ChrootManager", "Memulai duplikasi dari $sourceChroot ke $targetRootfs...")
+        AppLogger.i("ChrootManager", "Memulai duplikasi sistem dari $sourceChroot ke $targetRootfs...")
         val script = """
             if [ ! -d '$sourceChroot' ] || [ ! -x '$sourceChroot/bin/bash' ]; then
                 echo "SOURCE_NOT_FOUND: $sourceChroot tidak memiliki binary bash."
                 exit 1
             fi
             mkdir -p '$targetRootfs'
-            echo "Menyalin file rootfs... (ini memakan waktu 15-45 detik)"
-            tar --exclude='./proc/*' --exclude='./sys/*' --exclude='./dev/*' --exclude='./mnt/*' --exclude='./tmp/*' -C '$sourceChroot' -cf - . | tar -C '$targetRootfs' -xf -
-            mkdir -p '$targetRootfs/dev' '$targetRootfs/dev/pts' '$targetRootfs/proc' '$targetRootfs/sys' '$targetRootfs/mnt/sdcard' '$targetRootfs/tmp'
+            cd '$sourceChroot' || exit 1
+            echo "Membersihkan direktori target..."
+            rm -rf '$targetRootfs/bin' '$targetRootfs/boot' '$targetRootfs/etc' '$targetRootfs/lib' '$targetRootfs/opt' '$targetRootfs/root' '$targetRootfs/sbin' '$targetRootfs/srv' '$targetRootfs/usr' '$targetRootfs/var'
+            echo "Menyalin direktori sistem Ubuntu... (ini membutuhkan waktu sekitar 20-30 detik)"
+            cp -a bin boot etc lib opt root sbin srv usr var '$targetRootfs/'
+            mkdir -p '$targetRootfs/home/coder' '$targetRootfs/dev' '$targetRootfs/dev/pts' '$targetRootfs/proc' '$targetRootfs/sys' '$targetRootfs/mnt/sdcard' '$targetRootfs/tmp'
             chmod 1777 '$targetRootfs/tmp' 2>/dev/null || true
-            echo "CLONE_SUCCESS"
+            chown -R 1000:1000 '$targetRootfs/home/coder' 2>/dev/null || true
+            if [ -x '$targetRootfs/bin/bash' ] || [ -x '$targetRootfs/usr/bin/bash' ]; then
+                echo "CLONE_SUCCESS"
+            else
+                echo "CLONE_FAILED: Binary bash tidak ditemukan setelah penyalinan."
+                exit 1
+            fi
         """.trimIndent()
 
         val res = RootExecutor.execute(script)
         val out = res.getOrNull()?.stdout ?: ""
         return@withContext if (out.contains("CLONE_SUCCESS")) {
-            AppLogger.i("ChrootManager", "Duplikasi rootfs berhasil ke $targetRootfs!")
-            Result.success("Duplikasi rootfs mandiri berhasil ke $targetRootfs!")
+            AppLogger.i("ChrootManager", "Kloning rootfs berhasil! Container DevBox di $targetRootfs siap digunakan.")
+            Result.success("Kloning rootfs berhasil! Container DevBox siap digunakan.")
         } else {
             val err = "Gagal kloning: ${res.getOrNull()?.stderr.takeIf { !it.isNullOrBlank() } ?: out}"
             AppLogger.e("ChrootManager", err)
@@ -223,26 +232,37 @@ object ChrootManager {
     suspend fun downloadUbuntuOfficialRootfs(
         targetRootfs: String = activeRootfs
     ): Result<String> = withContext(Dispatchers.IO) {
-        val url = "https://partner-images.canonical.com/core/noble/current/ubuntu-noble-core-cloudimg-arm64-root.tar.gz"
-        AppLogger.i("ChrootManager", "Mengunduh Ubuntu 24.04 ARM64 resmi dari Canonical ($url)...")
+        val url = "https://cloud-images.ubuntu.com/minimal/releases/noble/release/ubuntu-24.04-minimal-cloudimg-arm64-root.tar.xz"
+        AppLogger.i("ChrootManager", "Mengunduh Ubuntu 24.04 ARM64 minimal resmi dari Canonical ($url)...")
 
         val script = """
             mkdir -p '$targetRootfs'
-            TAR_FILE="/sdcard/ubuntu-noble-arm64.tar.gz"
-            echo "Mengunduh archive rootfs resmi..."
-            curl -k -L '$url' -o "${'$'}TAR_FILE" || wget --no-check-certificate '$url' -O "${'$'}TAR_FILE"
-            if [ ! -s "${'$'}TAR_FILE" ]; then
-                echo "DOWNLOAD_FAILED: File unduhan kosong atau gagal."
+            TAR_FILE="/sdcard/ubuntu-noble-arm64.tar.xz"
+            echo "Mengunduh archive rootfs resmi (75 MB)..."
+            curl -k -L -f '$url' -o "${'$'}TAR_FILE" || wget --no-check-certificate '$url' -O "${'$'}TAR_FILE"
+            FILE_SIZE=${'$'}(wc -c < "${'$'}TAR_FILE" 2>/dev/null || echo 0)
+            if [ "${'$'}FILE_SIZE" -lt 10000000 ]; then
+                echo "DOWNLOAD_FAILED: File unduhan tidak lengkap atau gagal (hanya ${'$'}FILE_SIZE bytes)."
+                rm -f "${'$'}TAR_FILE"
                 exit 1
             fi
             echo "Mengekstrak rootfs ke $targetRootfs..."
-            tar -xzf "${'$'}TAR_FILE" -C '$targetRootfs'
+            if [ -x /data/local/ubuntu-chroot/usr/bin/tar ]; then
+                /data/local/ubuntu-chroot/usr/bin/tar -xf "${'$'}TAR_FILE" -C '$targetRootfs'
+            else
+                tar -xf "${'$'}TAR_FILE" -C '$targetRootfs'
+            fi
             rm -f "${'$'}TAR_FILE"
             mkdir -p '$targetRootfs/dev' '$targetRootfs/dev/pts' '$targetRootfs/proc' '$targetRootfs/sys' '$targetRootfs/mnt/sdcard' '$targetRootfs/tmp'
             chmod 1777 '$targetRootfs/tmp' 2>/dev/null || true
             echo "nameserver 8.8.8.8" > '$targetRootfs/etc/resolv.conf'
             echo "127.0.0.1 localhost" > '$targetRootfs/etc/hosts'
-            echo "DOWNLOAD_EXTRACT_SUCCESS"
+            if [ -x '$targetRootfs/bin/bash' ] || [ -x '$targetRootfs/bin/sh' ]; then
+                echo "DOWNLOAD_EXTRACT_SUCCESS"
+            else
+                echo "EXTRACT_FAILED"
+                exit 1
+            fi
         """.trimIndent()
 
         val res = RootExecutor.execute(script)
