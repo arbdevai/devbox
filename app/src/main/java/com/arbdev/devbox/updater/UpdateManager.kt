@@ -77,6 +77,8 @@ object UpdateManager {
     private val _updateStatus = MutableStateFlow<UpdateStatus>(UpdateStatus.Idle)
     val updateStatus: StateFlow<UpdateStatus> = _updateStatus.asStateFlow()
 
+    private var activeDownloadId: Long = -1L
+
     fun cleanupOldApks(context: Context, keepVersion: String? = null) {
         try {
             val downloadDir = context.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS)
