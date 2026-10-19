@@ -385,7 +385,9 @@ fun TerminalScreen(
                             AppLogger.i(tag, message)
                         }
 
-                        override fun logDebug(tag: String, message: String) {}
+                        override fun logDebug(tag: String, message: String) {
+                            AppLogger.i(tag, "[DEBUG] $message")
+                        }
 
                         override fun logVerbose(tag: String, message: String) {}
 

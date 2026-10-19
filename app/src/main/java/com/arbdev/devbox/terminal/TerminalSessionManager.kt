@@ -50,13 +50,16 @@ class NativeTerminalSession(
             val targetRootfs = ChrootManager.activeRootfs
             val suBinary = findSuPath()
 
+            AppLogger.i("NativeTerminal", "Inisialisasi sesi PTY [$name] di rootfs: $targetRootfs via $suBinary")
+
+            // Use setpriv inside chroot to switch to user coder (UID 1000) directly without breaking the PTY session leader
             val chrootCmd = "mkdir -p '$targetRootfs/dev' '$targetRootfs/dev/pts' '$targetRootfs/proc' '$targetRootfs/sys' '$targetRootfs/mnt/sdcard' '$targetRootfs/tmp' 2>/dev/null; " +
                     "mountpoint -q '$targetRootfs/dev' || mount --bind /dev '$targetRootfs/dev'; " +
                     "mountpoint -q '$targetRootfs/dev/pts' || mount --bind /dev/pts '$targetRootfs/dev/pts' 2>/dev/null || mount -t devpts devpts '$targetRootfs/dev/pts'; " +
                     "mountpoint -q '$targetRootfs/proc' || mount -t proc proc '$targetRootfs/proc'; " +
                     "mountpoint -q '$targetRootfs/sys' || mount -t sysfs sysfs '$targetRootfs/sys'; " +
                     "mountpoint -q '$targetRootfs/mnt/sdcard' || mount --bind /sdcard '$targetRootfs/mnt/sdcard' 2>/dev/null; " +
-                    "cd '$targetRootfs' && exec chroot '$targetRootfs' /usr/bin/env -i HOME=/home/coder USER=coder LOGNAME=coder SHELL=/bin/bash TERM=xterm-256color COLORTERM=truecolor PATH=/home/coder/.local/bin:/home/coder/.cargo/bin:/home/coder/go/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin /bin/bash -c 'cd /home/coder 2>/dev/null || cd /; if id -u coder >/dev/null 2>&1; then exec /usr/sbin/runuser -u coder -- /bin/bash -c \"cd /home/coder 2>/dev/null || cd /; exec /bin/bash -l\"; else exec /bin/bash -l; fi'"
+                    "cd '$targetRootfs' && exec chroot '$targetRootfs' /usr/bin/env -i HOME=/home/coder USER=coder LOGNAME=coder SHELL=/bin/bash TERM=xterm-256color COLORTERM=truecolor PATH=/home/coder/.local/bin:/home/coder/.cargo/bin:/home/coder/go/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin /bin/bash -c 'cd /home/coder 2>/dev/null || cd /; if [ -x /usr/bin/setpriv ]; then exec /usr/bin/setpriv --reuid 1000 --regid 1000 --init-groups /bin/bash -l; elif id -u coder >/dev/null 2>&1; then exec /usr/sbin/runuser -u coder --session-command \"exec /bin/bash -l\"; else exec /bin/bash -l; fi'"
 
             // In POSIX execvp(cmd, argv), argv[0] must be the program name!
             val args = arrayOf(suBinary, "-c", chrootCmd)
@@ -79,7 +82,7 @@ class NativeTerminalSession(
             isRunning = true
             AppLogger.i("NativeTerminal", "Sesi Terminal PTY [$name] berhasil dialokasikan via $suBinary")
         } catch (e: Exception) {
-            AppLogger.e("NativeTerminal", "Gagal inisialisasi sesi PTY [$name]: ${e.message}")
+            AppLogger.e("NativeTerminal", "Gagal inisialisasi sesi PTY [$name]: ${e.message}", e)
         }
     }
 
@@ -167,7 +170,9 @@ class NativeTerminalSession(
         AppLogger.i(tag, message)
     }
 
-    override fun logDebug(tag: String, message: String) {}
+    override fun logDebug(tag: String, message: String) {
+        AppLogger.i(tag, "[DEBUG] $message")
+    }
 
     override fun logVerbose(tag: String, message: String) {}
 
