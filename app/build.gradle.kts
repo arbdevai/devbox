@@ -13,8 +13,8 @@ android {
         applicationId = "com.arbdev.devbox"
         minSdk = 26
         targetSdk = 36
-        versionCode = 24
-        versionName = "1.0.23"
+        versionCode = 25
+        versionName = "1.0.24"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables {
@@ -101,9 +101,6 @@ dependencies {
     // Utilities
     implementation(libs.zxing.core)
     implementation(libs.androidx.work.runtime.ktx)
-
-    // Native PTY Terminal View Engine (Termux core engine)
-    implementation("com.github.termux.termux-app:terminal-view:v0.118.0")
 
     testImplementation(libs.junit)
     debugImplementation(libs.androidx.compose.ui.tooling)

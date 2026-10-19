@@ -1,31 +1,32 @@
 package com.arbdev.devbox.ui.screens
 
-import android.content.Context
-import android.graphics.Typeface
-import android.view.KeyEvent
-import android.view.MotionEvent
-import android.view.inputmethod.InputMethodManager
 import android.widget.Toast
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.ContentPaste
-import androidx.compose.material.icons.filled.DeleteSweep
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Terminal
 import androidx.compose.material3.FilterChip
@@ -36,24 +37,37 @@ import androidx.compose.material3.ScrollableTabRow
 import androidx.compose.material3.Tab
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onKeyEvent
+import androidx.compose.ui.input.key.type
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.KeyboardCapitalization
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.ui.viewinterop.AndroidView
 import com.arbdev.devbox.service.KeepAliveService
 import com.arbdev.devbox.terminal.TerminalSessionManager
 import com.arbdev.devbox.ui.theme.DevPrimary
@@ -61,10 +75,6 @@ import com.arbdev.devbox.ui.theme.TerminalBackground
 import com.arbdev.devbox.ui.theme.TerminalCyan
 import com.arbdev.devbox.ui.theme.TerminalGreen
 import com.arbdev.devbox.ui.theme.TerminalText
-import com.arbdev.devbox.util.AppLogger
-import com.termux.terminal.TerminalSession
-import com.termux.view.TerminalView
-import com.termux.view.TerminalViewClient
 
 @Composable
 fun TerminalScreen(
@@ -72,37 +82,55 @@ fun TerminalScreen(
 ) {
     val context = LocalContext.current
     val clipboardManager = LocalClipboardManager.current
+    val keyboardController = LocalSoftwareKeyboardController.current
 
     val activeSession = TerminalSessionManager.getActiveSession()
     val activeIndex = TerminalSessionManager.activeIndex.intValue
 
-    val terminalViewHolder = remember { arrayOfNulls<TerminalView>(1) }
-    var terminalFontSize by remember { mutableIntStateOf(12) }
+    // Ukuran font terminal dengan dukungan pinch-to-zoom (rentang 8sp - 28sp)
+    var terminalFontSize by remember { mutableFloatStateOf(12f) }
 
-    // Modifier states for virtual keyboard integration
+    // Modifier states untuk virtual modifier keys
     var isCtrlActive by remember { mutableStateOf(false) }
     var isAltActive by remember { mutableStateOf(false) }
     var isShiftActive by remember { mutableStateOf(false) }
 
+    // Input state untuk Compose BasicTextField (menangani FlorisBoard, Gboard, dll.)
+    var inputTfv by remember { mutableStateOf(TextFieldValue("")) }
+    val focusRequester = remember { FocusRequester() }
+
+    val verticalScrollState = rememberScrollState()
+    val horizontalScrollState = rememberScrollState()
+
     LaunchedEffect(Unit) {
         KeepAliveService.startService(context)
+        focusRequester.requestFocus()
     }
 
     LaunchedEffect(activeSession.isRunning, activeSession.currentDir, TerminalSessionManager.sessions.size) {
         KeepAliveService.updateNotification(context)
     }
 
-    // Execute initial command if provided
+    // Auto-scroll ke paling bawah saat ada teks baru yang masuk ke buffer
+    LaunchedEffect(activeSession.buffer.version.intValue) {
+        if (verticalScrollState.maxValue > 0) {
+            verticalScrollState.scrollTo(verticalScrollState.maxValue)
+        }
+    }
+
+    // Eksekusi initial command jika disediakan
     LaunchedEffect(initialCommand) {
         initialCommand?.let { cmd ->
             activeSession.runCommand(cmd)
         }
     }
 
-    LaunchedEffect(activeSession) {
-        activeSession.onClipboardCopy = { text ->
-            clipboardManager.setText(AnnotatedString(text))
-            Toast.makeText(context, "Teks disalin ke clipboard", Toast.LENGTH_SHORT).show()
+    // Gestur Pinch-to-Zoom (Cubit layar untuk zoom in / zoom out font)
+    val zoomModifier = Modifier.pointerInput(Unit) {
+        detectTransformGestures { _, _, zoom, _ ->
+            if (zoom != 1f) {
+                terminalFontSize = (terminalFontSize * zoom).coerceIn(8f, 28f)
+            }
         }
     }
 
@@ -168,7 +196,7 @@ fun TerminalScreen(
             }
         }
 
-        // Action Toolbar (Prompt, Keyboard toggle, Font size, Paste, Clear)
+        // Action Toolbar (Prompt status, Keyboard toggle, Zoom A-/A+, Copy Screen, Paste, Clear)
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -201,14 +229,11 @@ fun TerminalScreen(
             }
 
             Row(verticalAlignment = Alignment.CenterVertically) {
-                // Toggle Soft Keyboard (FlorisBoard / Gboard)
+                // Toggle Soft Keyboard
                 IconButton(
                     onClick = {
-                        terminalViewHolder[0]?.let { tv ->
-                            tv.requestFocus()
-                            val imm = context.getSystemService(Context.INPUT_METHOD_SERVICE) as? InputMethodManager
-                            imm?.toggleSoftInput(InputMethodManager.SHOW_FORCED, 0)
-                        }
+                        focusRequester.requestFocus()
+                        keyboardController?.show()
                     },
                     modifier = Modifier.size(30.dp)
                 ) {
@@ -223,9 +248,8 @@ fun TerminalScreen(
                 // Font Zoom Out (-)
                 IconButton(
                     onClick = {
-                        if (terminalFontSize > 8) {
-                            terminalFontSize -= 1
-                            terminalViewHolder[0]?.setTextSize(terminalFontSize)
+                        if (terminalFontSize > 8f) {
+                            terminalFontSize = (terminalFontSize - 1f).coerceAtLeast(8f)
                         }
                     },
                     modifier = Modifier.size(28.dp)
@@ -242,9 +266,8 @@ fun TerminalScreen(
                 // Font Zoom In (+)
                 IconButton(
                     onClick = {
-                        if (terminalFontSize < 24) {
-                            terminalFontSize += 1
-                            terminalViewHolder[0]?.setTextSize(terminalFontSize)
+                        if (terminalFontSize < 28f) {
+                            terminalFontSize = (terminalFontSize + 1f).coerceAtMost(28f)
                         }
                     },
                     modifier = Modifier.size(28.dp)
@@ -261,8 +284,8 @@ fun TerminalScreen(
                 // Copy terminal screen transcript
                 IconButton(
                     onClick = {
-                        val text = activeSession.termSession?.emulator?.screen?.transcriptText
-                        if (!text.isNullOrEmpty()) {
+                        val text = activeSession.buffer.getTranscriptText()
+                        if (text.isNotEmpty()) {
                             clipboardManager.setText(AnnotatedString(text))
                             Toast.makeText(context, "Layar terminal disalin ke clipboard", Toast.LENGTH_SHORT).show()
                         } else {
@@ -317,104 +340,129 @@ fun TerminalScreen(
             }
         }
 
-        // Native 2D VT100 Matrix Canvas TerminalView (Termux Core Engine)
-        AndroidView(
-            factory = { ctx ->
-                TerminalView(ctx, null).apply {
-                    isFocusable = true
-                    isFocusableInTouchMode = true
-                    requestFocus()
-                    setTextSize(terminalFontSize)
-                    setTypeface(Typeface.MONOSPACE)
-                    setTerminalViewClient(object : TerminalViewClient {
-                        override fun onScale(scale: Float): Float {
-                            return scale
-                        }
-
-                        override fun onSingleTapUp(e: MotionEvent) {
-                            this@apply.requestFocus()
-                            val imm = ctx.getSystemService(Context.INPUT_METHOD_SERVICE) as? InputMethodManager
-                            imm?.showSoftInput(this@apply, InputMethodManager.SHOW_IMPLICIT)
-                        }
-
-                        override fun shouldBackButtonBeMappedToEscape(): Boolean = false
-
-                        // Crucial for FlorisBoard & Gboard: keep false so IME dispatches text normally without double echo or lag
-                        override fun shouldEnforceCharBasedInput(): Boolean = false
-
-                        override fun shouldUseCtrlSpaceWorkaround(): Boolean = false
-
-                        override fun isTerminalViewSelected(): Boolean = true
-
-                        override fun copyModeChanged(copyMode: Boolean) {}
-
-                        override fun onKeyDown(keyCode: Int, e: KeyEvent, session: TerminalSession): Boolean = false
-
-                        override fun onKeyUp(keyCode: Int, e: KeyEvent): Boolean = false
-
-                        override fun onLongPress(event: MotionEvent): Boolean = false
-
-                        override fun readControlKey(): Boolean = isCtrlActive
-
-                        override fun readAltKey(): Boolean = isAltActive
-
-                        override fun readShiftKey(): Boolean = isShiftActive
-
-                        override fun readFnKey(): Boolean = false
-
-                        override fun onCodePoint(codePoint: Int, ctrlDown: Boolean, session: TerminalSession): Boolean {
-                            if (isCtrlActive || isAltActive || isShiftActive) {
-                                isCtrlActive = false
-                                isAltActive = false
-                                isShiftActive = false
+        // Hidden Compose BasicTextField for capturing soft keyboard input (FlorisBoard / Gboard)
+        BasicTextField(
+            value = inputTfv,
+            onValueChange = { newTfv ->
+                val text = newTfv.text
+                if (text.isNotEmpty()) {
+                    if (isCtrlActive) {
+                        for (ch in text) {
+                            val code = when (ch.lowercaseChar()) {
+                                'c' -> 3
+                                'd' -> 4
+                                'z' -> 26
+                                'l' -> 12
+                                'a' -> 1
+                                'e' -> 5
+                                'u' -> 21
+                                'k' -> 11
+                                'w' -> 23
+                                in 'a'..'z' -> (ch.lowercaseChar() - 'a' + 1)
+                                else -> ch.code
                             }
-                            return false
+                            activeSession.sendBytes(byteArrayOf(code.toByte()))
                         }
-
-                        override fun onEmulatorSet() {}
-
-                        override fun logError(tag: String, message: String) {
-                            AppLogger.e(tag, message)
-                        }
-
-                        override fun logWarn(tag: String, message: String) {
-                            AppLogger.w(tag, message)
-                        }
-
-                        override fun logInfo(tag: String, message: String) {
-                            AppLogger.i(tag, message)
-                        }
-
-                        override fun logDebug(tag: String, message: String) {
-                            AppLogger.i(tag, "[DEBUG] $message")
-                        }
-
-                        override fun logVerbose(tag: String, message: String) {}
-
-                        override fun logStackTraceWithMessage(tag: String, message: String, e: Exception) {
-                            AppLogger.e(tag, "$message: ${e.message}")
-                        }
-
-                        override fun logStackTrace(tag: String, e: Exception) {
-                            AppLogger.e(tag, "Stack trace: ${e.message}")
-                        }
-                    })
-
-                    terminalViewHolder[0] = this
-                    activeSession.termSession?.let { attachSession(it) }
-                }
-            },
-            update = { tv ->
-                activeSession.termSession?.let { session ->
-                    if (tv.currentSession != session) {
-                        tv.attachSession(session)
+                        isCtrlActive = false
+                    } else {
+                        activeSession.sendText(text)
                     }
+                    inputTfv = TextFieldValue("")
+                } else {
+                    // Backspace pada keyboard virtual
+                    activeSession.sendBytes(byteArrayOf(127))
+                    inputTfv = TextFieldValue("")
                 }
             },
             modifier = Modifier
+                .size(1.dp)
+                .focusRequester(focusRequester)
+                .onKeyEvent { keyEvent ->
+                    if (keyEvent.type == KeyEventType.KeyDown) {
+                        when (keyEvent.key) {
+                            Key.Enter -> {
+                                activeSession.sendText("\r")
+                                true
+                            }
+                            Key.Backspace -> {
+                                activeSession.sendBytes(byteArrayOf(127))
+                                true
+                            }
+                            Key.Tab -> {
+                                activeSession.sendBytes(byteArrayOf(9))
+                                true
+                            }
+                            Key.DirectionUp -> {
+                                activeSession.sendText("\u001B[A")
+                                true
+                            }
+                            Key.DirectionDown -> {
+                                activeSession.sendText("\u001B[B")
+                                true
+                            }
+                            Key.DirectionLeft -> {
+                                activeSession.sendText("\u001B[D")
+                                true
+                            }
+                            Key.DirectionRight -> {
+                                activeSession.sendText("\u001B[C")
+                                true
+                            }
+                            Key.Escape -> {
+                                activeSession.sendBytes(byteArrayOf(27))
+                                true
+                            }
+                            else -> false
+                        }
+                    } else false
+                },
+            keyboardOptions = KeyboardOptions(
+                capitalization = KeyboardCapitalization.None,
+                autoCorrectEnabled = false,
+                keyboardType = KeyboardType.Ascii,
+                imeAction = ImeAction.None
+            ),
+            keyboardActions = KeyboardActions(
+                onAny = {
+                    activeSession.sendText("\r")
+                }
+            ),
+            cursorBrush = SolidColor(Color.Transparent),
+            textStyle = TextStyle(color = Color.Transparent, fontSize = 1.sp)
+        )
+
+        // Native 2D VT100 Matrix Canvas / Terminal Text Area with Pinch-to-Zoom
+        Box(
+            modifier = Modifier
                 .weight(1f)
                 .fillMaxWidth()
-        )
+                .background(TerminalBackground)
+                .clickable(
+                    interactionSource = remember { MutableInteractionSource() },
+                    indication = null
+                ) {
+                    focusRequester.requestFocus()
+                    keyboardController?.show()
+                }
+                .then(zoomModifier)
+        ) {
+            val renderedText = remember(activeSession.buffer.version.intValue) {
+                activeSession.buffer.renderToAnnotatedString()
+            }
+
+            Text(
+                text = renderedText,
+                fontFamily = FontFamily.Monospace,
+                fontSize = terminalFontSize.sp,
+                lineHeight = (terminalFontSize * 1.25f).sp,
+                color = TerminalText,
+                modifier = Modifier
+                    .fillMaxSize()
+                    .verticalScroll(verticalScrollState)
+                    .horizontalScroll(horizontalScrollState)
+                    .padding(horizontal = 6.dp, vertical = 4.dp)
+            )
+        }
 
         // Comprehensive Mobile Extra Keys Panel (2 Scrollable Rows for FlorisBoard / Mobile Terminal)
         Column(
@@ -478,12 +526,12 @@ fun TerminalScreen(
                     activeSession.sendText("\u001B[D")
                 }
 
-                // Arrow Down ▼
+                // Arrow Down ▼ (Memilih menu agy)
                 TerminalModifierKey(label = "▼") {
                     activeSession.sendText("\u001B[B")
                 }
 
-                // Arrow Up ▲
+                // Arrow Up ▲ (Memilih menu agy)
                 TerminalModifierKey(label = "▲") {
                     activeSession.sendText("\u001B[A")
                 }

@@ -9,28 +9,45 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import com.arbdev.devbox.data.ChrootManager
 import com.arbdev.devbox.util.AppLogger
-import com.termux.terminal.TerminalSession
-import com.termux.terminal.TerminalSessionClient
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.isActive
+import kotlinx.coroutines.launch
 import java.io.File
-import java.util.UUID
+import java.io.InputStream
+import java.io.OutputStream
 
+/**
+ * Sesi Terminal Native murni Kotlin berbasis Linux PTY (/usr/bin/script).
+ * Tanpa library C/JNI luar, tanpa ketergantungan Termux, zero input latency.
+ */
 class NativeTerminalSession(
-    val id: String = UUID.randomUUID().toString().take(8),
+    val id: String = java.util.UUID.randomUUID().toString(),
     var name: String = "Sesi 1"
-) : TerminalSessionClient {
+) {
+    var isRunning by mutableStateOf(false)
+    var currentTitle by mutableStateOf("coder@devbox:~")
+    var currentDir by mutableStateOf("/home/coder")
 
+    val buffer = TerminalGridBuffer(maxCols = 80, maxRows = 30)
+
+    private var process: Process? = null
+    private var outputStream: OutputStream? = null
+    private var inputStream: InputStream? = null
+    private var readerJob: Job? = null
+
+    private val sessionScope = CoroutineScope(Dispatchers.IO)
     private val mainHandler = Handler(Looper.getMainLooper())
-    var termSession: TerminalSession? = null
-    var isRunning: Boolean by mutableStateOf(false)
-    var currentDir: String by mutableStateOf("/home/coder")
-    var currentTitle: String by mutableStateOf(name)
+
+    var onClipboardCopy: ((String) -> Unit)? = null
 
     init {
-        initializeNativeSession()
+        initializeProcess()
     }
 
     private fun findSuPath(): String {
-        val candidates = listOf(
+        val candidates = arrayOf(
             "/system/bin/su",
             "/system/xbin/su",
             "/data/adb/ksu/bin/su",
@@ -45,48 +62,91 @@ class NativeTerminalSession(
         return "su"
     }
 
-    fun initializeNativeSession() {
+    fun initializeProcess() {
         try {
             val targetRootfs = ChrootManager.activeRootfs
             val suBinary = findSuPath()
 
-            AppLogger.i("NativeTerminal", "Inisialisasi sesi PTY [$name] di rootfs: $targetRootfs via $suBinary")
+            AppLogger.i("NativeTerminal", "Meluncurkan sesi terminal [$name] di $targetRootfs via $suBinary")
 
-            // Use setpriv inside chroot to switch to user coder (UID 1000) directly without breaking the PTY session leader
+            // Menggunakan /usr/bin/script untuk mengalokasikan PTY sejati tanpa JNI,
+            // dan setpriv untuk menjalankan shell sebagai user coder (UID 1000).
             val chrootCmd = "mkdir -p '$targetRootfs/dev' '$targetRootfs/dev/pts' '$targetRootfs/proc' '$targetRootfs/sys' '$targetRootfs/mnt/sdcard' '$targetRootfs/tmp' 2>/dev/null; " +
                     "mountpoint -q '$targetRootfs/dev' || mount --bind /dev '$targetRootfs/dev'; " +
-                    "mountpoint -q '$targetRootfs/dev/pts' || mount --bind /dev/pts '$targetRootfs/dev/pts' 2>/dev/null || mount -t devpts devpts '$targetRootfs/dev/pts'; " +
+                    "mountpoint -q '$targetRootfs/dev/pts' || mount -t devpts devpts '$targetRootfs/dev/pts' 2>/dev/null || mount --bind /dev/pts '$targetRootfs/dev/pts'; " +
                     "mountpoint -q '$targetRootfs/proc' || mount -t proc proc '$targetRootfs/proc'; " +
                     "mountpoint -q '$targetRootfs/sys' || mount -t sysfs sysfs '$targetRootfs/sys'; " +
                     "mountpoint -q '$targetRootfs/mnt/sdcard' || mount --bind /sdcard '$targetRootfs/mnt/sdcard' 2>/dev/null; " +
-                    "cd '$targetRootfs' && exec chroot '$targetRootfs' /usr/bin/env -i HOME=/home/coder USER=coder LOGNAME=coder SHELL=/bin/bash TERM=xterm-256color COLORTERM=truecolor PATH=/home/coder/.local/bin:/home/coder/.cargo/bin:/home/coder/go/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin /bin/bash -c 'cd /home/coder 2>/dev/null || cd /; if [ -x /usr/bin/setpriv ]; then exec /usr/bin/setpriv --reuid 1000 --regid 1000 --init-groups /bin/bash -l; elif id -u coder >/dev/null 2>&1; then exec /usr/sbin/runuser -u coder --session-command \"exec /bin/bash -l\"; else exec /bin/bash -l; fi'"
+                    "cd '$targetRootfs' && exec chroot '$targetRootfs' /usr/bin/env -i HOME=/home/coder USER=coder LOGNAME=coder SHELL=/bin/bash TERM=xterm-256color COLORTERM=truecolor PATH=/home/coder/.local/bin:/home/coder/.cargo/bin:/home/coder/go/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin /usr/bin/setpriv --reuid 1000 --regid 1000 --init-groups /bin/bash -c 'cd /home/coder 2>/dev/null || cd /; if [ -x /usr/bin/script ]; then exec /usr/bin/script -qefc \"/bin/bash -l\" /dev/null; else exec /bin/bash -l; fi'"
 
-            // In POSIX execvp(cmd, argv), argv[0] must be the program name!
-            val args = arrayOf(suBinary, "-c", chrootCmd)
-            val env = arrayOf(
-                "TERM=xterm-256color",
-                "COLORTERM=truecolor"
-            )
+            val pb = ProcessBuilder(suBinary, "-c", chrootCmd)
+            pb.redirectErrorStream(true) // Gabungkan stderr ke stdout stream
+            val proc = pb.start()
+            process = proc
+            outputStream = proc.outputStream
+            inputStream = proc.inputStream
 
-            val session = TerminalSession(
-                suBinary,
-                "$targetRootfs/home/coder",
-                args,
-                env,
-                3000,
-                this
-            )
-            // Pre-initialize emulator with standard dimensions (80 cols x 24 rows)
-            session.initializeEmulator(80, 24)
-            termSession = session
             isRunning = true
-            AppLogger.i("NativeTerminal", "Sesi Terminal PTY [$name] berhasil dialokasikan via $suBinary")
+            AppLogger.i("NativeTerminal", "Sesi [$name] aktif (PID terhubung, PTY siap)")
+
+            // Mulai membaca output secara asynchronous di background IO thread
+            readerJob = sessionScope.launch {
+                val byteBuffer = ByteArray(4096)
+                val stream = inputStream ?: return@launch
+                try {
+                    while (isActive && isRunning) {
+                        val count = stream.read(byteBuffer)
+                        if (count == -1) break
+                        if (count > 0) {
+                            buffer.write(byteBuffer, 0, count)
+                        }
+                    }
+                } catch (e: Exception) {
+                    AppLogger.w("NativeTerminal", "Stream pembaca sesi [$name] terputus: ${e.message}")
+                } finally {
+                    mainHandler.post {
+                        isRunning = false
+                        val exitCode = try { proc.exitValue() } catch (_: Exception) { -1 }
+                        AppLogger.i("NativeTerminal", "Sesi [$name] telah selesai (exit code: $exitCode)")
+                    }
+                }
+            }
         } catch (e: Exception) {
-            AppLogger.e("NativeTerminal", "Gagal inisialisasi sesi PTY [$name]: ${e.message}", e)
+            AppLogger.e("NativeTerminal", "Gagal memulai sesi PTY [$name]: ${e.message}", e)
+            isRunning = false
         }
     }
 
-    var onClipboardCopy: ((String) -> Unit)? = null
+    fun sendText(text: String) {
+        val out = outputStream ?: return
+        try {
+            val bytes = text.toByteArray(Charsets.UTF_8)
+            out.write(bytes)
+            out.flush()
+        } catch (e: Exception) {
+            AppLogger.e("NativeTerminal", "Gagal kirim teks ke [$name]: ${e.message}")
+        }
+    }
+
+    fun sendBytes(bytes: ByteArray) {
+        val out = outputStream ?: return
+        try {
+            out.write(bytes)
+            out.flush()
+        } catch (e: Exception) {
+            AppLogger.e("NativeTerminal", "Gagal kirim bytes ke [$name]: ${e.message}")
+        }
+    }
+
+    fun cancelActiveProcess() {
+        sendBytes(byteArrayOf(3)) // Send Ctrl+C (0x03)
+    }
+
+    fun runCommand(cmd: String) {
+        val trimmed = cmd.trim()
+        if (trimmed.isEmpty()) return
+        sendText("$trimmed\r")
+    }
 
     fun getDisplayDir(): String {
         return when {
@@ -96,92 +156,14 @@ class NativeTerminalSession(
         }
     }
 
-    fun sendText(text: String) {
-        val session = termSession ?: return
-        val bytes = text.toByteArray(Charsets.UTF_8)
-        session.write(bytes, 0, bytes.size)
-    }
-
-    fun sendBytes(bytes: ByteArray) {
-        termSession?.write(bytes, 0, bytes.size)
-    }
-
-    fun cancelActiveProcess() {
-        sendBytes(byteArrayOf(3)) // Send byte 0x03 (SIGINT / Ctrl+C)
-    }
-
-    fun runCommand(cmd: String) {
-        val trimmed = cmd.trim()
-        if (trimmed.isEmpty()) return
-        sendText("$trimmed\r")
-    }
-
     fun finish() {
-        try {
-            termSession?.finishIfRunning()
-        } catch (_: Exception) {}
         isRunning = false
-    }
-
-    // --- TerminalSessionClient implementation ---
-    override fun onTextChanged(changedSession: TerminalSession) {}
-
-    override fun onTitleChanged(changedSession: TerminalSession) {
-        val title = changedSession.title
-        if (!title.isNullOrBlank()) {
-            mainHandler.post {
-                currentTitle = title
-            }
-        }
-    }
-
-    override fun onSessionFinished(finishedSession: TerminalSession) {
-        mainHandler.post {
-            isRunning = false
-            AppLogger.i("NativeTerminal", "Sesi [$name] telah selesai (exit code: ${finishedSession.exitStatus})")
-        }
-    }
-
-    override fun onCopyTextToClipboard(session: TerminalSession, text: String) {
-        mainHandler.post {
-            onClipboardCopy?.invoke(text)
-        }
-    }
-
-    override fun onPasteTextFromClipboard(session: TerminalSession) {}
-
-    override fun onBell(session: TerminalSession) {}
-
-    override fun onColorsChanged(session: TerminalSession) {}
-
-    override fun onTerminalCursorStateChange(state: Boolean) {}
-
-    override fun getTerminalCursorStyle(): Int? = null
-
-    override fun logError(tag: String, message: String) {
-        AppLogger.e(tag, message)
-    }
-
-    override fun logWarn(tag: String, message: String) {
-        AppLogger.w(tag, message)
-    }
-
-    override fun logInfo(tag: String, message: String) {
-        AppLogger.i(tag, message)
-    }
-
-    override fun logDebug(tag: String, message: String) {
-        AppLogger.i(tag, "[DEBUG] $message")
-    }
-
-    override fun logVerbose(tag: String, message: String) {}
-
-    override fun logStackTraceWithMessage(tag: String, message: String, e: Exception) {
-        AppLogger.e(tag, "$message: ${e.message}")
-    }
-
-    override fun logStackTrace(tag: String, e: Exception) {
-        AppLogger.e(tag, "Stack trace: ${e.message}")
+        readerJob?.cancel()
+        try {
+            outputStream?.close()
+            inputStream?.close()
+            process?.destroy()
+        } catch (_: Exception) {}
     }
 }
 
@@ -190,38 +172,35 @@ object TerminalSessionManager {
     val activeIndex = mutableIntStateOf(0)
 
     init {
-        sessions.add(NativeTerminalSession(name = "Sesi 1"))
+        createNewSession("Sesi 1")
     }
 
     fun getActiveSession(): NativeTerminalSession {
         if (sessions.isEmpty()) {
-            sessions.add(NativeTerminalSession(name = "Sesi 1"))
-            activeIndex.intValue = 0
+            createNewSession("Sesi 1")
         }
-        val idx = activeIndex.intValue.coerceIn(0, sessions.size - 1)
-        return sessions[idx]
+        val safeIdx = activeIndex.intValue.coerceIn(0, (sessions.size - 1).coerceAtLeast(0))
+        return sessions[safeIdx]
     }
 
-    fun createNewSession(): NativeTerminalSession {
-        val newName = "Sesi ${sessions.size + 1}"
-        val session = NativeTerminalSession(name = newName)
-        sessions.add(session)
+    fun createNewSession(customName: String? = null): NativeTerminalSession {
+        val sessionNumber = sessions.size + 1
+        val name = customName ?: "Sesi $sessionNumber"
+        val newSession = NativeTerminalSession(name = name)
+        sessions.add(newSession)
         activeIndex.intValue = sessions.size - 1
-        AppLogger.i("TerminalManager", "Sesi baru dibuat: $newName (Total: ${sessions.size})")
-        return session
+        return newSession
     }
 
     fun closeSession(index: Int) {
+        if (sessions.size <= 1) return // Jangan tutup sesi terakhir
         if (index in sessions.indices) {
-            val session = sessions.removeAt(index)
-            session.finish()
-            AppLogger.i("TerminalManager", "Menutup ${session.name}")
-            if (sessions.isEmpty()) {
-                sessions.add(NativeTerminalSession(name = "Sesi 1"))
-                activeIndex.intValue = 0
-            } else {
-                activeIndex.intValue = (index - 1).coerceAtLeast(0)
-            }
+            val sessionToClose = sessions[index]
+            sessionToClose.finish()
+            sessions.removeAt(index)
+
+            val newActive = activeIndex.intValue.coerceIn(0, sessions.size - 1)
+            activeIndex.intValue = newActive
         }
     }
 
@@ -229,12 +208,9 @@ object TerminalSessionManager {
         closeSession(activeIndex.intValue)
     }
 
-    fun terminateAll() {
-        AppLogger.i("TerminalManager", "Mematikan semua sesi aktif...")
+    fun destroyAll() {
         sessions.forEach { it.finish() }
         sessions.clear()
-        ChrootManager.killDevboxProcessesAndUnmountSync()
-        sessions.add(NativeTerminalSession(name = "Sesi 1"))
         activeIndex.intValue = 0
     }
 }
