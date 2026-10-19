@@ -13,7 +13,8 @@ data class ChrootState(
     val swapUsedMb: Long = 0,
     val isCodeServerRunning: Boolean = false,
     val isSshRunning: Boolean = false,
-    val rootfsPath: String = ChrootManager.DEFAULT_ROOTFS
+    val rootfsPath: String = ChrootManager.DEFAULT_ROOTFS,
+    val isSourceChrootAvailable: Boolean = false
 )
 
 object ChrootManager {
@@ -42,10 +43,20 @@ object ChrootManager {
         val existsRes = RootExecutor.execute(checkCmd)
         val statusText = existsRes.getOrNull()?.stdout?.trim() ?: "NOT_FOUND"
 
+        val checkSourceRes = RootExecutor.execute(
+            "if [ -d '/data/local/ubuntu-chroot' ] && { [ -x '/data/local/ubuntu-chroot/bin/bash' ] || [ -x '/data/local/ubuntu-chroot/usr/bin/bash' ]; }; then echo 'SOURCE_OK'; fi"
+        )
+        val isSourceOk = checkSourceRes.getOrNull()?.stdout?.contains("SOURCE_OK") == true
+
         val isRootfsExists = statusText == "EXISTS"
         if (!isRootfsExists) {
             AppLogger.w("ChrootManager", "Status rootfs di $rootfs: $statusText")
-            return ChrootState(isRootGranted = true, isRootfsExists = false, rootfsPath = rootfs)
+            return ChrootState(
+                isRootGranted = true,
+                isRootfsExists = false,
+                rootfsPath = rootfs,
+                isSourceChrootAvailable = isSourceOk
+            )
         }
 
         val mountRes = RootExecutor.execute("mountpoint -q '$rootfs/proc' && echo 'MOUNTED'")
@@ -98,7 +109,8 @@ object ChrootManager {
             swapUsedMb = swapUsed,
             isCodeServerRunning = isCodeServer,
             isSshRunning = isSsh,
-            rootfsPath = rootfs
+            rootfsPath = rootfs,
+            isSourceChrootAvailable = isSourceOk
         )
     }
 
@@ -196,20 +208,30 @@ object ChrootManager {
     ): Result<String> = withContext(Dispatchers.IO) {
         AppLogger.i("ChrootManager", "Memulai duplikasi sistem dari $sourceChroot ke $targetRootfs...")
         val script = """
-            if [ ! -d '$sourceChroot' ] || [ ! -x '$sourceChroot/bin/bash' ]; then
+            if [ ! -d '$sourceChroot' ] || { [ ! -x '$sourceChroot/bin/bash' ] && [ ! -x '$sourceChroot/usr/bin/bash' ]; }; then
                 echo "SOURCE_NOT_FOUND: $sourceChroot tidak memiliki binary bash."
                 exit 1
             fi
+            echo "Unmounting mount points target lama jika ada..."
+            umount -l '$targetRootfs/mnt/sdcard' 2>/dev/null || true
+            umount -l '$targetRootfs/sys' 2>/dev/null || true
+            umount -l '$targetRootfs/proc' 2>/dev/null || true
+            umount -l '$targetRootfs/dev/pts' 2>/dev/null || true
+            umount -l '$targetRootfs/dev' 2>/dev/null || true
+
             mkdir -p '$targetRootfs'
             cd '$sourceChroot' || exit 1
             echo "Membersihkan direktori target..."
             rm -rf '$targetRootfs/bin' '$targetRootfs/boot' '$targetRootfs/etc' '$targetRootfs/lib' '$targetRootfs/opt' '$targetRootfs/root' '$targetRootfs/sbin' '$targetRootfs/srv' '$targetRootfs/usr' '$targetRootfs/var'
-            echo "Menyalin direktori sistem Ubuntu... (ini membutuhkan waktu sekitar 20-30 detik)"
-            cp -a bin boot etc lib opt root sbin srv usr var '$targetRootfs/'
+            echo "Menyalin direktori sistem Ubuntu... (ini membutuhkan waktu sekitar 15-20 detik)"
+            cp -a bin boot etc lib opt root sbin srv usr var '$targetRootfs/' 2>/dev/null || true
             mkdir -p '$targetRootfs/home/coder' '$targetRootfs/dev' '$targetRootfs/dev/pts' '$targetRootfs/proc' '$targetRootfs/sys' '$targetRootfs/mnt/sdcard' '$targetRootfs/tmp'
             chmod 1777 '$targetRootfs/tmp' 2>/dev/null || true
             chown -R 1000:1000 '$targetRootfs/home/coder' 2>/dev/null || true
-            if [ -x '$targetRootfs/bin/bash' ] || [ -x '$targetRootfs/usr/bin/bash' ]; then
+            grep -qE '^127\.0\.0\.1[[:space:]]+localhost' '$targetRootfs/etc/hosts' 2>/dev/null || echo '127.0.0.1 localhost' >> '$targetRootfs/etc/hosts' 2>/dev/null || true
+            echo "nameserver 8.8.8.8" > '$targetRootfs/etc/resolv.conf' 2>/dev/null || true
+
+            if [ -x '$targetRootfs/bin/bash' ] || [ -x '$targetRootfs/usr/bin/bash' ] || [ -x '$targetRootfs/bin/sh' ]; then
                 echo "CLONE_SUCCESS"
             else
                 echo "CLONE_FAILED: Binary bash tidak ditemukan setelah penyalinan."
@@ -232,32 +254,59 @@ object ChrootManager {
     suspend fun downloadUbuntuOfficialRootfs(
         targetRootfs: String = activeRootfs
     ): Result<String> = withContext(Dispatchers.IO) {
-        val url = "https://cloud-images.ubuntu.com/minimal/releases/noble/release/ubuntu-24.04-minimal-cloudimg-arm64-root.tar.xz"
-        AppLogger.i("ChrootManager", "Mengunduh Ubuntu 24.04 ARM64 minimal resmi dari Canonical ($url)...")
+        val url = "http://cdimage.ubuntu.com/ubuntu-base/releases/24.04/release/ubuntu-base-24.04.5-base-arm64.tar.gz"
+        AppLogger.i("ChrootManager", "Menyiapkan Ubuntu 24.04 ARM64 resmi...")
 
         val script = """
+            umount -l '$targetRootfs/mnt/sdcard' 2>/dev/null || true
+            umount -l '$targetRootfs/sys' 2>/dev/null || true
+            umount -l '$targetRootfs/proc' 2>/dev/null || true
+            umount -l '$targetRootfs/dev/pts' 2>/dev/null || true
+            umount -l '$targetRootfs/dev' 2>/dev/null || true
             mkdir -p '$targetRootfs'
-            TAR_FILE="/sdcard/ubuntu-noble-arm64.tar.xz"
-            echo "Mengunduh archive rootfs resmi (75 MB)..."
-            curl -k -L -f '$url' -o "${'$'}TAR_FILE" || wget --no-check-certificate '$url' -O "${'$'}TAR_FILE"
-            FILE_SIZE=${'$'}(wc -c < "${'$'}TAR_FILE" 2>/dev/null || echo 0)
-            if [ "${'$'}FILE_SIZE" -lt 10000000 ]; then
-                echo "DOWNLOAD_FAILED: File unduhan tidak lengkap atau gagal (hanya ${'$'}FILE_SIZE bytes)."
+
+            EXTRACTED=0
+
+            # Cek 1: Jika sudah ada archive tar.xz dari unduhan sebelumnya di /sdcard dan ubuntu-chroot ada
+            if [ -f /sdcard/ubuntu-noble-arm64.tar.xz ] && [ -x /data/local/ubuntu-chroot/usr/bin/tar ]; then
+                echo "Mengekstrak archive /sdcard/ubuntu-noble-arm64.tar.xz yang sudah ada..."
+                mkdir -p /data/local/ubuntu-chroot/mnt/devbox_dest
+                mountpoint -q /data/local/ubuntu-chroot/mnt/devbox_dest || mount --bind '$targetRootfs' /data/local/ubuntu-chroot/mnt/devbox_dest
+                mountpoint -q /data/local/ubuntu-chroot/mnt/sdcard || mount --bind /sdcard /data/local/ubuntu-chroot/mnt/sdcard
+                chroot /data/local/ubuntu-chroot /usr/bin/tar -xf /mnt/sdcard/ubuntu-noble-arm64.tar.xz -C /mnt/devbox_dest
+                umount -l /data/local/ubuntu-chroot/mnt/devbox_dest 2>/dev/null || true
+                if [ -x '$targetRootfs/bin/bash' ] || [ -x '$targetRootfs/usr/bin/bash' ]; then
+                    EXTRACTED=1
+                    echo "EXTRACT_SUCCESS_FROM_EXISTING"
+                fi
+            fi
+
+            # Cek 2: Jika belum terekstrak, unduh Ubuntu Base 24.04 ARM64 (.tar.gz, 29 MB)
+            if [ "${'$'}EXTRACTED" -eq 0 ]; then
+                TAR_FILE="/sdcard/ubuntu-base-24.04-arm64.tar.gz"
+                echo "Mengunduh archive Ubuntu Base 24.04 ARM64 resmi (29 MB)..."
+                curl -k -L -f '$url' -o "${'$'}TAR_FILE" || wget --no-check-certificate '$url' -O "${'$'}TAR_FILE"
+                FILE_SIZE=${'$'}(wc -c < "${'$'}TAR_FILE" 2>/dev/null || echo 0)
+                if [ "${'$'}FILE_SIZE" -lt 15000000 ]; then
+                    echo "DOWNLOAD_FAILED: File unduhan tidak lengkap (hanya ${'$'}FILE_SIZE bytes)."
+                    rm -f "${'$'}TAR_FILE"
+                    exit 1
+                fi
+                echo "Mengekstrak rootfs ke $targetRootfs..."
+                gzip -dc "${'$'}TAR_FILE" | tar -xf - -C '$targetRootfs' 2>/dev/null || tar -xzf "${'$'}TAR_FILE" -C '$targetRootfs' 2>/dev/null || tar -xf "${'$'}TAR_FILE" -C '$targetRootfs'
                 rm -f "${'$'}TAR_FILE"
-                exit 1
             fi
-            echo "Mengekstrak rootfs ke $targetRootfs..."
-            if [ -x /data/local/ubuntu-chroot/usr/bin/tar ]; then
-                /data/local/ubuntu-chroot/usr/bin/tar -xf "${'$'}TAR_FILE" -C '$targetRootfs'
-            else
-                tar -xf "${'$'}TAR_FILE" -C '$targetRootfs'
-            fi
-            rm -f "${'$'}TAR_FILE"
-            mkdir -p '$targetRootfs/dev' '$targetRootfs/dev/pts' '$targetRootfs/proc' '$targetRootfs/sys' '$targetRootfs/mnt/sdcard' '$targetRootfs/tmp'
+
+            mkdir -p '$targetRootfs/dev' '$targetRootfs/dev/pts' '$targetRootfs/proc' '$targetRootfs/sys' '$targetRootfs/mnt/sdcard' '$targetRootfs/tmp' '$targetRootfs/home/coder'
             chmod 1777 '$targetRootfs/tmp' 2>/dev/null || true
-            echo "nameserver 8.8.8.8" > '$targetRootfs/etc/resolv.conf'
-            echo "127.0.0.1 localhost" > '$targetRootfs/etc/hosts'
-            if [ -x '$targetRootfs/bin/bash' ] || [ -x '$targetRootfs/bin/sh' ]; then
+            echo "nameserver 8.8.8.8" > '$targetRootfs/etc/resolv.conf' 2>/dev/null || true
+            echo "127.0.0.1 localhost" > '$targetRootfs/etc/hosts' 2>/dev/null || true
+
+            # Buat user coder jika belum ada
+            chroot '$targetRootfs' /usr/sbin/useradd -m -s /bin/bash coder 2>/dev/null || chroot '$targetRootfs' /bin/sh -c 'useradd -m -s /bin/bash coder 2>/dev/null || true'
+            chown -R 1000:1000 '$targetRootfs/home/coder' 2>/dev/null || true
+
+            if [ -x '$targetRootfs/bin/bash' ] || [ -x '$targetRootfs/usr/bin/bash' ] || [ -x '$targetRootfs/bin/sh' ]; then
                 echo "DOWNLOAD_EXTRACT_SUCCESS"
             else
                 echo "EXTRACT_FAILED"
@@ -267,7 +316,7 @@ object ChrootManager {
 
         val res = RootExecutor.execute(script)
         val out = res.getOrNull()?.stdout ?: ""
-        return@withContext if (out.contains("DOWNLOAD_EXTRACT_SUCCESS")) {
+        return@withContext if (out.contains("DOWNLOAD_EXTRACT_SUCCESS") || out.contains("EXTRACT_SUCCESS_FROM_EXISTING")) {
             AppLogger.i("ChrootManager", "Ubuntu 24.04 ARM64 resmi berhasil dipasang di $targetRootfs!")
             Result.success("Ubuntu 24.04 ARM64 resmi berhasil dipasang!")
         } else {

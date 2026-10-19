@@ -300,12 +300,36 @@ fun DashboardScreen(
                         )
                     }
 
+                    if (state.isSourceChrootAvailable) {
+                        Card(
+                            modifier = Modifier.fillMaxWidth().padding(bottom = 12.dp),
+                            colors = CardDefaults.cardColors(containerColor = DevSuccess.copy(alpha = 0.12f)),
+                            border = BorderStroke(1.dp, DevSuccess.copy(alpha = 0.4f)),
+                            shape = RoundedCornerShape(12.dp)
+                        ) {
+                            Column(modifier = Modifier.padding(12.dp)) {
+                                Text(
+                                    text = "💡 Terdeteksi Sistem Ubuntu di /data/local/ubuntu-chroot!",
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 13.sp,
+                                    color = DevSuccess
+                                )
+                                Spacer(modifier = Modifier.height(4.dp))
+                                Text(
+                                    text = "Kloning langsung dalam 15-20 detik tanpa kuota internet. Semua tools yang sudah Anda instal akan langsung tersedia di DevBox.",
+                                    fontSize = 11.sp,
+                                    color = Color.LightGray
+                                )
+                            }
+                        }
+                    }
+
                     // Option 1: Clone from existing local chroot (Recommended)
                     Button(
                         onClick = {
                             scope.launch {
                                 isOperating = true
-                                actionMessage = "Menyalin direktori sistem dari /data/local/ubuntu-chroot ke ${ChrootManager.activeRootfs}... (20-30 detik)"
+                                actionMessage = "Menyalin direktori sistem dari /data/local/ubuntu-chroot ke ${ChrootManager.activeRootfs}... (15-20 detik)"
                                 val res = ChrootManager.cloneExistingChroot(
                                     sourceChroot = "/data/local/ubuntu-chroot",
                                     targetRootfs = ChrootManager.activeRootfs
@@ -322,7 +346,12 @@ fun DashboardScreen(
                     ) {
                         Icon(Icons.Default.ContentCopy, contentDescription = null, tint = Color.Black)
                         Spacer(modifier = Modifier.width(8.dp))
-                        Text("1. Kloning dari /data/local/ubuntu-chroot (Direkomendasikan - Instan)", color = Color.Black, fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                        Text(
+                            text = if (state.isSourceChrootAvailable) "1. Kloning dari /data/local/ubuntu-chroot (Instan ~15s)" else "1. Kloning dari chroot lokal",
+                            color = Color.Black,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 12.sp
+                        )
                     }
 
                     Spacer(modifier = Modifier.height(8.dp))
@@ -332,7 +361,7 @@ fun DashboardScreen(
                         onClick = {
                             scope.launch {
                                 isOperating = true
-                                actionMessage = "Mengunduh Ubuntu 24.04 ARM64 resmi dari Canonical..."
+                                actionMessage = "Menyiapkan Ubuntu 24.04 ARM64 resmi (29 MB)..."
                                 val res = ChrootManager.downloadUbuntuOfficialRootfs(ChrootManager.activeRootfs)
                                 actionMessage = res.getOrNull() ?: res.exceptionOrNull()?.message
                                 refreshState()
@@ -345,7 +374,7 @@ fun DashboardScreen(
                     ) {
                         Icon(Icons.Default.CloudDownload, contentDescription = null, tint = DevSecondary)
                         Spacer(modifier = Modifier.width(8.dp))
-                        Text("2. Unduh Ubuntu 24.04 ARM64 Resmi (Canonical)", fontSize = 12.sp)
+                        Text("2. Unduh Ubuntu Base 24.04 ARM64 (Resmi Canonical 29 MB)", fontSize = 12.sp)
                     }
 
                     Spacer(modifier = Modifier.height(8.dp))
