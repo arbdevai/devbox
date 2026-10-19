@@ -66,13 +66,16 @@ class NativeTerminalSession(
         logLines.add(TerminalLine("^C", LineType.SYSTEM))
     }
 
-    fun sendInputToProcess(text: String) {
+    fun sendInputToProcess(text: String, appendNewline: Boolean = true) {
         if (isRunning && currentProcess != null) {
             try {
                 val out = currentProcess?.outputStream ?: return
-                out.write((text + "\n").toByteArray(Charsets.UTF_8))
+                val toSend = if (appendNewline) text + "\n" else text
+                out.write(toSend.toByteArray(Charsets.UTF_8))
                 out.flush()
-                logLines.add(TerminalLine("[stdin] $text", LineType.INPUT))
+                if (appendNewline && text.isNotEmpty() && !text.startsWith("\u001B")) {
+                    logLines.add(TerminalLine("[stdin] $text", LineType.INPUT))
+                }
             } catch (e: Exception) {
                 AppLogger.w("NativeTerminal", "Gagal mengirim input ke proses: ${e.message}")
             }
@@ -154,9 +157,16 @@ rm -f '$targetRootfs/tmp/.devbox_cmd.sh'
                     var line: String?
                     while (reader.readLine().also { line = it } != null) {
                         val raw = line ?: continue
-                        val l = raw.replace("\r", "")
-                        if (l.contains("___DEVBOX_PWD:")) {
-                            val newPath = l.substringAfter("___DEVBOX_PWD:").trim()
+                        // Handle carriage return: take the latest segment if \r was used to overwrite
+                        val rawEffective = if (raw.contains("\r")) {
+                            raw.split("\r").filter { it.isNotEmpty() }.lastOrNull() ?: ""
+                        } else {
+                            raw
+                        }
+                        if (rawEffective.isEmpty()) continue
+
+                        if (rawEffective.contains("___DEVBOX_PWD:")) {
+                            val newPath = rawEffective.substringAfter("___DEVBOX_PWD:").trim()
                             if (newPath.isNotEmpty() && newPath.startsWith("/")) {
                                 currentDir = newPath
                             }
@@ -164,13 +174,29 @@ rm -f '$targetRootfs/tmp/.devbox_cmd.sh'
                             continue
                         }
 
+                        // Terminal clear screen escape sequences (\u001b[2J or \u001b[H\u001b[2J)
+                        val hasScreenClear = rawEffective.contains("\u001b[2J") || rawEffective.contains("\u001b[H\u001b[2J")
+                        if (hasScreenClear) {
+                            withContext(Dispatchers.Main) {
+                                logLines.clear()
+                            }
+                        }
+
+                        val cleanedLine = rawEffective
+                            .replace("\u001b[H\u001b[2J", "")
+                            .replace("\u001b[2J", "")
+
+                        if (AnsiParser.stripAnsi(cleanedLine).trim().isEmpty() && hasScreenClear) {
+                            continue
+                        }
+
                         val type = when {
-                            l.contains("[ERROR]", ignoreCase = true) || l.contains("Permission denied", ignoreCase = true) -> LineType.ERROR
-                            l.contains("[WARN]", ignoreCase = true) -> LineType.SYSTEM
+                            cleanedLine.contains("[ERROR]", ignoreCase = true) || cleanedLine.contains("Permission denied", ignoreCase = true) -> LineType.ERROR
+                            cleanedLine.contains("[WARN]", ignoreCase = true) -> LineType.SYSTEM
                             else -> LineType.OUTPUT
                         }
                         withContext(Dispatchers.Main) {
-                            logLines.add(TerminalLine(l, type))
+                            logLines.add(TerminalLine(cleanedLine, type))
                             if (logLines.size > 2000) {
                                 logLines.removeRange(0, 500)
                             }

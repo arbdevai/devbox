@@ -132,12 +132,14 @@ fun TerminalScreen(
 
     fun submitCommand() {
         val text = inputState.text.replace("\n", "").trim()
-        if (text.isBlank()) return
         if (activeSession.isRunning) {
-            activeSession.sendInputToProcess(text)
-        } else {
-            activeSession.runCommand(text, scope)
+            activeSession.sendInputToProcess(text, appendNewline = true)
+            inputState = TextFieldValue("")
+            focusRequester.requestFocus()
+            return
         }
+        if (text.isBlank()) return
+        activeSession.runCommand(text, scope)
         inputState = TextFieldValue("")
         focusRequester.requestFocus()
         mainHandler.postDelayed({
@@ -279,7 +281,7 @@ fun TerminalScreen(
                 // Copy All Button
                 IconButton(
                     onClick = {
-                        val allText = activeSession.logLines.joinToString("\n") { it.text }
+                        val allText = activeSession.logLines.joinToString("\n") { AnsiParser.stripAnsi(it.text) }
                         clipboardManager.setText(AnnotatedString(allText))
                         Toast.makeText(context, "Semua teks terminal disalin", Toast.LENGTH_SHORT).show()
                     },
@@ -408,12 +410,8 @@ fun TerminalScreen(
                     onValueChange = { newValue ->
                         if (newValue.text.contains("\n")) {
                             val clean = newValue.text.replace("\n", "").trim()
-                            if (clean.isNotBlank()) {
-                                inputState = TextFieldValue(clean)
-                                submitCommand()
-                            } else {
-                                inputState = TextFieldValue("")
-                            }
+                            inputState = TextFieldValue(clean)
+                            submitCommand()
                         } else {
                             inputState = newValue
                         }
@@ -462,7 +460,7 @@ fun TerminalScreen(
                     }
                 )
 
-                if (inputState.text.isNotEmpty()) {
+                if (inputState.text.isNotEmpty() || activeSession.isRunning) {
                     Spacer(modifier = Modifier.width(4.dp))
                     IconButton(
                         onClick = { submitCommand() },
@@ -491,15 +489,29 @@ fun TerminalScreen(
         ) {
             // ESC
             TerminalModifierKey(label = "ESC") {
-                if (inputState.text.isNotEmpty()) {
-                    inputState = TextFieldValue("")
+                if (activeSession.isRunning) {
+                    activeSession.sendInputToProcess("\u001B", appendNewline = false)
+                } else {
+                    if (inputState.text.isNotEmpty()) {
+                        inputState = TextFieldValue("")
+                    }
                 }
                 focusRequester.requestFocus()
             }
 
             // TAB
             TerminalModifierKey(label = "TAB") {
-                insertTextAtCursor("    ")
+                if (activeSession.isRunning) {
+                    activeSession.sendInputToProcess("\t", appendNewline = false)
+                } else {
+                    insertTextAtCursor("    ")
+                }
+                focusRequester.requestFocus()
+            }
+
+            // ENTER
+            TerminalModifierKey(label = "ENTER") {
+                submitCommand()
             }
 
             // CTRL Toggle
@@ -531,42 +543,58 @@ fun TerminalScreen(
 
             // Arrow Left ◀
             TerminalModifierKey(label = "◀") {
-                val pos = inputState.selection.start
-                if (pos > 0) {
-                    inputState = inputState.copy(selection = TextRange(pos - 1))
+                if (activeSession.isRunning && inputState.text.isEmpty()) {
+                    activeSession.sendInputToProcess("\u001B[D", appendNewline = false)
+                } else {
+                    val pos = inputState.selection.start
+                    if (pos > 0) {
+                        inputState = inputState.copy(selection = TextRange(pos - 1))
+                    }
                 }
                 focusRequester.requestFocus()
             }
 
             // Arrow Right ▶
             TerminalModifierKey(label = "▶") {
-                val pos = inputState.selection.end
-                if (pos < inputState.text.length) {
-                    inputState = inputState.copy(selection = TextRange(pos + 1))
-                }
-                focusRequester.requestFocus()
-            }
-
-            // Arrow Up ▲ (Command History Previous)
-            TerminalModifierKey(label = "▲") {
-                if (activeSession.history.isNotEmpty()) {
-                    activeSession.historyIndex = (activeSession.historyIndex - 1).coerceAtLeast(0)
-                    val cmd = activeSession.history[activeSession.historyIndex]
-                    inputState = TextFieldValue(text = cmd, selection = TextRange(cmd.length))
-                }
-                focusRequester.requestFocus()
-            }
-
-            // Arrow Down ▼ (Command History Next)
-            TerminalModifierKey(label = "▼") {
-                if (activeSession.history.isNotEmpty()) {
-                    activeSession.historyIndex = (activeSession.historyIndex + 1).coerceAtMost(activeSession.history.size)
-                    val cmd = if (activeSession.historyIndex < activeSession.history.size) {
-                        activeSession.history[activeSession.historyIndex]
-                    } else {
-                        ""
+                if (activeSession.isRunning && inputState.text.isEmpty()) {
+                    activeSession.sendInputToProcess("\u001B[C", appendNewline = false)
+                } else {
+                    val pos = inputState.selection.end
+                    if (pos < inputState.text.length) {
+                        inputState = inputState.copy(selection = TextRange(pos + 1))
                     }
-                    inputState = TextFieldValue(text = cmd, selection = TextRange(cmd.length))
+                }
+                focusRequester.requestFocus()
+            }
+
+            // Arrow Up ▲
+            TerminalModifierKey(label = "▲") {
+                if (activeSession.isRunning) {
+                    activeSession.sendInputToProcess("\u001B[A", appendNewline = false)
+                } else {
+                    if (activeSession.history.isNotEmpty()) {
+                        activeSession.historyIndex = (activeSession.historyIndex - 1).coerceAtLeast(0)
+                        val cmd = activeSession.history[activeSession.historyIndex]
+                        inputState = TextFieldValue(text = cmd, selection = TextRange(cmd.length))
+                    }
+                }
+                focusRequester.requestFocus()
+            }
+
+            // Arrow Down ▼
+            TerminalModifierKey(label = "▼") {
+                if (activeSession.isRunning) {
+                    activeSession.sendInputToProcess("\u001B[B", appendNewline = false)
+                } else {
+                    if (activeSession.history.isNotEmpty()) {
+                        activeSession.historyIndex = (activeSession.historyIndex + 1).coerceAtMost(activeSession.history.size)
+                        val cmd = if (activeSession.historyIndex < activeSession.history.size) {
+                            activeSession.history[activeSession.historyIndex]
+                        } else {
+                            ""
+                        }
+                        inputState = TextFieldValue(text = cmd, selection = TextRange(cmd.length))
+                    }
                 }
                 focusRequester.requestFocus()
             }
