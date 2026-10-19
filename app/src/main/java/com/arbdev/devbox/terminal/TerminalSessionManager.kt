@@ -16,8 +16,7 @@ import java.util.UUID
 
 class NativeTerminalSession(
     val id: String = UUID.randomUUID().toString().take(8),
-    var name: String = "Sesi 1",
-    val onSessionClosed: ((NativeTerminalSession) -> Unit)? = null
+    var name: String = "Sesi 1"
 ) : TerminalSessionClient {
 
     private val mainHandler = Handler(Looper.getMainLooper())
@@ -50,6 +49,7 @@ class NativeTerminalSession(
         try {
             val targetRootfs = ChrootManager.activeRootfs
             val suBinary = findSuPath()
+
             val chrootCmd = "mkdir -p '$targetRootfs/dev' '$targetRootfs/dev/pts' '$targetRootfs/proc' '$targetRootfs/sys' '$targetRootfs/mnt/sdcard' '$targetRootfs/tmp' 2>/dev/null; " +
                     "mountpoint -q '$targetRootfs/dev' || mount --bind /dev '$targetRootfs/dev'; " +
                     "mountpoint -q '$targetRootfs/dev/pts' || mount -t devpts devpts '$targetRootfs/dev/pts'; " +
@@ -58,7 +58,8 @@ class NativeTerminalSession(
                     "mountpoint -q '$targetRootfs/mnt/sdcard' || mount --bind /sdcard '$targetRootfs/mnt/sdcard' 2>/dev/null; " +
                     "cd '$targetRootfs' && exec chroot '$targetRootfs' /usr/bin/env -i HOME=/home/coder USER=coder LOGNAME=coder SHELL=/bin/bash TERM=xterm-256color COLORTERM=truecolor PATH=/home/coder/.local/bin:/home/coder/.cargo/bin:/home/coder/go/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin /bin/bash -c 'if id -u coder >/dev/null 2>&1; then exec /usr/sbin/runuser -u coder -- /bin/bash -l; else exec /bin/bash -l; fi'"
 
-            val args = arrayOf("-c", chrootCmd)
+            // In POSIX execvp(cmd, argv), argv[0] must be the program name!
+            val args = arrayOf(suBinary, "-c", chrootCmd)
             val env = arrayOf(
                 "TERM=xterm-256color",
                 "COLORTERM=truecolor"
@@ -72,7 +73,7 @@ class NativeTerminalSession(
                 3000,
                 this
             )
-            // Pre-initialize emulator with default standard terminal dimensions (80 cols x 24 rows)
+            // Pre-initialize emulator with standard dimensions (80 cols x 24 rows)
             session.initializeEmulator(80, 24)
             termSession = session
             isRunning = true
@@ -132,8 +133,7 @@ class NativeTerminalSession(
     override fun onSessionFinished(finishedSession: TerminalSession) {
         mainHandler.post {
             isRunning = false
-            AppLogger.i("NativeTerminal", "Sesi [$name] telah selesai (exit status: ${finishedSession.exitStatus})")
-            onSessionClosed?.invoke(this)
+            AppLogger.i("NativeTerminal", "Sesi [$name] telah selesai (exit code: ${finishedSession.exitStatus})")
         }
     }
 
@@ -179,21 +179,12 @@ object TerminalSessionManager {
     val activeIndex = mutableIntStateOf(0)
 
     init {
-        sessions.add(createSession("Sesi 1"))
-    }
-
-    private fun createSession(name: String): NativeTerminalSession {
-        return NativeTerminalSession(name = name) { closedSession ->
-            val idx = sessions.indexOf(closedSession)
-            if (idx >= 0) {
-                closeSession(idx)
-            }
-        }
+        sessions.add(NativeTerminalSession(name = "Sesi 1"))
     }
 
     fun getActiveSession(): NativeTerminalSession {
         if (sessions.isEmpty()) {
-            sessions.add(createSession("Sesi 1"))
+            sessions.add(NativeTerminalSession(name = "Sesi 1"))
             activeIndex.intValue = 0
         }
         val idx = activeIndex.intValue.coerceIn(0, sessions.size - 1)
@@ -202,7 +193,7 @@ object TerminalSessionManager {
 
     fun createNewSession(): NativeTerminalSession {
         val newName = "Sesi ${sessions.size + 1}"
-        val session = createSession(newName)
+        val session = NativeTerminalSession(name = newName)
         sessions.add(session)
         activeIndex.intValue = sessions.size - 1
         AppLogger.i("TerminalManager", "Sesi baru dibuat: $newName (Total: ${sessions.size})")
@@ -215,8 +206,7 @@ object TerminalSessionManager {
             session.finish()
             AppLogger.i("TerminalManager", "Menutup ${session.name}")
             if (sessions.isEmpty()) {
-                ChrootManager.killDevboxProcessesAndUnmountSync()
-                sessions.add(createSession("Sesi 1"))
+                sessions.add(NativeTerminalSession(name = "Sesi 1"))
                 activeIndex.intValue = 0
             } else {
                 activeIndex.intValue = (index - 1).coerceAtLeast(0)
@@ -232,7 +222,8 @@ object TerminalSessionManager {
         AppLogger.i("TerminalManager", "Mematikan semua sesi aktif...")
         sessions.forEach { it.finish() }
         sessions.clear()
-        sessions.add(createSession("Sesi 1"))
+        ChrootManager.killDevboxProcessesAndUnmountSync()
+        sessions.add(NativeTerminalSession(name = "Sesi 1"))
         activeIndex.intValue = 0
     }
 }

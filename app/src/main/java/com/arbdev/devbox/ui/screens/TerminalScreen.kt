@@ -76,7 +76,7 @@ fun TerminalScreen(
     val activeSession = TerminalSessionManager.getActiveSession()
     val activeIndex = TerminalSessionManager.activeIndex.intValue
 
-    var terminalViewRef by remember { mutableStateOf<TerminalView?>(null) }
+    val terminalViewHolder = remember { arrayOfNulls<TerminalView>(1) }
     var terminalFontSize by remember { mutableIntStateOf(12) }
 
     // Modifier states for virtual keyboard integration
@@ -198,7 +198,7 @@ fun TerminalScreen(
                 // Toggle Soft Keyboard (FlorisBoard / Gboard)
                 IconButton(
                     onClick = {
-                        terminalViewRef?.let { tv ->
+                        terminalViewHolder[0]?.let { tv ->
                             tv.requestFocus()
                             val imm = context.getSystemService(Context.INPUT_METHOD_SERVICE) as? InputMethodManager
                             imm?.toggleSoftInput(InputMethodManager.SHOW_FORCED, 0)
@@ -219,7 +219,7 @@ fun TerminalScreen(
                     onClick = {
                         if (terminalFontSize > 8) {
                             terminalFontSize -= 1
-                            terminalViewRef?.setTextSize(terminalFontSize)
+                            terminalViewHolder[0]?.setTextSize(terminalFontSize)
                         }
                     },
                     modifier = Modifier.size(28.dp)
@@ -238,7 +238,7 @@ fun TerminalScreen(
                     onClick = {
                         if (terminalFontSize < 24) {
                             terminalFontSize += 1
-                            terminalViewRef?.setTextSize(terminalFontSize)
+                            terminalViewHolder[0]?.setTextSize(terminalFontSize)
                         }
                     },
                     modifier = Modifier.size(28.dp)
@@ -294,6 +294,9 @@ fun TerminalScreen(
         AndroidView(
             factory = { ctx ->
                 TerminalView(ctx, null).apply {
+                    isFocusable = true
+                    isFocusableInTouchMode = true
+                    requestFocus()
                     setTextSize(terminalFontSize)
                     setTypeface(Typeface.MONOSPACE)
                     setTerminalViewClient(object : TerminalViewClient {
@@ -366,12 +369,11 @@ fun TerminalScreen(
                         }
                     })
 
-                    terminalViewRef = this
+                    terminalViewHolder[0] = this
                     activeSession.termSession?.let { attachSession(it) }
                 }
             },
             update = { tv ->
-                terminalViewRef = tv
                 activeSession.termSession?.let { session ->
                     if (tv.currentSession != session) {
                         tv.attachSession(session)
