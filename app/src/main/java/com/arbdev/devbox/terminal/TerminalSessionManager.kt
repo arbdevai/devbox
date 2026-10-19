@@ -112,6 +112,10 @@ class NativeTerminalSession(
 
                 val scriptContent = """
 cd "$currentDir" 2>/dev/null || cd /home/coder 2>/dev/null || cd /
+if [ -f /etc/profile ]; then . /etc/profile >/dev/null 2>&1; fi
+if [ -f /home/coder/.profile ]; then . /home/coder/.profile >/dev/null 2>&1; fi
+if [ -f /home/coder/.bashrc ]; then . /home/coder/.bashrc >/dev/null 2>&1; fi
+export PATH=/home/coder/.local/bin:/home/coder/.cargo/bin:/home/coder/go/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:${'$'}PATH
 $trimmed
 __code=$?
 printf "\n___DEVBOX_PWD:%s\n" "${'$'}(pwd)"
@@ -119,7 +123,7 @@ exit ${'$'}__code
 """.trimIndent()
 
                 val b64Script = Base64.encodeToString(scriptContent.toByteArray(Charsets.UTF_8), Base64.NO_WRAP)
-                val envPrefix = "env -i HOME=/home/coder USER=coder LOGNAME=coder SHELL=/bin/bash TERM=xterm-256color PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+                val envPrefix = "env -i HOME=/home/coder USER=coder LOGNAME=coder SHELL=/bin/bash TERM=xterm-256color PATH=/home/coder/.local/bin:/home/coder/.cargo/bin:/home/coder/go/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 
                 val executionCmd = """
 if chroot '$targetRootfs' id -u coder >/dev/null 2>&1; then

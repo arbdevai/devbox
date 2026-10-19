@@ -48,6 +48,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateListOf
@@ -81,6 +82,7 @@ class WebTabItem(
 ) {
     var url by mutableStateOf(initialUrl)
     var title by mutableStateOf(initialTitle)
+    var webView: WebView? = null
 }
 
 @Serializable
@@ -179,7 +181,7 @@ fun WebPreviewScreen() {
 
     // Intercept back button for in-webview history navigation
     BackHandler(enabled = canBack) {
-        webViewRef?.goBack()
+        (currentTab.webView ?: webViewRef)?.goBack()
     }
 
     fun navigateTo(url: String) {
@@ -192,7 +194,8 @@ fun WebPreviewScreen() {
         currentTab.url = target
         currentTab.title = WebPreviewStateManager.getDisplayTitle(target)
         WebPreviewStateManager.save(context)
-        webViewRef?.loadUrl(target)
+        val targetView = currentTab.webView ?: webViewRef
+        targetView?.loadUrl(target)
         focusManager.clearFocus()
     }
 
@@ -228,7 +231,6 @@ fun WebPreviewScreen() {
                             if (activeTabIndex != index) {
                                 activeTabIndex = index
                                 urlInput = tab.url
-                                webViewRef?.loadUrl(tab.url)
                                 WebPreviewStateManager.save(context)
                             }
                         }
@@ -252,13 +254,15 @@ fun WebPreviewScreen() {
                             modifier = Modifier
                                 .size(14.dp)
                                 .clickable {
-                                    tabs.removeAt(index)
+                                    val removed = tabs.removeAt(index)
+                                    try {
+                                        removed.webView?.destroy()
+                                    } catch (_: Exception) {}
                                     if (activeTabIndex >= tabs.size) {
                                         activeTabIndex = tabs.size - 1
                                     }
                                     val newActive = tabs[activeTabIndex]
                                     urlInput = newActive.url
-                                    webViewRef?.loadUrl(newActive.url)
                                     WebPreviewStateManager.save(context)
                                 }
                         )
@@ -273,7 +277,6 @@ fun WebPreviewScreen() {
                     tabs.add(newTab)
                     activeTabIndex = tabs.size - 1
                     urlInput = newTab.url
-                    webViewRef?.loadUrl(newTab.url)
                     WebPreviewStateManager.save(context)
                 },
                 modifier = Modifier.size(28.dp)
@@ -297,7 +300,7 @@ fun WebPreviewScreen() {
         ) {
             // History Back Button
             IconButton(
-                onClick = { webViewRef?.goBack() },
+                onClick = { (currentTab.webView ?: webViewRef)?.goBack() },
                 enabled = canBack,
                 modifier = Modifier.size(32.dp)
             ) {
@@ -311,7 +314,7 @@ fun WebPreviewScreen() {
 
             // History Forward Button
             IconButton(
-                onClick = { webViewRef?.goForward() },
+                onClick = { (currentTab.webView ?: webViewRef)?.goForward() },
                 enabled = canForward,
                 modifier = Modifier.size(32.dp)
             ) {
@@ -325,7 +328,7 @@ fun WebPreviewScreen() {
 
             // Reload Button
             IconButton(
-                onClick = { webViewRef?.reload() },
+                onClick = { (currentTab.webView ?: webViewRef)?.reload() },
                 modifier = Modifier.size(32.dp)
             ) {
                 Icon(
@@ -391,79 +394,97 @@ fun WebPreviewScreen() {
             )
         }
 
-        // Embedded Multi-Tab WebView
+        // Embedded Multi-Tab WebView with Persistent In-Memory DOM State
         Box(
             modifier = Modifier
                 .weight(1f)
                 .fillMaxWidth()
         ) {
-            AndroidView(
-                factory = { ctx ->
-                    WebView(ctx).apply {
-                        layoutParams = ViewGroup.LayoutParams(
-                            ViewGroup.LayoutParams.MATCH_PARENT,
-                            ViewGroup.LayoutParams.MATCH_PARENT
-                        )
-                        settings.apply {
-                            javaScriptEnabled = true
-                            domStorageEnabled = true
-                            databaseEnabled = true
-                            allowFileAccess = true
-                            useWideViewPort = true
-                            loadWithOverviewMode = true
-                            mixedContentMode = WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
-                            cacheMode = WebSettings.LOAD_DEFAULT
-                        }
-
-                        val cookieManager = CookieManager.getInstance()
-                        cookieManager.setAcceptCookie(true)
-                        cookieManager.setAcceptThirdPartyCookies(this, true)
-
-                        webChromeClient = object : WebChromeClient() {
-                            override fun onProgressChanged(view: WebView?, newProgress: Int) {
-                                loadProgress = newProgress / 100f
-                                isLoading = newProgress < 100
-                            }
-
-                            override fun onReceivedTitle(view: WebView?, title: String?) {
-                                if (!title.isNullOrEmpty()) {
-                                    val shortTitle = if (title.length > 14) title.take(12) + ".." else title
-                                    currentTab.title = shortTitle
-                                    WebPreviewStateManager.save(context)
+            key(currentTab.id) {
+                AndroidView(
+                    factory = { ctx ->
+                        val existingView = currentTab.webView
+                        if (existingView != null) {
+                            (existingView.parent as? ViewGroup)?.removeView(existingView)
+                            webViewRef = existingView
+                            canBack = existingView.canGoBack()
+                            canForward = existingView.canGoForward()
+                            urlInput = existingView.url ?: currentTab.url
+                            existingView
+                        } else {
+                            WebView(ctx).apply {
+                                layoutParams = ViewGroup.LayoutParams(
+                                    ViewGroup.LayoutParams.MATCH_PARENT,
+                                    ViewGroup.LayoutParams.MATCH_PARENT
+                                )
+                                settings.apply {
+                                    javaScriptEnabled = true
+                                    domStorageEnabled = true
+                                    databaseEnabled = true
+                                    allowFileAccess = true
+                                    useWideViewPort = true
+                                    loadWithOverviewMode = true
+                                    mixedContentMode = WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
+                                    cacheMode = WebSettings.LOAD_DEFAULT
                                 }
+
+                                val cookieManager = CookieManager.getInstance()
+                                cookieManager.setAcceptCookie(true)
+                                cookieManager.setAcceptThirdPartyCookies(this, true)
+
+                                webChromeClient = object : WebChromeClient() {
+                                    override fun onProgressChanged(view: WebView?, newProgress: Int) {
+                                        loadProgress = newProgress / 100f
+                                        isLoading = newProgress < 100
+                                    }
+
+                                    override fun onReceivedTitle(view: WebView?, title: String?) {
+                                        if (!title.isNullOrEmpty()) {
+                                            val shortTitle = if (title.length > 14) title.take(12) + ".." else title
+                                            currentTab.title = shortTitle
+                                            WebPreviewStateManager.save(context)
+                                        }
+                                    }
+                                }
+
+                                webViewClient = object : WebViewClient() {
+                                    override fun onPageStarted(view: WebView?, url: String?, favicon: Bitmap?) {
+                                        isLoading = true
+                                        canBack = view?.canGoBack() == true
+                                        canForward = view?.canGoForward() == true
+                                        url?.let {
+                                            urlInput = it
+                                            currentTab.url = it
+                                            WebPreviewStateManager.save(context)
+                                        }
+                                    }
+
+                                    override fun onPageFinished(view: WebView?, url: String?) {
+                                        isLoading = false
+                                        canBack = view?.canGoBack() == true
+                                        canForward = view?.canGoForward() == true
+                                        url?.let {
+                                            urlInput = it
+                                            currentTab.url = it
+                                            WebPreviewStateManager.save(context)
+                                        }
+                                    }
+                                }
+
+                                loadUrl(currentTab.url)
+                                currentTab.webView = this
+                                webViewRef = this
                             }
                         }
-
-                        webViewClient = object : WebViewClient() {
-                            override fun onPageStarted(view: WebView?, url: String?, favicon: Bitmap?) {
-                                isLoading = true
-                                canBack = view?.canGoBack() == true
-                                canForward = view?.canGoForward() == true
-                                url?.let {
-                                    urlInput = it
-                                    currentTab.url = it
-                                    WebPreviewStateManager.save(context)
-                                }
-                            }
-
-                            override fun onPageFinished(view: WebView?, url: String?) {
-                                isLoading = false
-                                canBack = view?.canGoBack() == true
-                                canForward = view?.canGoForward() == true
-                                url?.let {
-                                    urlInput = it
-                                    currentTab.url = it
-                                    WebPreviewStateManager.save(context)
-                                }
-                            }
-                        }
-
-                        loadUrl(currentTab.url)
-                        webViewRef = this
-                    }
-                },
-                modifier = Modifier.fillMaxSize()
-            )
+                    },
+                    update = { view ->
+                        webViewRef = view
+                        canBack = view.canGoBack()
+                        canForward = view.canGoForward()
+                    },
+                    modifier = Modifier.fillMaxSize()
+                )
+            }
         }
     }
 }
