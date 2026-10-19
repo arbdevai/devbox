@@ -1,35 +1,33 @@
 package com.arbdev.devbox.ui.screens
 
+import android.content.Context
 import android.graphics.Typeface
-import android.widget.ScrollView
-import android.widget.TextView
+import android.view.KeyEvent
+import android.view.MotionEvent
+import android.view.inputmethod.InputMethodManager
 import android.widget.Toast
 import androidx.compose.foundation.background
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.text.BasicTextField
-import androidx.compose.foundation.text.KeyboardActions
-import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.ContentPaste
 import androidx.compose.material.icons.filled.DeleteSweep
+import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Terminal
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.Icon
@@ -38,40 +36,24 @@ import androidx.compose.material3.ScrollableTabRow
 import androidx.compose.material3.Tab
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.focus.FocusRequester
-import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.AnnotatedString
-import androidx.compose.ui.text.TextRange
-import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.input.ImeAction
-import androidx.compose.ui.text.input.KeyboardType
-import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
-import android.os.Handler
-import android.os.Looper
-import android.view.KeyEvent
-import androidx.compose.ui.input.key.Key
-import androidx.compose.ui.input.key.KeyEventType
-import androidx.compose.ui.input.key.key
-import androidx.compose.ui.input.key.onKeyEvent
-import androidx.compose.ui.input.key.type
-import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import com.arbdev.devbox.service.KeepAliveService
 import com.arbdev.devbox.terminal.TerminalSessionManager
 import com.arbdev.devbox.ui.theme.DevPrimary
@@ -79,9 +61,10 @@ import com.arbdev.devbox.ui.theme.TerminalBackground
 import com.arbdev.devbox.ui.theme.TerminalCyan
 import com.arbdev.devbox.ui.theme.TerminalGreen
 import com.arbdev.devbox.ui.theme.TerminalText
-import com.arbdev.devbox.util.AnsiParser
-import com.arbdev.devbox.util.LineType
-import com.arbdev.devbox.util.TerminalLine
+import com.arbdev.devbox.util.AppLogger
+import com.termux.terminal.TerminalSession
+import com.termux.view.TerminalView
+import com.termux.view.TerminalViewClient
 
 @Composable
 fun TerminalScreen(
@@ -89,15 +72,17 @@ fun TerminalScreen(
 ) {
     val context = LocalContext.current
     val clipboardManager = LocalClipboardManager.current
-    val keyboardController = LocalSoftwareKeyboardController.current
-    val mainHandler = remember { Handler(Looper.getMainLooper()) }
-    val scope = rememberCoroutineScope()
-    val focusRequester = remember { FocusRequester() }
 
     val activeSession = TerminalSessionManager.getActiveSession()
     val activeIndex = TerminalSessionManager.activeIndex.intValue
 
-    var inputState by remember { mutableStateOf(TextFieldValue("")) }
+    var terminalViewRef by remember { mutableStateOf<TerminalView?>(null) }
+    var terminalFontSize by remember { mutableIntStateOf(12) }
+
+    // Modifier states for virtual keyboard integration
+    var isCtrlActive by remember { mutableStateOf(false) }
+    var isAltActive by remember { mutableStateOf(false) }
+    var isShiftActive by remember { mutableStateOf(false) }
 
     LaunchedEffect(Unit) {
         KeepAliveService.startService(context)
@@ -107,57 +92,10 @@ fun TerminalScreen(
         KeepAliveService.updateNotification(context)
     }
 
-    // Modifier states for keyboard
-    var isCtrlActive by remember { mutableStateOf(false) }
-    var isAltActive by remember { mutableStateOf(false) }
-    var isShiftActive by remember { mutableStateOf(false) }
-
-    var textViewRef by remember { mutableStateOf<TextView?>(null) }
-    var scrollViewRef by remember { mutableStateOf<ScrollView?>(null) }
-
-    fun insertTextAtCursor(insert: String) {
-        val toInsert = if (isShiftActive) insert.uppercase() else insert
-        if (isShiftActive) isShiftActive = false
-
-        val cur = inputState.text
-        val pos = inputState.selection.start.coerceIn(0, cur.length)
-        val before = cur.substring(0, pos)
-        val after = cur.substring(pos)
-        inputState = inputState.copy(
-            text = "$before$toInsert$after",
-            selection = TextRange(pos + toInsert.length)
-        )
-        focusRequester.requestFocus()
-    }
-
-    fun submitCommand() {
-        val text = inputState.text.replace("\n", "").trim()
-        if (activeSession.isRunning) {
-            activeSession.sendInputToProcess(text, appendNewline = true)
-            inputState = TextFieldValue("")
-            focusRequester.requestFocus()
-            return
-        }
-        if (text.isBlank()) return
-        activeSession.runCommand(text, scope)
-        inputState = TextFieldValue("")
-        focusRequester.requestFocus()
-        mainHandler.postDelayed({
-            focusRequester.requestFocus()
-            keyboardController?.show()
-        }, 50)
-    }
-
+    // Execute initial command if provided
     LaunchedEffect(initialCommand) {
         initialCommand?.let { cmd ->
-            activeSession.runCommand(cmd, scope)
-        }
-    }
-
-    // Auto-scroll when new logs arrive in active session
-    LaunchedEffect(activeSession.logLines.size) {
-        scrollViewRef?.post {
-            scrollViewRef?.fullScroll(ScrollView.FOCUS_DOWN)
+            activeSession.runCommand(cmd)
         }
     }
 
@@ -224,12 +162,12 @@ fun TerminalScreen(
             }
         }
 
-        // Action Toolbar (Prompt, Paste, Copy All, Clear)
+        // Action Toolbar (Prompt, Keyboard toggle, Font size, Paste, Clear)
         Row(
             modifier = Modifier
                 .fillMaxWidth()
                 .background(Color(0xFF000000))
-                .padding(horizontal = 10.dp, vertical = 6.dp),
+                .padding(horizontal = 8.dp, vertical = 4.dp),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
@@ -237,103 +175,207 @@ fun TerminalScreen(
                 Text(
                     text = "coder@devbox",
                     fontFamily = FontFamily.Monospace,
-                    fontSize = 12.sp,
+                    fontSize = 11.sp,
                     color = TerminalGreen,
                     fontWeight = FontWeight.Bold
                 )
                 Text(
                     text = ":${activeSession.getDisplayDir()}$",
                     fontFamily = FontFamily.Monospace,
-                    fontSize = 12.sp,
+                    fontSize = 11.sp,
                     color = TerminalCyan
                 )
-                Spacer(modifier = Modifier.width(6.dp))
+                Spacer(modifier = Modifier.width(4.dp))
                 Text(
-                    text = if (activeSession.isRunning) "• PROSES..." else "• SIAP",
+                    text = if (activeSession.isRunning) "• PTY" else "• SELESAI",
                     fontFamily = FontFamily.Monospace,
-                    fontSize = 10.sp,
+                    fontSize = 9.sp,
                     color = if (activeSession.isRunning) DevPrimary else Color.Gray
                 )
             }
 
             Row(verticalAlignment = Alignment.CenterVertically) {
-                // Paste Button
+                // Toggle Soft Keyboard (FlorisBoard / Gboard)
+                IconButton(
+                    onClick = {
+                        terminalViewRef?.let { tv ->
+                            tv.requestFocus()
+                            val imm = context.getSystemService(Context.INPUT_METHOD_SERVICE) as? InputMethodManager
+                            imm?.toggleSoftInput(InputMethodManager.SHOW_FORCED, 0)
+                        }
+                    },
+                    modifier = Modifier.size(30.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Terminal,
+                        contentDescription = "Buka Keyboard",
+                        tint = DevPrimary,
+                        modifier = Modifier.size(16.dp)
+                    )
+                }
+
+                // Font Zoom Out (-)
+                IconButton(
+                    onClick = {
+                        if (terminalFontSize > 8) {
+                            terminalFontSize -= 1
+                            terminalViewRef?.setTextSize(terminalFontSize)
+                        }
+                    },
+                    modifier = Modifier.size(28.dp)
+                ) {
+                    Text(
+                        text = "A-",
+                        fontFamily = FontFamily.Monospace,
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = TerminalText
+                    )
+                }
+
+                // Font Zoom In (+)
+                IconButton(
+                    onClick = {
+                        if (terminalFontSize < 24) {
+                            terminalFontSize += 1
+                            terminalViewRef?.setTextSize(terminalFontSize)
+                        }
+                    },
+                    modifier = Modifier.size(28.dp)
+                ) {
+                    Text(
+                        text = "A+",
+                        fontFamily = FontFamily.Monospace,
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = TerminalText
+                    )
+                }
+
+                // Paste Clipboard directly into active PTY session
                 IconButton(
                     onClick = {
                         val clip = clipboardManager.getText()?.text
                         if (!clip.isNullOrEmpty()) {
-                            insertTextAtCursor(clip)
-                            Toast.makeText(context, "Ditempel dari clipboard", Toast.LENGTH_SHORT).show()
+                            activeSession.sendText(clip)
+                            Toast.makeText(context, "Ditempel ke terminal", Toast.LENGTH_SHORT).show()
                         } else {
                             Toast.makeText(context, "Clipboard kosong", Toast.LENGTH_SHORT).show()
                         }
                     },
-                    modifier = Modifier.size(32.dp)
+                    modifier = Modifier.size(30.dp)
                 ) {
                     Icon(
                         imageVector = Icons.Default.ContentPaste,
                         contentDescription = "Tempel",
                         tint = DevPrimary,
-                        modifier = Modifier.size(18.dp)
+                        modifier = Modifier.size(16.dp)
                     )
                 }
 
-                // Copy All Button
+                // Reset / Clear Screen (Ctrl+L)
                 IconButton(
                     onClick = {
-                        val allText = activeSession.logLines.joinToString("\n") { AnsiParser.stripAnsi(it.text) }
-                        clipboardManager.setText(AnnotatedString(allText))
-                        Toast.makeText(context, "Semua teks terminal disalin", Toast.LENGTH_SHORT).show()
+                        activeSession.sendBytes(byteArrayOf(12)) // Send Ctrl+L
                     },
-                    modifier = Modifier.size(32.dp)
+                    modifier = Modifier.size(30.dp)
                 ) {
                     Icon(
-                        imageVector = Icons.Default.ContentCopy,
-                        contentDescription = "Salin Semua Log",
+                        imageVector = Icons.Default.Refresh,
+                        contentDescription = "Refresh Layar",
                         tint = TerminalText,
-                        modifier = Modifier.size(18.dp)
-                    )
-                }
-
-                // Clear Terminal
-                IconButton(
-                    onClick = {
-                        activeSession.logLines.clear()
-                    },
-                    modifier = Modifier.size(32.dp)
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.DeleteSweep,
-                        contentDescription = "Bersihkan Layar",
-                        tint = TerminalText,
-                        modifier = Modifier.size(18.dp)
+                        modifier = Modifier.size(16.dp)
                     )
                 }
             }
         }
 
-        // Native Interactive Terminal Log Area using TextView with setTextIsSelectable(true)
+        // Native 2D VT100 Matrix Canvas TerminalView (Termux Core Engine)
         AndroidView(
             factory = { ctx ->
-                ScrollView(ctx).apply {
-                    isFillViewport = true
-                    val tv = TextView(ctx).apply {
-                        setTextIsSelectable(true)
-                        typeface = Typeface.MONOSPACE
-                        textSize = 12f
-                        setTextColor(android.graphics.Color.parseColor("#C9D1D9"))
-                        setBackgroundColor(android.graphics.Color.BLACK)
-                        setPadding(20, 14, 20, 14)
-                    }
-                    addView(tv)
-                    textViewRef = tv
-                    scrollViewRef = this
+                TerminalView(ctx, null).apply {
+                    setTextSize(terminalFontSize)
+                    setTypeface(Typeface.MONOSPACE)
+                    setTerminalViewClient(object : TerminalViewClient {
+                        override fun onScale(scale: Float): Float {
+                            return scale
+                        }
+
+                        override fun onSingleTapUp(e: MotionEvent) {
+                            this@apply.requestFocus()
+                            val imm = ctx.getSystemService(Context.INPUT_METHOD_SERVICE) as? InputMethodManager
+                            imm?.showSoftInput(this@apply, InputMethodManager.SHOW_IMPLICIT)
+                        }
+
+                        override fun shouldBackButtonBeMappedToEscape(): Boolean = false
+
+                        // Crucial for FlorisBoard & Gboard: enforce single character raw input without IME word composition
+                        override fun shouldEnforceCharBasedInput(): Boolean = true
+
+                        override fun shouldUseCtrlSpaceWorkaround(): Boolean = false
+
+                        override fun isTerminalViewSelected(): Boolean = true
+
+                        override fun copyModeChanged(copyMode: Boolean) {}
+
+                        override fun onKeyDown(keyCode: Int, e: KeyEvent, session: TerminalSession): Boolean = false
+
+                        override fun onKeyUp(keyCode: Int, e: KeyEvent): Boolean = false
+
+                        override fun onLongPress(event: MotionEvent): Boolean = false
+
+                        override fun readControlKey(): Boolean = isCtrlActive
+
+                        override fun readAltKey(): Boolean = isAltActive
+
+                        override fun readShiftKey(): Boolean = isShiftActive
+
+                        override fun readFnKey(): Boolean = false
+
+                        override fun onCodePoint(codePoint: Int, ctrlDown: Boolean, session: TerminalSession): Boolean {
+                            if (isCtrlActive) isCtrlActive = false
+                            if (isAltActive) isAltActive = false
+                            if (isShiftActive) isShiftActive = false
+                            return false
+                        }
+
+                        override fun onEmulatorSet() {}
+
+                        override fun logError(tag: String, message: String) {
+                            AppLogger.e(tag, message)
+                        }
+
+                        override fun logWarn(tag: String, message: String) {
+                            AppLogger.w(tag, message)
+                        }
+
+                        override fun logInfo(tag: String, message: String) {
+                            AppLogger.i(tag, message)
+                        }
+
+                        override fun logDebug(tag: String, message: String) {}
+
+                        override fun logVerbose(tag: String, message: String) {}
+
+                        override fun logStackTraceWithMessage(tag: String, message: String, e: Exception) {
+                            AppLogger.e(tag, "$message: ${e.message}")
+                        }
+
+                        override fun logStackTrace(tag: String, e: Exception) {
+                            AppLogger.e(tag, "Stack trace: ${e.message}")
+                        }
+                    })
+
+                    terminalViewRef = this
+                    activeSession.termSession?.let { attachSession(it) }
                 }
             },
-            update = { _ ->
-                textViewRef?.let { tv ->
-                    val ssb = AnsiParser.buildSpannable(activeSession.logLines)
-                    tv.text = ssb
+            update = { tv ->
+                terminalViewRef = tv
+                activeSession.termSession?.let { session ->
+                    if (tv.currentSession != session) {
+                        tv.attachSession(session)
+                    }
                 }
             },
             modifier = Modifier
@@ -341,273 +383,161 @@ fun TerminalScreen(
                 .fillMaxWidth()
         )
 
-        // Native Inline Prompt Input Line (Zero Delay, 100% Android Keyboard Compatibility)
+        // Comprehensive Mobile Extra Keys Panel (2 Scrollable Rows for FlorisBoard / Mobile Terminal)
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .background(Color(0xFF070707))
-                .padding(horizontal = 10.dp, vertical = 6.dp)
-        ) {
-            // Top breadcrumb row
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(
-                    text = "┌─[",
-                    fontFamily = FontFamily.Monospace,
-                    fontSize = 11.sp,
-                    color = Color.DarkGray
-                )
-                Text(
-                    text = "coder@devbox",
-                    fontFamily = FontFamily.Monospace,
-                    fontSize = 11.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = TerminalCyan
-                )
-                Text(
-                    text = "]─[",
-                    fontFamily = FontFamily.Monospace,
-                    fontSize = 11.sp,
-                    color = Color.DarkGray
-                )
-                Text(
-                    text = activeSession.getDisplayDir(),
-                    fontFamily = FontFamily.Monospace,
-                    fontSize = 11.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = DevPrimary
-                )
-                Text(
-                    text = "]",
-                    fontFamily = FontFamily.Monospace,
-                    fontSize = 11.sp,
-                    color = Color.DarkGray
-                )
-                if (activeSession.isRunning) {
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Text(
-                        text = "• [RUNNING - stdin aktif]",
-                        fontFamily = FontFamily.Monospace,
-                        fontSize = 10.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = DevPrimary
-                    )
-                }
-            }
-
-            Spacer(modifier = Modifier.height(2.dp))
-
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(
-                    text = "└─❯ ",
-                    fontFamily = FontFamily.Monospace,
-                    fontSize = 13.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = if (activeSession.isRunning) DevPrimary else TerminalGreen
-                )
-
-                BasicTextField(
-                    value = inputState,
-                    onValueChange = { newValue ->
-                        if (newValue.text.contains("\n")) {
-                            val clean = newValue.text.replace("\n", "").trim()
-                            inputState = TextFieldValue(clean)
-                            submitCommand()
-                        } else {
-                            inputState = newValue
-                        }
-                    },
-                    modifier = Modifier
-                        .weight(1f)
-                        .focusRequester(focusRequester)
-                        .onKeyEvent { keyEvent ->
-                            if (keyEvent.type == KeyEventType.KeyDown && (keyEvent.key == Key.Enter || keyEvent.nativeKeyEvent.keyCode == KeyEvent.KEYCODE_ENTER)) {
-                                submitCommand()
-                                true
-                            } else {
-                                false
-                            }
-                        },
-                    textStyle = TextStyle(
-                        fontFamily = FontFamily.Monospace,
-                        fontSize = 13.sp,
-                        color = Color.White
-                    ),
-                    cursorBrush = SolidColor(DevPrimary),
-                    singleLine = false,
-                    maxLines = 1,
-                    keyboardOptions = KeyboardOptions(
-                        imeAction = ImeAction.None,
-                        keyboardType = KeyboardType.Ascii,
-                        autoCorrect = false
-                    ),
-                    keyboardActions = KeyboardActions(
-                        onAny = {
-                            submitCommand()
-                        }
-                    ),
-                    decorationBox = { innerTextField ->
-                        Box(modifier = Modifier.fillMaxWidth()) {
-                            if (inputState.text.isEmpty()) {
-                                Text(
-                                    text = if (activeSession.isRunning) "kirim respon stdin (y/n/teks)..." else "ketik perintah...",
-                                    fontFamily = FontFamily.Monospace,
-                                    fontSize = 11.sp,
-                                    color = Color.DarkGray
-                                )
-                            }
-                            innerTextField()
-                        }
-                    }
-                )
-
-                if (inputState.text.isNotEmpty() || activeSession.isRunning) {
-                    Spacer(modifier = Modifier.width(4.dp))
-                    IconButton(
-                        onClick = { submitCommand() },
-                        modifier = Modifier.size(28.dp)
-                    ) {
-                        Icon(
-                            imageVector = Icons.AutoMirrored.Filled.Send,
-                            contentDescription = "Kirim",
-                            tint = DevPrimary,
-                            modifier = Modifier.size(18.dp)
-                        )
-                    }
-                }
-            }
-        }
-
-        // Termux & Agent CLI Extra Keys Bar
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
                 .background(Color(0xFF0D0D0D))
-                .horizontalScroll(rememberScrollState())
-                .padding(horizontal = 6.dp, vertical = 4.dp),
-            horizontalArrangement = Arrangement.spacedBy(4.dp),
-            verticalAlignment = Alignment.CenterVertically
+                .padding(vertical = 4.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp)
         ) {
-            // ESC
-            TerminalModifierKey(label = "ESC") {
-                if (activeSession.isRunning) {
-                    activeSession.sendInputToProcess("\u001B", appendNewline = false)
-                } else {
-                    if (inputState.text.isNotEmpty()) {
-                        inputState = TextFieldValue("")
-                    }
+            // Row 1: Essential Modifiers, Navigation & Line Controls
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .horizontalScroll(rememberScrollState())
+                    .padding(horizontal = 6.dp),
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                // ESC
+                TerminalModifierKey(label = "ESC") {
+                    activeSession.sendBytes(byteArrayOf(27))
                 }
-                focusRequester.requestFocus()
-            }
 
-            // TAB
-            TerminalModifierKey(label = "TAB") {
-                if (activeSession.isRunning) {
-                    activeSession.sendInputToProcess("\t", appendNewline = false)
-                } else {
-                    insertTextAtCursor("    ")
+                // TAB
+                TerminalModifierKey(label = "TAB") {
+                    activeSession.sendBytes(byteArrayOf(9))
                 }
-                focusRequester.requestFocus()
+
+                // Sticky CTRL
+                TerminalToggleKey(label = "CTRL", isActive = isCtrlActive) {
+                    isCtrlActive = !isCtrlActive
+                }
+
+                // Sticky ALT
+                TerminalToggleKey(label = "ALT", isActive = isAltActive) {
+                    isAltActive = !isAltActive
+                }
+
+                // Sticky SHIFT
+                TerminalToggleKey(label = "SHIFT", isActive = isShiftActive) {
+                    isShiftActive = !isShiftActive
+                }
+
+                // Dedicated ENTER
+                TerminalModifierKey(label = "ENTER", highlight = true) {
+                    activeSession.sendText("\r")
+                }
+
+                // Backspace (⌫)
+                TerminalModifierKey(label = "⌫") {
+                    activeSession.sendBytes(byteArrayOf(127))
+                }
+
+                // Delete forward (DEL)
+                TerminalModifierKey(label = "DEL") {
+                    activeSession.sendText("\u001B[3~")
+                }
+
+                // Arrow Left ◀
+                TerminalModifierKey(label = "◀") {
+                    activeSession.sendText("\u001B[D")
+                }
+
+                // Arrow Down ▼
+                TerminalModifierKey(label = "▼") {
+                    activeSession.sendText("\u001B[B")
+                }
+
+                // Arrow Up ▲
+                TerminalModifierKey(label = "▲") {
+                    activeSession.sendText("\u001B[A")
+                }
+
+                // Arrow Right ▶
+                TerminalModifierKey(label = "▶") {
+                    activeSession.sendText("\u001B[C")
+                }
+
+                // HOME
+                TerminalModifierKey(label = "HOME") {
+                    activeSession.sendText("\u001B[H")
+                }
+
+                // END
+                TerminalModifierKey(label = "END") {
+                    activeSession.sendText("\u001B[F")
+                }
+
+                // PGUP
+                TerminalModifierKey(label = "PGUP") {
+                    activeSession.sendText("\u001B[5~")
+                }
+
+                // PGDN
+                TerminalModifierKey(label = "PGDN") {
+                    activeSession.sendText("\u001B[6~")
+                }
             }
 
-            // ENTER
-            TerminalModifierKey(label = "ENTER") {
-                submitCommand()
-            }
-
-            // CTRL Toggle
-            TerminalToggleKey(label = "CTRL", isActive = isCtrlActive) {
-                isCtrlActive = !isCtrlActive
-            }
-
-            // ALT Toggle
-            TerminalToggleKey(label = "ALT", isActive = isAltActive) {
-                isAltActive = !isAltActive
-            }
-
-            // SHIFT Toggle
-            TerminalToggleKey(label = "SHIFT", isActive = isShiftActive) {
-                isShiftActive = !isShiftActive
-            }
-
-            // Dedicated Ctrl+C Button
-            TerminalModifierKey(label = "Ctrl+C") {
-                if (activeSession.isRunning) {
+            // Row 2: POSIX Signals, Shortcuts & Programming Symbols
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .horizontalScroll(rememberScrollState())
+                    .padding(horizontal = 6.dp),
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                // Ctrl+C (Dedicated SIGINT Kill)
+                TerminalModifierKey(label = "Ctrl+C", isSignal = true) {
                     activeSession.cancelActiveProcess()
-                    Toast.makeText(context, "Proses dibatalkan (SIGINT)", Toast.LENGTH_SHORT).show()
-                } else {
-                    activeSession.logLines.add(TerminalLine("^C", LineType.SYSTEM))
-                    inputState = TextFieldValue("")
+                    Toast.makeText(context, "SIGINT (Ctrl+C) terkirim", Toast.LENGTH_SHORT).show()
                 }
-                focusRequester.requestFocus()
-            }
 
-            // Arrow Left ◀
-            TerminalModifierKey(label = "◀") {
-                if (activeSession.isRunning && inputState.text.isEmpty()) {
-                    activeSession.sendInputToProcess("\u001B[D", appendNewline = false)
-                } else {
-                    val pos = inputState.selection.start
-                    if (pos > 0) {
-                        inputState = inputState.copy(selection = TextRange(pos - 1))
+                // Ctrl+Z (SIGTSTP Suspend)
+                TerminalModifierKey(label = "Ctrl+Z") {
+                    activeSession.sendBytes(byteArrayOf(26))
+                }
+
+                // Ctrl+D (EOF / Logout)
+                TerminalModifierKey(label = "Ctrl+D") {
+                    activeSession.sendBytes(byteArrayOf(4))
+                }
+
+                // Ctrl+L (Clear Screen)
+                TerminalModifierKey(label = "Ctrl+L") {
+                    activeSession.sendBytes(byteArrayOf(12))
+                }
+
+                // Ctrl+A (Jump to beginning of line)
+                TerminalModifierKey(label = "Ctrl+A") {
+                    activeSession.sendBytes(byteArrayOf(1))
+                }
+
+                // Ctrl+E (Jump to end of line)
+                TerminalModifierKey(label = "Ctrl+E") {
+                    activeSession.sendBytes(byteArrayOf(5))
+                }
+
+                // Ctrl+R (Reverse history search)
+                TerminalModifierKey(label = "Ctrl+R") {
+                    activeSession.sendBytes(byteArrayOf(18))
+                }
+
+                // Shell & Programming Symbols
+                val symbols = listOf(
+                    "~", "/", "-", "_", "|", "$", "=", ":", ";",
+                    "&", "*", "\\", "\"", "'", "`", "<", ">", "!",
+                    "?", "(", ")", "[", "]", "{", "}"
+                )
+                symbols.forEach { sym ->
+                    TerminalModifierKey(label = sym) {
+                        activeSession.sendText(sym)
                     }
                 }
-                focusRequester.requestFocus()
             }
-
-            // Arrow Right ▶
-            TerminalModifierKey(label = "▶") {
-                if (activeSession.isRunning && inputState.text.isEmpty()) {
-                    activeSession.sendInputToProcess("\u001B[C", appendNewline = false)
-                } else {
-                    val pos = inputState.selection.end
-                    if (pos < inputState.text.length) {
-                        inputState = inputState.copy(selection = TextRange(pos + 1))
-                    }
-                }
-                focusRequester.requestFocus()
-            }
-
-            // Arrow Up ▲
-            TerminalModifierKey(label = "▲") {
-                if (activeSession.isRunning) {
-                    activeSession.sendInputToProcess("\u001B[A", appendNewline = false)
-                } else {
-                    if (activeSession.history.isNotEmpty()) {
-                        activeSession.historyIndex = (activeSession.historyIndex - 1).coerceAtLeast(0)
-                        val cmd = activeSession.history[activeSession.historyIndex]
-                        inputState = TextFieldValue(text = cmd, selection = TextRange(cmd.length))
-                    }
-                }
-                focusRequester.requestFocus()
-            }
-
-            // Arrow Down ▼
-            TerminalModifierKey(label = "▼") {
-                if (activeSession.isRunning) {
-                    activeSession.sendInputToProcess("\u001B[B", appendNewline = false)
-                } else {
-                    if (activeSession.history.isNotEmpty()) {
-                        activeSession.historyIndex = (activeSession.historyIndex + 1).coerceAtMost(activeSession.history.size)
-                        val cmd = if (activeSession.historyIndex < activeSession.history.size) {
-                            activeSession.history[activeSession.historyIndex]
-                        } else {
-                            ""
-                        }
-                        inputState = TextFieldValue(text = cmd, selection = TextRange(cmd.length))
-                    }
-                }
-                focusRequester.requestFocus()
-            }
-
-            // Symbols
-            TerminalModifierKey(label = "~") { insertTextAtCursor("~") }
-            TerminalModifierKey(label = "/") { insertTextAtCursor("/") }
-            TerminalModifierKey(label = "-") { insertTextAtCursor("-") }
-            TerminalModifierKey(label = "_") { insertTextAtCursor("_") }
-            TerminalModifierKey(label = "|") { insertTextAtCursor("|") }
-            TerminalModifierKey(label = "=") { insertTextAtCursor("=") }
-            TerminalModifierKey(label = ":") { insertTextAtCursor(":") }
-            TerminalModifierKey(label = "$") { insertTextAtCursor("$") }
         }
     }
 }
@@ -615,8 +545,22 @@ fun TerminalScreen(
 @Composable
 fun TerminalModifierKey(
     label: String,
+    highlight: Boolean = false,
+    isSignal: Boolean = false,
     onClick: () -> Unit
 ) {
+    val containerBg = when {
+        isSignal -> Color(0xFF3E1214)
+        highlight -> DevPrimary.copy(alpha = 0.25f)
+        else -> Color(0xFF1C1C1C)
+    }
+
+    val textColor = when {
+        isSignal -> Color(0xFFFF7B72)
+        highlight -> DevPrimary
+        else -> Color.White
+    }
+
     FilterChip(
         selected = false,
         onClick = onClick,
@@ -627,11 +571,11 @@ fun TerminalModifierKey(
                 fontSize = 11.sp,
                 fontWeight = FontWeight.Bold,
                 fontFamily = FontFamily.Monospace,
-                color = Color.White
+                color = textColor
             )
         },
         colors = FilterChipDefaults.filterChipColors(
-            containerColor = Color(0xFF1C1C1C)
+            containerColor = containerBg
         )
     )
 }
