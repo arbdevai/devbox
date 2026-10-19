@@ -7,6 +7,7 @@ import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import com.arbdev.devbox.data.ChrootManager
+import com.arbdev.devbox.util.AnsiParser
 import com.arbdev.devbox.util.AppLogger
 import com.arbdev.devbox.util.LineType
 import com.arbdev.devbox.util.TerminalLine
