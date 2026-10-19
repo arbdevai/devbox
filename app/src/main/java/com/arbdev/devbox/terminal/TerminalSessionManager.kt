@@ -213,4 +213,8 @@ object TerminalSessionManager {
         sessions.clear()
         activeIndex.intValue = 0
     }
+
+    fun terminateAll() {
+        destroyAll()
+    }
 }
