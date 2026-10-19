@@ -77,9 +77,25 @@ object UpdateManager {
     private val _updateStatus = MutableStateFlow<UpdateStatus>(UpdateStatus.Idle)
     val updateStatus: StateFlow<UpdateStatus> = _updateStatus.asStateFlow()
 
-    private var activeDownloadId: Long = -1L
+    fun cleanupOldApks(context: Context, keepVersion: String? = null) {
+        try {
+            val downloadDir = context.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS)
+                ?: context.cacheDir
+            val keepFileName = if (keepVersion != null) "devbox-$keepVersion.apk" else null
 
-    suspend fun checkForUpdates(): Result<UpdateInfo> = withContext(Dispatchers.IO) {
+            downloadDir.listFiles { file -> file.isFile && (file.name.endsWith(".apk") || file.name.startsWith("devbox-")) }?.forEach { file ->
+                if (keepFileName == null || file.name != keepFileName) {
+                    val sizeMb = file.length() / (1024.0 * 1024.0)
+                    val deleted = file.delete()
+                    AppLogger.i("UpdateManager", "Membersihkan file APK usang: ${file.name} (%.2f MB, terhapus: $deleted)".format(sizeMb))
+                }
+            }
+        } catch (e: Exception) {
+            AppLogger.w("UpdateManager", "Gagal membersihkan APK lama: ${e.message}")
+        }
+    }
+
+    suspend fun checkForUpdates(context: Context? = null): Result<UpdateInfo> = withContext(Dispatchers.IO) {
         _updateStatus.value = UpdateStatus.Checking
         AppLogger.i("UpdateManager", "Memeriksa pembaruan dari $API_URL...")
 
@@ -124,8 +140,14 @@ object UpdateManager {
 
             if (info.hasUpdate) {
                 _updateStatus.value = UpdateStatus.Available(info)
+                if (context != null) {
+                    cleanupOldApks(context, keepVersion = info.latestVersion)
+                }
             } else {
                 _updateStatus.value = UpdateStatus.Idle
+                if (context != null) {
+                    cleanupOldApks(context, keepVersion = null)
+                }
             }
 
             Result.success(info)
@@ -155,6 +177,8 @@ object UpdateManager {
     }
 
     suspend fun startDownload(context: Context, info: UpdateInfo) = withContext(Dispatchers.IO) {
+        cleanupOldApks(context, keepVersion = info.latestVersion)
+
         val downloadDir = context.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS)
             ?: context.cacheDir
 

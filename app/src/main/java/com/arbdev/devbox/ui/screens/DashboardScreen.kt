@@ -113,8 +113,8 @@ fun DashboardScreen(
 
     LaunchedEffect(Unit) {
         refreshState()
-        // Cek update otomatis di background
-        UpdateManager.checkForUpdates()
+        // Cek update otomatis di background & bersihkan APK usang
+        UpdateManager.checkForUpdates(context)
     }
 
     Column(
@@ -149,7 +149,7 @@ fun DashboardScreen(
                     onClick = {
                         scope.launch {
                             Toast.makeText(context, "Memeriksa pembaruan...", Toast.LENGTH_SHORT).show()
-                            UpdateManager.checkForUpdates()
+                            UpdateManager.checkForUpdates(context)
                         }
                     }
                 ) {
