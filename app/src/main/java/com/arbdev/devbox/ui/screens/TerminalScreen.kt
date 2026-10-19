@@ -57,8 +57,7 @@ import androidx.compose.ui.input.key.type
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalSoftwareKeyboardController
-import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -96,7 +95,8 @@ fun TerminalScreen(
     var isShiftActive by remember { mutableStateOf(false) }
 
     // Input state untuk Compose BasicTextField (menangani FlorisBoard, Gboard, dll.)
-    var inputTfv by remember { mutableStateOf(TextFieldValue("")) }
+    val zeroWidthPrefix = "\u200B"
+    var inputTfv by remember { mutableStateOf(TextFieldValue(zeroWidthPrefix, TextRange(zeroWidthPrefix.length))) }
     val focusRequester = remember { FocusRequester() }
 
     val verticalScrollState = rememberScrollState()
@@ -344,34 +344,37 @@ fun TerminalScreen(
         BasicTextField(
             value = inputTfv,
             onValueChange = { newTfv ->
-                val text = newTfv.text
-                if (text.isNotEmpty()) {
-                    if (isCtrlActive) {
-                        for (ch in text) {
-                            val code = when (ch.lowercaseChar()) {
-                                'c' -> 3
-                                'd' -> 4
-                                'z' -> 26
-                                'l' -> 12
-                                'a' -> 1
-                                'e' -> 5
-                                'u' -> 21
-                                'k' -> 11
-                                'w' -> 23
-                                in 'a'..'z' -> (ch.lowercaseChar() - 'a' + 1)
-                                else -> ch.code
-                            }
-                            activeSession.sendBytes(byteArrayOf(code.toByte()))
-                        }
-                        isCtrlActive = false
-                    } else {
-                        activeSession.sendText(text)
-                    }
-                    inputTfv = TextFieldValue("")
-                } else {
-                    // Backspace pada keyboard virtual
+                val newText = newTfv.text
+                if (newText.length < zeroWidthPrefix.length || !newText.startsWith(zeroWidthPrefix)) {
+                    // Tombol hapus (Backspace) ditekan pada FlorisBoard / keyboard virtual
                     activeSession.sendBytes(byteArrayOf(127))
-                    inputTfv = TextFieldValue("")
+                    inputTfv = TextFieldValue(zeroWidthPrefix, TextRange(zeroWidthPrefix.length))
+                } else {
+                    val typed = newText.removePrefix(zeroWidthPrefix)
+                    if (typed.isNotEmpty()) {
+                        if (isCtrlActive) {
+                            for (ch in typed) {
+                                val code = when (ch.lowercaseChar()) {
+                                    'c' -> 3
+                                    'd' -> 4
+                                    'z' -> 26
+                                    'l' -> 12
+                                    'a' -> 1
+                                    'e' -> 5
+                                    'u' -> 21
+                                    'k' -> 11
+                                    'w' -> 23
+                                    in 'a'..'z' -> (ch.lowercaseChar() - 'a' + 1)
+                                    else -> ch.code
+                                }
+                                activeSession.sendBytes(byteArrayOf(code.toByte()))
+                            }
+                            isCtrlActive = false
+                        } else {
+                            activeSession.sendText(typed)
+                        }
+                        inputTfv = TextFieldValue(zeroWidthPrefix, TextRange(zeroWidthPrefix.length))
+                    }
                 }
             },
             modifier = Modifier
