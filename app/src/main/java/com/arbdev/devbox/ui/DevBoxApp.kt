@@ -7,6 +7,7 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.togetherWith
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.isImeVisible
@@ -50,6 +51,7 @@ enum class DevBoxTab(val title: String, val icon: ImageVector) {
     PREVIEW("Preview", Icons.Default.Language)
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun DevBoxApp() {
     var selectedTab by remember { mutableStateOf(DevBoxTab.DASHBOARD) }
