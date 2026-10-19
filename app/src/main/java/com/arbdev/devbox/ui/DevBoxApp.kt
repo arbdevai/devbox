@@ -10,6 +10,7 @@ import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.BugReport
 import androidx.compose.material.icons.filled.Code
 import androidx.compose.material.icons.filled.Dns
 import androidx.compose.material.icons.filled.Language
@@ -30,6 +31,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import com.arbdev.devbox.ui.screens.DashboardScreen
+import com.arbdev.devbox.ui.screens.LogScreen
 import com.arbdev.devbox.ui.screens.TerminalScreen
 import com.arbdev.devbox.ui.screens.WebIdeScreen
 import com.arbdev.devbox.ui.screens.WebPreviewScreen
@@ -40,6 +42,7 @@ import com.arbdev.devbox.ui.theme.DevSurface
 enum class DevBoxTab(val title: String, val icon: ImageVector) {
     DASHBOARD("Status", Icons.Default.Dns),
     TERMINAL("Terminal", Icons.Default.Terminal),
+    LOGS("Log", Icons.Default.BugReport),
     IDE("Web IDE", Icons.Default.Code),
     PREVIEW("Preview", Icons.Default.Language)
 }
@@ -110,6 +113,10 @@ fun DevBoxApp() {
                     onNavigateToIde = {
                         previousTabIndex = selectedTab.ordinal
                         selectedTab = DevBoxTab.IDE
+                    },
+                    onNavigateToLogs = {
+                        previousTabIndex = selectedTab.ordinal
+                        selectedTab = DevBoxTab.LOGS
                     }
                 )
                 DevBoxTab.TERMINAL -> {
@@ -117,6 +124,7 @@ fun DevBoxApp() {
                     pendingTerminalCommand = null
                     TerminalScreen(initialCommand = cmd)
                 }
+                DevBoxTab.LOGS -> LogScreen()
                 DevBoxTab.IDE -> WebIdeScreen()
                 DevBoxTab.PREVIEW -> WebPreviewScreen()
             }

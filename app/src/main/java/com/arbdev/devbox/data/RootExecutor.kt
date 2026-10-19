@@ -1,5 +1,6 @@
 package com.arbdev.devbox.data
 
+import com.arbdev.devbox.util.AppLogger
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.BufferedReader
@@ -19,8 +20,15 @@ object RootExecutor {
             val process = ProcessBuilder("su", "-c", "id").start()
             val stdout = process.inputStream.bufferedReader().use(BufferedReader::readText)
             val exit = process.waitFor()
-            exit == 0 && stdout.contains("uid=0")
-        } catch (_: Exception) {
+            val available = exit == 0 && stdout.contains("uid=0")
+            if (available) {
+                AppLogger.i("RootExecutor", "Akses root (su) terverifikasi: $stdout")
+            } else {
+                AppLogger.w("RootExecutor", "Akses root gagal / ditolak (exit: $exit, out: $stdout)")
+            }
+            available
+        } catch (e: Exception) {
+            AppLogger.e("RootExecutor", "Exception saat cek su", e)
             false
         }
     }
@@ -35,8 +43,11 @@ object RootExecutor {
             val stdout = process.inputStream.bufferedReader().use(BufferedReader::readText)
             val stderr = process.errorStream.bufferedReader().use(BufferedReader::readText)
             val exitCode = process.waitFor()
-            Result.success(CommandResult(exitCode, stdout.trim(), stderr.trim()))
+            val res = CommandResult(exitCode, stdout.trim(), stderr.trim())
+            AppLogger.cmd(command, exitCode, res.stdout, res.stderr)
+            Result.success(res)
         } catch (e: Exception) {
+            AppLogger.e("RootExecutor", "Gagal mengeksekusi perintah: $command", e)
             Result.failure(e)
         }
     }
@@ -45,6 +56,7 @@ object RootExecutor {
         command: String,
         onOutputLine: (String) -> Unit
     ): Int = withContext(Dispatchers.IO) {
+        AppLogger.i("RootExecutor", "Memulai stream eksekusi: $command")
         try {
             val process = ProcessBuilder("su", "-c", command)
                 .redirectErrorStream(true)
@@ -53,12 +65,19 @@ object RootExecutor {
             process.inputStream.bufferedReader().use { reader ->
                 var line: String?
                 while (reader.readLine().also { line = it } != null) {
-                    line?.let { onOutputLine(it) }
+                    line?.let {
+                        AppLogger.i("Stream", it)
+                        onOutputLine(it)
+                    }
                 }
             }
-            process.waitFor()
+            val exit = process.waitFor()
+            AppLogger.i("RootExecutor", "Stream selesai (exit: $exit): $command")
+            exit
         } catch (e: Exception) {
-            onOutputLine("Error: ${e.localizedMessage}")
+            val errMsg = "Error: ${e.localizedMessage}"
+            AppLogger.e("RootExecutor", errMsg, e)
+            onOutputLine(errMsg)
             -1
         }
     }

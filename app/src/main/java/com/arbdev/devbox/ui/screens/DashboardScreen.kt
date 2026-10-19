@@ -1,6 +1,7 @@
 package com.arbdev.devbox.ui.screens
 
 import android.app.Activity
+import android.widget.Toast
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
@@ -20,25 +21,36 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Build
+import androidx.compose.material.icons.filled.Assessment
+import androidx.compose.material.icons.filled.BugReport
+import androidx.compose.material.icons.filled.CloudDownload
 import androidx.compose.material.icons.filled.Code
+import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Dns
+import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.PowerSettingsNew
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.SystemUpdate
 import androidx.compose.material.icons.filled.Terminal
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -63,12 +75,17 @@ import com.arbdev.devbox.ui.theme.DevSecondary
 import com.arbdev.devbox.ui.theme.DevSuccess
 import com.arbdev.devbox.ui.theme.DevSurfaceVariant
 import com.arbdev.devbox.ui.theme.DevWarning
+import com.arbdev.devbox.updater.UpdateInfo
+import com.arbdev.devbox.updater.UpdateManager
+import com.arbdev.devbox.updater.UpdateStatus
+import com.arbdev.devbox.util.AppLogger
 import kotlinx.coroutines.launch
 
 @Composable
 fun DashboardScreen(
     onNavigateToTerminal: (initialCommand: String?) -> Unit,
-    onNavigateToIde: () -> Unit
+    onNavigateToIde: () -> Unit,
+    onNavigateToLogs: () -> Unit
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -76,6 +93,14 @@ fun DashboardScreen(
     var isRefreshing by remember { mutableStateOf(false) }
     var wakeLockActive by remember { mutableStateOf(KeepAliveService.isRunning) }
     var actionMessage by remember { mutableStateOf<String?>(null) }
+    var isOperating by remember { mutableStateOf(false) }
+
+    // Dialog Custom Rootfs Path
+    var showCustomPathDialog by remember { mutableStateOf(false) }
+    var tempPathInput by remember { mutableStateOf(ChrootManager.activeRootfs) }
+
+    // In-App Updater State
+    val updateStatus by UpdateManager.updateStatus.collectAsState()
 
     fun refreshState() {
         scope.launch {
@@ -88,6 +113,8 @@ fun DashboardScreen(
 
     LaunchedEffect(Unit) {
         refreshState()
+        // Cek update otomatis di background
+        UpdateManager.checkForUpdates()
     }
 
     Column(
@@ -112,22 +139,105 @@ fun DashboardScreen(
                 )
                 Text(
                     text = "Standalone Linux Container & AI Agent CLI",
-                    fontSize = 14.sp,
+                    fontSize = 13.sp,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
-            IconButton(
-                onClick = { refreshState() }
-            ) {
-                Icon(
-                    imageVector = Icons.Default.Refresh,
-                    contentDescription = "Segarkan",
-                    tint = DevPrimary
-                )
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                // In-App Update Icon Button
+                IconButton(
+                    onClick = {
+                        scope.launch {
+                            Toast.makeText(context, "Memeriksa pembaruan...", Toast.LENGTH_SHORT).show()
+                            UpdateManager.checkForUpdates()
+                        }
+                    }
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.SystemUpdate,
+                        contentDescription = "Cek Pembaruan",
+                        tint = DevPrimary
+                    )
+                }
+
+                // Refresh Button
+                IconButton(onClick = { refreshState() }) {
+                    Icon(
+                        imageVector = Icons.Default.Refresh,
+                        contentDescription = "Segarkan",
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
             }
         }
 
-        Spacer(modifier = Modifier.height(16.dp))
+        Spacer(modifier = Modifier.height(14.dp))
+
+        // In-App Update Notification Card
+        when (val status = updateStatus) {
+            is UpdateStatus.Available -> {
+                UpdateBannerCard(
+                    info = status.info,
+                    onUpdateClick = {
+                        scope.launch {
+                            UpdateManager.startDownload(context, status.info)
+                        }
+                    }
+                )
+                Spacer(modifier = Modifier.height(12.dp))
+            }
+            is UpdateStatus.Downloading -> {
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = CardDefaults.cardColors(containerColor = Color(0xFF141414)),
+                    shape = RoundedCornerShape(12.dp)
+                ) {
+                    Column(modifier = Modifier.padding(14.dp)) {
+                        Text(
+                            text = "Mengunduh Pembaruan (${status.progressPercent}%)",
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = DevPrimary
+                        )
+                        Spacer(modifier = Modifier.height(8.dp))
+                        LinearProgressIndicator(
+                            progress = { status.progressPercent / 100f },
+                            modifier = Modifier.fillMaxWidth(),
+                            color = DevPrimary
+                        )
+                    }
+                }
+                Spacer(modifier = Modifier.height(12.dp))
+            }
+            is UpdateStatus.ReadyToInstall -> {
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = CardDefaults.cardColors(containerColor = Color(0xFF141414)),
+                    shape = RoundedCornerShape(12.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.padding(14.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "Pembaruan Siap Dipasang",
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = DevSuccess
+                        )
+                        Button(
+                            onClick = { UpdateManager.installApk(context, status.apkFile) },
+                            colors = ButtonDefaults.buttonColors(containerColor = DevSuccess)
+                        ) {
+                            Text("Pasang APK", color = Color.Black, fontWeight = FontWeight.Bold)
+                        }
+                    }
+                }
+                Spacer(modifier = Modifier.height(12.dp))
+            }
+            else -> {}
+        }
 
         // Action Message Banner
         AnimatedVisibility(visible = actionMessage != null) {
@@ -151,27 +261,115 @@ fun DashboardScreen(
         // Status Card
         StatusCard(state = state)
 
-        // Bootstrap Rootfs Button if not present
+        // ROOTFS SETUP OPTIONS IF NOT INSTALLED
         if (!state.isRootfsExists && state.isRootGranted) {
-            Spacer(modifier = Modifier.height(12.dp))
-            Button(
-                onClick = {
-                    scope.launch {
-                        actionMessage = "Menginisialisasi direktori rootfs di ${ChrootManager.DEFAULT_ROOTFS}..."
-                        val res = ChrootManager.initDevboxRootfs()
-                        actionMessage = res.getOrNull() ?: res.exceptionOrNull()?.message
-                        refreshState()
-                    }
-                },
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(48.dp),
-                shape = RoundedCornerShape(12.dp),
-                colors = ButtonDefaults.buttonColors(containerColor = DevWarning)
+            Spacer(modifier = Modifier.height(14.dp))
+
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                colors = CardDefaults.cardColors(containerColor = Color(0xFF101010)),
+                shape = RoundedCornerShape(16.dp),
+                border = BorderStroke(1.dp, DevWarning.copy(alpha = 0.5f))
             ) {
-                Icon(Icons.Default.Build, contentDescription = null, tint = Color.Black)
-                Spacer(modifier = Modifier.width(8.dp))
-                Text("Inisialisasi Direktori Rootfs DevBox", color = Color.Black, fontWeight = FontWeight.Bold)
+                Column(modifier = Modifier.padding(16.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(Icons.Default.Folder, contentDescription = null, tint = DevWarning)
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = "Pemasangan Rootfs Mandiri",
+                            fontSize = 15.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Color.White
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.height(6.dp))
+
+                    Text(
+                        text = "Direktori target (${ChrootManager.activeRootfs}) belum memiliki binary sistem Linux (/bin/bash). Pilih salah satu metode di bawah:",
+                        fontSize = 12.sp,
+                        color = Color.LightGray
+                    )
+
+                    Spacer(modifier = Modifier.height(14.dp))
+
+                    // Option 1: Clone from existing local chroot
+                    Button(
+                        onClick = {
+                            scope.launch {
+                                isOperating = true
+                                actionMessage = "Menyalin dari /data/local/ubuntu-chroot ke ${ChrootManager.activeRootfs}..."
+                                val res = ChrootManager.cloneExistingChroot(
+                                    sourceChroot = "/data/local/ubuntu-chroot",
+                                    targetRootfs = ChrootManager.activeRootfs
+                                )
+                                actionMessage = res.getOrNull() ?: res.exceptionOrNull()?.message
+                                refreshState()
+                                isOperating = false
+                            }
+                        },
+                        enabled = !isOperating,
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(10.dp),
+                        colors = ButtonDefaults.buttonColors(containerColor = DevPrimary)
+                    ) {
+                        Icon(Icons.Default.ContentCopy, contentDescription = null, tint = Color.Black)
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("1. Kloning dari /data/local/ubuntu-chroot", color = Color.Black, fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                    }
+
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    // Option 2: Download Official Ubuntu 24.04 ARM64
+                    OutlinedButton(
+                        onClick = {
+                            scope.launch {
+                                isOperating = true
+                                actionMessage = "Mengunduh Ubuntu 24.04 ARM64 resmi dari Canonical..."
+                                val res = ChrootManager.downloadUbuntuOfficialRootfs(ChrootManager.activeRootfs)
+                                actionMessage = res.getOrNull() ?: res.exceptionOrNull()?.message
+                                refreshState()
+                                isOperating = false
+                            }
+                        },
+                        enabled = !isOperating,
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(10.dp)
+                    ) {
+                        Icon(Icons.Default.CloudDownload, contentDescription = null, tint = DevSecondary)
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("2. Unduh Ubuntu 24.04 ARM64 Resmi (Canonical)", fontSize = 12.sp)
+                    }
+
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    // Option 3: Change rootfs path / use existing path directly
+                    OutlinedButton(
+                        onClick = {
+                            tempPathInput = ChrootManager.activeRootfs
+                            showCustomPathDialog = true
+                        },
+                        enabled = !isOperating,
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(10.dp)
+                    ) {
+                        Icon(Icons.Default.Folder, contentDescription = null, tint = Color.White)
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("3. Gunakan Path Rootfs Kustom Lain", fontSize = 12.sp)
+                    }
+
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    // View Error Logs Button
+                    TextButton(
+                        onClick = { onNavigateToLogs() },
+                        modifier = Modifier.align(Alignment.End)
+                    ) {
+                        Icon(Icons.Default.BugReport, contentDescription = null, tint = DevWarning, modifier = Modifier.size(16.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text("Buka Log Error & Diagnostik", color = DevWarning, fontSize = 12.sp)
+                    }
+                }
             }
         }
 
@@ -180,32 +378,44 @@ fun DashboardScreen(
         // Quick Primary Launchers
         Row(
             modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(12.dp)
+            horizontalArrangement = Arrangement.spacedBy(10.dp)
         ) {
             Button(
                 onClick = { onNavigateToTerminal(null) },
                 modifier = Modifier
                     .weight(1f)
-                    .height(52.dp),
+                    .height(48.dp),
                 shape = RoundedCornerShape(12.dp),
                 colors = ButtonDefaults.buttonColors(containerColor = DevPrimary)
             ) {
                 Icon(Icons.Default.Terminal, contentDescription = null, tint = Color.Black)
-                Spacer(modifier = Modifier.width(8.dp))
-                Text("Terminal", color = Color.Black, fontWeight = FontWeight.SemiBold)
+                Spacer(modifier = Modifier.width(6.dp))
+                Text("Terminal", color = Color.Black, fontWeight = FontWeight.Bold, fontSize = 13.sp)
             }
 
             Button(
                 onClick = { onNavigateToIde() },
                 modifier = Modifier
                     .weight(1f)
-                    .height(52.dp),
+                    .height(48.dp),
                 shape = RoundedCornerShape(12.dp),
                 colors = ButtonDefaults.buttonColors(containerColor = DevSecondary)
             ) {
                 Icon(Icons.Default.Code, contentDescription = null, tint = Color.Black)
-                Spacer(modifier = Modifier.width(8.dp))
-                Text("Web IDE", color = Color.Black, fontWeight = FontWeight.SemiBold)
+                Spacer(modifier = Modifier.width(6.dp))
+                Text("Web IDE", color = Color.Black, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+            }
+
+            OutlinedButton(
+                onClick = { onNavigateToLogs() },
+                modifier = Modifier
+                    .weight(1f)
+                    .height(48.dp),
+                shape = RoundedCornerShape(12.dp)
+            ) {
+                Icon(Icons.Default.BugReport, contentDescription = null, tint = DevWarning)
+                Spacer(modifier = Modifier.width(6.dp))
+                Text("Log", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 13.sp)
             }
         }
 
@@ -219,7 +429,7 @@ fun DashboardScreen(
             color = MaterialTheme.colorScheme.onBackground
         )
 
-        Spacer(modifier = Modifier.height(12.dp))
+        Spacer(modifier = Modifier.height(10.dp))
 
         Card(
             modifier = Modifier.fillMaxWidth(),
@@ -235,7 +445,7 @@ fun DashboardScreen(
                     isChecked = state.isMounted,
                     onCheckedChange = { enable ->
                         scope.launch {
-                            actionMessage = if (enable) "Memasang mount chroot DevBox..." else "Membersihkan mount chroot DevBox..."
+                            actionMessage = if (enable) "Memasang mount container..." else "Membersihkan mount container..."
                             if (enable) ChrootManager.mountAll() else ChrootManager.unmountAll()
                             refreshState()
                             actionMessage = null
@@ -267,7 +477,7 @@ fun DashboardScreen(
                 ControlRow(
                     icon = Icons.Default.PowerSettingsNew,
                     title = "Background CPU WakeLock",
-                    subtitle = if (wakeLockActive) "CPU aktif saat layar mati (ada tombol exit di notifikasi)" else "Hemat baterai (CPU sleep)",
+                    subtitle = if (wakeLockActive) "CPU aktif saat layar mati (notifikasi status bar aktif)" else "Hemat baterai (CPU sleep)",
                     isChecked = wakeLockActive,
                     onCheckedChange = { enable ->
                         if (enable) {
@@ -285,13 +495,13 @@ fun DashboardScreen(
 
         // System Telemetry Card
         Text(
-            text = "Telemetri Sistem",
+            text = "Telemetri Sistem & Jalur Rootfs",
             fontSize = 16.sp,
             fontWeight = FontWeight.SemiBold,
             color = MaterialTheme.colorScheme.onBackground
         )
 
-        Spacer(modifier = Modifier.height(12.dp))
+        Spacer(modifier = Modifier.height(10.dp))
 
         Card(
             modifier = Modifier.fillMaxWidth(),
@@ -303,45 +513,9 @@ fun DashboardScreen(
                 Spacer(modifier = Modifier.height(8.dp))
                 MetricRow(label = "Swap Terpakai", value = "${state.swapUsedMb} MB")
                 Spacer(modifier = Modifier.height(8.dp))
-                MetricRow(label = "Proses DevBox", value = "${state.activeProcesses} proses")
+                MetricRow(label = "Proses Container", value = "${state.activeProcesses} proses")
                 Spacer(modifier = Modifier.height(8.dp))
-                MetricRow(label = "Rootfs Path Mandiri", value = ChrootManager.DEFAULT_ROOTFS)
-            }
-        }
-
-        Spacer(modifier = Modifier.height(20.dp))
-
-        // Standalone Terminal Shortcuts
-        Text(
-            text = "Pintasan Perintah Cepat",
-            fontSize = 16.sp,
-            fontWeight = FontWeight.SemiBold,
-            color = MaterialTheme.colorScheme.onBackground
-        )
-
-        Spacer(modifier = Modifier.height(10.dp))
-
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            OutlinedButton(
-                onClick = { onNavigateToTerminal("uname -a") },
-                shape = RoundedCornerShape(8.dp)
-            ) {
-                Text("uname -a", fontSize = 12.sp, fontFamily = FontFamily.Monospace)
-            }
-            OutlinedButton(
-                onClick = { onNavigateToTerminal("df -h") },
-                shape = RoundedCornerShape(8.dp)
-            ) {
-                Text("df -h", fontSize = 12.sp, fontFamily = FontFamily.Monospace)
-            }
-            OutlinedButton(
-                onClick = { onNavigateToTerminal("ps aux") },
-                shape = RoundedCornerShape(8.dp)
-            ) {
-                Text("ps aux", fontSize = 12.sp, fontFamily = FontFamily.Monospace)
+                MetricRow(label = "Jalur Rootfs Aktif", value = ChrootManager.activeRootfs)
             }
         }
 
@@ -365,6 +539,98 @@ fun DashboardScreen(
             Text("Matikan DevBox & Keluar Total", fontWeight = FontWeight.SemiBold)
         }
     }
+
+    // Custom Path Dialog
+    if (showCustomPathDialog) {
+        AlertDialog(
+            onDismissRequest = { showCustomPathDialog = false },
+            title = { Text("Ubah Jalur Rootfs Target") },
+            text = {
+                Column {
+                    Text(
+                        text = "Masukkan path absolut direktori rootfs di perangkat Anda:",
+                        fontSize = 13.sp,
+                        color = Color.LightGray
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    OutlinedTextField(
+                        value = tempPathInput,
+                        onValueChange = { tempPathInput = it },
+                        modifier = Modifier.fillMaxWidth(),
+                        singleLine = true,
+                        textStyle = androidx.compose.ui.text.TextStyle(fontFamily = FontFamily.Monospace, fontSize = 12.sp),
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedBorderColor = DevPrimary,
+                            unfocusedBorderColor = Color.DarkGray
+                        )
+                    )
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        val trimmed = tempPathInput.trim()
+                        if (trimmed.startsWith("/")) {
+                            ChrootManager.activeRootfs = trimmed
+                            AppLogger.i("ChrootManager", "Jalur rootfs diubah ke: $trimmed")
+                            refreshState()
+                            showCustomPathDialog = false
+                        } else {
+                            Toast.makeText(context, "Path harus diawali dengan /", Toast.LENGTH_SHORT).show()
+                        }
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = DevPrimary)
+                ) {
+                    Text("Terapkan", color = Color.Black, fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showCustomPathDialog = false }) {
+                    Text("Batal", color = Color.White)
+                }
+            }
+        )
+    }
+}
+
+@Composable
+fun UpdateBannerCard(
+    info: UpdateInfo,
+    onUpdateClick: () -> Unit
+) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(containerColor = Color(0xFF0F1E14)),
+        shape = RoundedCornerShape(14.dp),
+        border = BorderStroke(1.dp, DevSuccess.copy(alpha = 0.6f))
+    ) {
+        Row(
+            modifier = Modifier.padding(14.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = "Pembaruan Tersedia: ${info.latestVersion}",
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = DevSuccess
+                )
+                Text(
+                    text = "Versi saat ini: ${info.currentVersion} • Ukuran: ${"%.1f".format(info.apkSizeMb)} MB",
+                    fontSize = 11.sp,
+                    color = Color.LightGray
+                )
+            }
+            Button(
+                onClick = onUpdateClick,
+                colors = ButtonDefaults.buttonColors(containerColor = DevSuccess),
+                shape = RoundedCornerShape(8.dp)
+            ) {
+                Text("Perbarui", color = Color.Black, fontWeight = FontWeight.Bold, fontSize = 12.sp)
+            }
+        }
+    }
 }
 
 @Composable
@@ -377,18 +643,18 @@ fun StatusCard(state: ChrootState) {
         )
         !state.isRootfsExists -> Triple(
             DevWarning,
-            "Rootfs DevBox Belum Terpasang",
-            "Direktori ${ChrootManager.DEFAULT_ROOTFS} belum ada di penyimpanan lokal."
+            "Rootfs Belum Terpasang",
+            "Direktori ${ChrootManager.activeRootfs} belum memiliki binary sistem Linux (/bin/bash)."
         )
         state.isMounted -> Triple(
             DevSuccess,
             "Container DevBox Aktif",
-            "Rootfs mandiri berjalan normal dan terisolasi dari chroot lain."
+            "Rootfs berjalan normal dan siap digunakan."
         )
         else -> Triple(
             DevPrimary,
             "Container DevBox Siap (Standby)",
-            "Rootfs mandiri terverifikasi. Masuk ke Terminal untuk memulai sesi."
+            "Rootfs terverifikasi. Masuk ke Terminal untuk memulai sesi."
         )
     }
 

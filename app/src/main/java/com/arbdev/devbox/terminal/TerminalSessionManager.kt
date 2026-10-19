@@ -4,10 +4,10 @@ import android.util.Base64
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateListOf
 import com.arbdev.devbox.data.ChrootManager
+import com.arbdev.devbox.util.AppLogger
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import java.io.InputStream
@@ -45,6 +45,9 @@ class TerminalSession(
 
     fun start(scope: CoroutineScope) {
         if (isAlive) return
+        val targetRootfs = ChrootManager.activeRootfs
+        AppLogger.i("TerminalSession", "Memulai sesi $name pada rootfs: $targetRootfs")
+
         try {
             val pb = ProcessBuilder("su")
             pb.redirectErrorStream(true)
@@ -56,23 +59,23 @@ class TerminalSession(
 
             // Inisialisasi mount container mandiri devbox-chroot dan jalankan shell interaktif
             val initScript = """
-                mkdir -p /data/local/devbox-chroot/dev /data/local/devbox-chroot/dev/pts /data/local/devbox-chroot/proc /data/local/devbox-chroot/sys /data/local/devbox-chroot/mnt/sdcard /data/local/devbox-chroot/tmp
-                chmod 1777 /data/local/devbox-chroot/tmp 2>/dev/null || true
-                mountpoint -q /data/local/devbox-chroot/dev || mount --bind /dev /data/local/devbox-chroot/dev
-                mountpoint -q /data/local/devbox-chroot/dev/pts || mount -t devpts devpts /data/local/devbox-chroot/dev/pts
-                mountpoint -q /data/local/devbox-chroot/proc || mount -t proc proc /data/local/devbox-chroot/proc
-                mountpoint -q /data/local/devbox-chroot/sys || mount -t sysfs sysfs /data/local/devbox-chroot/sys
-                mountpoint -q /data/local/devbox-chroot/mnt/sdcard || mount --bind /sdcard /data/local/devbox-chroot/mnt/sdcard
-                grep -qE '^127\.0\.0\.1[[:space:]]+localhost' /data/local/devbox-chroot/etc/hosts 2>/dev/null || echo '127.0.0.1 localhost' >> /data/local/devbox-chroot/etc/hosts 2>/dev/null || true
+                mkdir -p '$targetRootfs/dev' '$targetRootfs/dev/pts' '$targetRootfs/proc' '$targetRootfs/sys' '$targetRootfs/mnt/sdcard' '$targetRootfs/tmp'
+                chmod 1777 '$targetRootfs/tmp' 2>/dev/null || true
+                mountpoint -q '$targetRootfs/dev' || mount --bind /dev '$targetRootfs/dev'
+                mountpoint -q '$targetRootfs/dev/pts' || mount -t devpts devpts '$targetRootfs/dev/pts'
+                mountpoint -q '$targetRootfs/proc' || mount -t proc proc '$targetRootfs/proc'
+                mountpoint -q '$targetRootfs/sys' || mount -t sysfs sysfs '$targetRootfs/sys'
+                mountpoint -q '$targetRootfs/mnt/sdcard' || mount --bind /sdcard '$targetRootfs/mnt/sdcard'
+                grep -qE '^127\.0\.0\.1[[:space:]]+localhost' '$targetRootfs/etc/hosts' 2>/dev/null || echo '127.0.0.1 localhost' >> '$targetRootfs/etc/hosts' 2>/dev/null || true
                 
-                if [ -x /data/local/devbox-chroot/bin/bash ]; then
-                    chroot /data/local/devbox-chroot /usr/bin/env -i HOME=/home/coder USER=coder LOGNAME=coder SHELL=/bin/bash TERM=xterm-256color PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin /usr/bin/script -q -c "/usr/sbin/runuser -u coder -- /bin/bash -l" /dev/null
-                elif [ -x /data/local/devbox-chroot/bin/sh ]; then
-                    chroot /data/local/devbox-chroot /usr/bin/env -i HOME=/home/coder USER=coder LOGNAME=coder SHELL=/bin/sh TERM=xterm-256color PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin /bin/sh -i
+                if [ -x '$targetRootfs/bin/bash' ] || [ -x '$targetRootfs/usr/bin/bash' ]; then
+                    chroot '$targetRootfs' /usr/bin/env -i HOME=/home/coder USER=coder LOGNAME=coder SHELL=/bin/bash TERM=xterm-256color PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin /usr/bin/script -q -c "/usr/sbin/runuser -u coder -- /bin/bash -l" /dev/null 2>/dev/null || chroot '$targetRootfs' /bin/bash -i
+                elif [ -x '$targetRootfs/bin/sh' ]; then
+                    chroot '$targetRootfs' /usr/bin/env -i HOME=/home/coder USER=coder LOGNAME=coder SHELL=/bin/sh TERM=xterm-256color PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin /bin/sh -i
                 else
                     echo -e "\r\n\033[1;33m[DevBox Container Notice]\033[0m"
-                    echo -e "Direktori rootfs mandiri di \033[1;36m/data/local/devbox-chroot\033[0m belum diinisialisasi."
-                    echo -e "Silakan buka tab \033[1;32mStatus\033[0m untuk mempersiapkan rootfs DevBox."
+                    echo -e "Direktori rootfs di \033[1;36m$targetRootfs\033[0m belum dipasang binary sistem."
+                    echo -e "Silakan buka tab \033[1;32mStatus\033[0m untuk kloning atau unduh Ubuntu resmi."
                     echo -e "Menyediakan emergency shell host...\r\n"
                     /bin/sh -i
                 fi
@@ -101,10 +104,11 @@ class TerminalSession(
                             outputListener?.invoke(b64)
                         }
                     }
-                } catch (_: Exception) {
+                } catch (e: Exception) {
+                    AppLogger.w("TerminalSession", "Reader exception: ${e.message}")
                 } finally {
                     isAlive = false
-                    // Shell keluar (exit). Bersihkan semua sisa proses agent/container
+                    AppLogger.i("TerminalSession", "Sesi $name keluar. Membersihkan sisa container...")
                     ChrootManager.killDevboxProcessesAndUnmountSync()
                     val exitMsg = "\r\n\r\n\u001b[1;31m[Sesi DevBox Berakhir - Semua Proses Container Ditutup]\u001b[0m\r\n"
                     synchronized(bufferLock) {
@@ -116,6 +120,7 @@ class TerminalSession(
             }
         } catch (e: Exception) {
             isAlive = false
+            AppLogger.e("TerminalSession", "Gagal memulai root shell", e)
             val errorMsg = "\r\n\u001b[1;31mGagal menjalankan root shell: ${e.message}\u001b[0m\r\n"
             synchronized(bufferLock) {
                 outputBuffer.append(errorMsg)
@@ -138,7 +143,6 @@ class TerminalSession(
     fun resize(cols: Int, rows: Int) {
         if (!isAlive) return
         try {
-            // Update terminal size via stty command
             val sttyCmd = "stty cols $cols rows $rows 2>/dev/null\n"
             outputStream?.write(sttyCmd.toByteArray(Charsets.UTF_8))
             outputStream?.flush()
