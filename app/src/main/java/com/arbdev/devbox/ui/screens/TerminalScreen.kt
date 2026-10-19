@@ -99,11 +99,17 @@ fun TerminalScreen(
         }
     }
 
+    LaunchedEffect(activeSession) {
+        activeSession.onClipboardCopy = { text ->
+            clipboardManager.setText(AnnotatedString(text))
+            Toast.makeText(context, "Teks disalin ke clipboard", Toast.LENGTH_SHORT).show()
+        }
+    }
+
     Column(
         modifier = Modifier
             .fillMaxSize()
             .background(TerminalBackground)
-            .imePadding()
     ) {
         // Multi-Session Tab Row
         ScrollableTabRow(
@@ -252,6 +258,27 @@ fun TerminalScreen(
                     )
                 }
 
+                // Copy terminal screen transcript
+                IconButton(
+                    onClick = {
+                        val text = activeSession.termSession?.emulator?.screen?.transcriptText
+                        if (!text.isNullOrEmpty()) {
+                            clipboardManager.setText(AnnotatedString(text))
+                            Toast.makeText(context, "Layar terminal disalin ke clipboard", Toast.LENGTH_SHORT).show()
+                        } else {
+                            Toast.makeText(context, "Tidak ada teks untuk disalin", Toast.LENGTH_SHORT).show()
+                        }
+                    },
+                    modifier = Modifier.size(30.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.ContentCopy,
+                        contentDescription = "Salin Layar",
+                        tint = DevPrimary,
+                        modifier = Modifier.size(16.dp)
+                    )
+                }
+
                 // Paste Clipboard directly into active PTY session
                 IconButton(
                     onClick = {
@@ -312,8 +339,8 @@ fun TerminalScreen(
 
                         override fun shouldBackButtonBeMappedToEscape(): Boolean = false
 
-                        // Crucial for FlorisBoard & Gboard: enforce single character raw input without IME word composition
-                        override fun shouldEnforceCharBasedInput(): Boolean = true
+                        // Crucial for FlorisBoard & Gboard: keep false so IME dispatches text normally without double echo or lag
+                        override fun shouldEnforceCharBasedInput(): Boolean = false
 
                         override fun shouldUseCtrlSpaceWorkaround(): Boolean = false
 
@@ -336,9 +363,11 @@ fun TerminalScreen(
                         override fun readFnKey(): Boolean = false
 
                         override fun onCodePoint(codePoint: Int, ctrlDown: Boolean, session: TerminalSession): Boolean {
-                            if (isCtrlActive) isCtrlActive = false
-                            if (isAltActive) isAltActive = false
-                            if (isShiftActive) isShiftActive = false
+                            if (isCtrlActive || isAltActive || isShiftActive) {
+                                isCtrlActive = false
+                                isAltActive = false
+                                isShiftActive = false
+                            }
                             return false
                         }
 
