@@ -112,7 +112,11 @@ fun TerminalScreen(
     fun submitCommand() {
         val text = inputState.text
         if (text.isBlank()) return
-        activeSession.runCommand(text, scope)
+        if (activeSession.isRunning) {
+            activeSession.sendInputToProcess(text)
+        } else {
+            activeSession.runCommand(text, scope)
+        }
         inputState = TextFieldValue("")
         focusRequester.requestFocus()
     }
@@ -311,68 +315,117 @@ fun TerminalScreen(
         )
 
         // Native Inline Prompt Input Line (Zero Delay, 100% Android Keyboard Compatibility)
-        Row(
+        Column(
             modifier = Modifier
                 .fillMaxWidth()
                 .background(Color(0xFF070707))
-                .padding(horizontal = 10.dp, vertical = 6.dp),
-            verticalAlignment = Alignment.CenterVertically
+                .padding(horizontal = 10.dp, vertical = 6.dp)
         ) {
-            Text(
-                text = "coder@devbox:${activeSession.getDisplayDir()}$ ",
-                fontFamily = FontFamily.Monospace,
-                fontSize = 11.sp,
-                fontWeight = FontWeight.Bold,
-                color = TerminalGreen
-            )
-
-            BasicTextField(
-                value = inputState,
-                onValueChange = { inputState = it },
-                modifier = Modifier
-                    .weight(1f)
-                    .focusRequester(focusRequester),
-                textStyle = TextStyle(
+            // Top breadcrumb row
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    text = "┌─[",
                     fontFamily = FontFamily.Monospace,
-                    fontSize = 12.sp,
-                    color = Color.White
-                ),
-                cursorBrush = SolidColor(DevPrimary),
-                singleLine = true,
-                keyboardOptions = KeyboardOptions(
-                    imeAction = ImeAction.Send,
-                    keyboardType = KeyboardType.Ascii
-                ),
-                keyboardActions = KeyboardActions(
-                    onSend = { submitCommand() }
-                ),
-                decorationBox = { innerTextField ->
-                    Box(modifier = Modifier.fillMaxWidth()) {
-                        if (inputState.text.isEmpty() && !activeSession.isRunning) {
-                            Text(
-                                text = "ketik perintah...",
-                                fontFamily = FontFamily.Monospace,
-                                fontSize = 11.sp,
-                                color = Color.DarkGray
-                            )
-                        }
-                        innerTextField()
-                    }
-                }
-            )
-
-            if (inputState.text.isNotEmpty()) {
-                Spacer(modifier = Modifier.width(4.dp))
-                IconButton(
-                    onClick = { submitCommand() },
-                    modifier = Modifier.size(28.dp)
-                ) {
-                    Icon(
-                        imageVector = Icons.AutoMirrored.Filled.Send,
-                        contentDescription = "Kirim",
-                        tint = DevPrimary,
-                        modifier = Modifier.size(18.dp)
+                    fontSize = 11.sp,
+                    color = Color.DarkGray
+                )
+                Text(
+                    text = "coder@devbox",
+                    fontFamily = FontFamily.Monospace,
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = TerminalCyan
+                )
+                Text(
+                    text = "]─[",
+                    fontFamily = FontFamily.Monospace,
+                    fontSize = 11.sp,
+                    color = Color.DarkGray
+                )
+                Text(
+                    text = activeSession.getDisplayDir(),
+                    fontFamily = FontFamily.Monospace,
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = DevPrimary
+                )
+                Text(
+                    text = "]",
+                    fontFamily = FontFamily.Monospace,
+                    fontSize = 11.sp,
+                    color = Color.DarkGray
+                )
+                if (activeSession.isRunning) {
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text(
+                        text = "• [RUNNING - stdin aktif]",
+                        fontFamily = FontFamily.Monospace,
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = DevPrimary
                     )
+                }
+            }
+
+            Spacer(modifier = Modifier.height(2.dp))
+
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    text = "└─❯ ",
+                    fontFamily = FontFamily.Monospace,
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = if (activeSession.isRunning) DevPrimary else TerminalGreen
+                )
+
+                BasicTextField(
+                    value = inputState,
+                    onValueChange = { inputState = it },
+                    modifier = Modifier
+                        .weight(1f)
+                        .focusRequester(focusRequester),
+                    textStyle = TextStyle(
+                        fontFamily = FontFamily.Monospace,
+                        fontSize = 13.sp,
+                        color = Color.White
+                    ),
+                    cursorBrush = SolidColor(DevPrimary),
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(
+                        imeAction = ImeAction.Send,
+                        keyboardType = KeyboardType.Ascii
+                    ),
+                    keyboardActions = KeyboardActions(
+                        onSend = { submitCommand() }
+                    ),
+                    decorationBox = { innerTextField ->
+                        Box(modifier = Modifier.fillMaxWidth()) {
+                            if (inputState.text.isEmpty()) {
+                                Text(
+                                    text = if (activeSession.isRunning) "kirim respon stdin (y/n/teks)..." else "ketik perintah...",
+                                    fontFamily = FontFamily.Monospace,
+                                    fontSize = 11.sp,
+                                    color = Color.DarkGray
+                                )
+                            }
+                            innerTextField()
+                        }
+                    }
+                )
+
+                if (inputState.text.isNotEmpty()) {
+                    Spacer(modifier = Modifier.width(4.dp))
+                    IconButton(
+                        onClick = { submitCommand() },
+                        modifier = Modifier.size(28.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.AutoMirrored.Filled.Send,
+                            contentDescription = "Kirim",
+                            tint = DevPrimary,
+                            modifier = Modifier.size(18.dp)
+                        )
+                    }
                 }
             }
         }

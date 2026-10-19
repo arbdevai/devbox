@@ -30,10 +30,22 @@ class NativeTerminalSession(
     var runningJob: Job? = null
 
     init {
-        logLines.add(TerminalLine("DevBox Native Terminal [Ubuntu 24.04 Chroot Engine]", LineType.SYSTEM))
-        logLines.add(TerminalLine("Tekan lama pada teks mana saja untuk seleksi & copy khas Android.", LineType.SYSTEM))
-        logLines.add(TerminalLine("Mendukung ANSI escape colors, multi-sesi, dan Termux extra keys.", LineType.SYSTEM))
-        logLines.add(TerminalLine("------------------------------------------------------------", LineType.SYSTEM))
+        val motdBanner = """
+==================================================
+ [ DEVBOX CONTAINER ENGINE - UBUNTU 24.04 ARM64 ]
+==================================================
+ OS: Ubuntu 24.04 LTS (Noble aarch64)
+ Path: /data/local/devbox-chroot
+ User: coder (uid 1000)
+--------------------------------------------------
+ * Terminal native interaktif (zero input delay)
+ * Dukungan ANSI color styling untuk AI Agent CLI
+ * Tekan lama pada teks untuk seleksi & salin
+--------------------------------------------------
+""".trimIndent()
+        motdBanner.lines().forEach { line ->
+            logLines.add(TerminalLine(line, LineType.SYSTEM))
+        }
     }
 
     fun getDisplayDir(): String {
@@ -54,14 +66,32 @@ class NativeTerminalSession(
         logLines.add(TerminalLine("^C", LineType.SYSTEM))
     }
 
+    fun sendInputToProcess(text: String) {
+        if (isRunning && currentProcess != null) {
+            try {
+                val out = currentProcess?.outputStream ?: return
+                out.write((text + "\n").toByteArray(Charsets.UTF_8))
+                out.flush()
+                logLines.add(TerminalLine("[stdin] $text", LineType.INPUT))
+            } catch (e: Exception) {
+                AppLogger.w("NativeTerminal", "Gagal mengirim input ke proses: ${e.message}")
+            }
+        }
+    }
+
     fun runCommand(cmd: String, scope: CoroutineScope) {
         val trimmed = cmd.trim()
-        if (trimmed.isEmpty() || isRunning) return
+        if (trimmed.isEmpty()) return
+
+        if (isRunning) {
+            sendInputToProcess(trimmed)
+            return
+        }
 
         history.add(trimmed)
         historyIndex = history.size
-        val promptStr = "coder@devbox:${getDisplayDir()}$ "
-        logLines.add(TerminalLine("$promptStr$trimmed", LineType.INPUT))
+        val promptHeader = "┌─[coder@devbox]─[${getDisplayDir()}]\n└─❯ "
+        logLines.add(TerminalLine("$promptHeader$trimmed", LineType.INPUT))
 
         if (trimmed == "clear") {
             logLines.clear()
@@ -108,22 +138,24 @@ fi
                     var line: String?
                     while (reader.readLine().also { line = it } != null) {
                         val l = line ?: continue
-                        if (l.startsWith("___DEVBOX_PWD:")) {
+                        if (l.contains("___DEVBOX_PWD:")) {
                             val newPath = l.substringAfter("___DEVBOX_PWD:").trim()
                             if (newPath.isNotEmpty() && newPath.startsWith("/")) {
                                 currentDir = newPath
                             }
-                        } else {
-                            val type = when {
-                                l.contains("[ERROR]", ignoreCase = true) || l.contains("Permission denied", ignoreCase = true) -> LineType.ERROR
-                                l.contains("[WARN]", ignoreCase = true) -> LineType.SYSTEM
-                                else -> LineType.OUTPUT
-                            }
-                            withContext(Dispatchers.Main) {
-                                logLines.add(TerminalLine(l, type))
-                                if (logLines.size > 2000) {
-                                    logLines.removeRange(0, 500)
-                                }
+                            // Do not display the internal directory marker
+                            continue
+                        }
+
+                        val type = when {
+                            l.contains("[ERROR]", ignoreCase = true) || l.contains("Permission denied", ignoreCase = true) -> LineType.ERROR
+                            l.contains("[WARN]", ignoreCase = true) -> LineType.SYSTEM
+                            else -> LineType.OUTPUT
+                        }
+                        withContext(Dispatchers.Main) {
+                            logLines.add(TerminalLine(l, type))
+                            if (logLines.size > 2000) {
+                                logLines.removeRange(0, 500)
                             }
                         }
                     }
