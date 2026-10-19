@@ -7,8 +7,11 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.togetherWith
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.isImeVisible
 import androidx.compose.foundation.layout.padding
+import androidx.compose.ui.unit.dp
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.BugReport
 import androidx.compose.material.icons.filled.Code
@@ -58,30 +61,34 @@ fun DevBoxApp() {
         selectedTab = DevBoxTab.DASHBOARD
     }
 
+    val isImeVisible = WindowInsets.isImeVisible
+
     Scaffold(
         modifier = Modifier.fillMaxSize(),
         containerColor = DevBackground,
         bottomBar = {
-            NavigationBar(
-                containerColor = DevSurface
-            ) {
-                DevBoxTab.entries.forEachIndexed { index, tab ->
-                    NavigationBarItem(
-                        selected = selectedTab == tab,
-                        onClick = {
-                            previousTabIndex = selectedTab.ordinal
-                            selectedTab = tab
-                        },
-                        icon = { Icon(imageVector = tab.icon, contentDescription = tab.title) },
-                        label = { Text(text = tab.title) },
-                        colors = NavigationBarItemDefaults.colors(
-                            selectedIconColor = DevPrimary,
-                            selectedTextColor = DevPrimary,
-                            unselectedIconColor = MaterialTheme.colorScheme.onSurfaceVariant,
-                            unselectedTextColor = MaterialTheme.colorScheme.onSurfaceVariant,
-                            indicatorColor = DevSurface
+            if (!isImeVisible) {
+                NavigationBar(
+                    containerColor = DevSurface
+                ) {
+                    DevBoxTab.entries.forEachIndexed { index, tab ->
+                        NavigationBarItem(
+                            selected = selectedTab == tab,
+                            onClick = {
+                                previousTabIndex = selectedTab.ordinal
+                                selectedTab = tab
+                            },
+                            icon = { Icon(imageVector = tab.icon, contentDescription = tab.title) },
+                            label = { Text(text = tab.title) },
+                            colors = NavigationBarItemDefaults.colors(
+                                selectedIconColor = DevPrimary,
+                                selectedTextColor = DevPrimary,
+                                unselectedIconColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                                unselectedTextColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                                indicatorColor = DevSurface
+                            )
                         )
-                    )
+                    }
                 }
             }
         }
@@ -100,7 +107,10 @@ fun DevBoxApp() {
             },
             modifier = Modifier
                 .fillMaxSize()
-                .padding(innerPadding),
+                .padding(
+                    top = innerPadding.calculateTopPadding(),
+                    bottom = if (isImeVisible) 0.dp else innerPadding.calculateBottomPadding()
+                ),
             label = "tabTransition"
         ) { currentTab ->
             when (currentTab) {

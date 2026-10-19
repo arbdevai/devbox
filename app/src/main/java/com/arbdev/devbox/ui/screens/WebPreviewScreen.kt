@@ -1,8 +1,10 @@
 package com.arbdev.devbox.ui.screens
 
 import android.annotation.SuppressLint
+import android.content.Context
 import android.graphics.Bitmap
 import android.view.ViewGroup
+import android.webkit.CookieManager
 import android.webkit.WebChromeClient
 import android.webkit.WebSettings
 import android.webkit.WebView
@@ -44,6 +46,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
@@ -54,6 +57,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
@@ -64,30 +68,106 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import com.arbdev.devbox.ui.theme.DevPrimary
+import kotlinx.serialization.Serializable
+import kotlinx.serialization.encodeToString
+import kotlinx.serialization.json.Json
+import java.net.URI
 import java.util.UUID
 
-data class WebTabItem(
+class WebTabItem(
     val id: String = UUID.randomUUID().toString(),
-    var url: String,
-    var title: String = "Lokal",
-    var canGoBack: Boolean = false,
-    var canGoForward: Boolean = false
+    initialUrl: String,
+    initialTitle: String = "Lokal"
+) {
+    var url by mutableStateOf(initialUrl)
+    var title by mutableStateOf(initialTitle)
+}
+
+@Serializable
+data class SavedWebTab(
+    val url: String,
+    val title: String = "Lokal"
 )
+
+object WebPreviewStateManager {
+    val tabs = mutableStateListOf<WebTabItem>()
+    var activeTabIndex = mutableIntStateOf(0)
+    var isInitialized = false
+
+    fun init(context: Context) {
+        if (isInitialized) return
+        val prefs = context.getSharedPreferences("devbox_web_preview", Context.MODE_PRIVATE)
+        val savedTabsJson = prefs.getString("saved_tabs", null)
+        val savedIndex = prefs.getInt("active_tab_index", 0)
+        val lastUrl = prefs.getString("last_url", "http://127.0.0.1:3000") ?: "http://127.0.0.1:3000"
+
+        if (!savedTabsJson.isNullOrEmpty()) {
+            try {
+                val list = Json.decodeFromString<List<SavedWebTab>>(savedTabsJson)
+                if (list.isNotEmpty()) {
+                    tabs.clear()
+                    tabs.addAll(list.map { WebTabItem(initialUrl = it.url, initialTitle = it.title) })
+                    activeTabIndex.intValue = savedIndex.coerceIn(0, tabs.size - 1)
+                    isInitialized = true
+                    return
+                }
+            } catch (_: Exception) {
+            }
+        }
+
+        tabs.clear()
+        tabs.add(WebTabItem(initialUrl = lastUrl, initialTitle = getDisplayTitle(lastUrl)))
+        tabs.add(WebTabItem(initialUrl = "http://127.0.0.1:8080", initialTitle = ":8080"))
+        activeTabIndex.intValue = 0
+        isInitialized = true
+    }
+
+    fun save(context: Context) {
+        val prefs = context.getSharedPreferences("devbox_web_preview", Context.MODE_PRIVATE)
+        val currentTab = tabs.getOrNull(activeTabIndex.intValue)
+        val lastUrl = currentTab?.url ?: "http://127.0.0.1:3000"
+        val list = tabs.map { SavedWebTab(url = it.url, title = it.title) }
+        val json = try {
+            Json.encodeToString(list)
+        } catch (_: Exception) {
+            ""
+        }
+        prefs.edit()
+            .putString("last_url", lastUrl)
+            .putString("saved_tabs", json)
+            .putInt("active_tab_index", activeTabIndex.intValue)
+            .apply()
+    }
+
+    fun getDisplayTitle(url: String): String {
+        return try {
+            val uri = URI(url)
+            val port = uri.port
+            if (port > 0) ":$port" else uri.host ?: "Web"
+        } catch (_: Exception) {
+            "Web"
+        }
+    }
+}
 
 @SuppressLint("SetJavaScriptEnabled")
 @Composable
 fun WebPreviewScreen() {
+    val context = LocalContext.current
     val focusManager = LocalFocusManager.current
 
-    val tabs = remember {
-        mutableStateListOf(
-            WebTabItem(url = "http://127.0.0.1:3000", title = ":3000"),
-            WebTabItem(url = "http://127.0.0.1:8080", title = ":8080")
-        )
+    LaunchedEffect(Unit) {
+        WebPreviewStateManager.init(context)
     }
-    var activeTabIndex by remember { mutableIntStateOf(0) }
 
-    val currentTab = tabs.getOrNull(activeTabIndex) ?: tabs.firstOrNull() ?: WebTabItem(url = "http://127.0.0.1:3000")
+    val tabs = WebPreviewStateManager.tabs
+    var activeTabIndex by WebPreviewStateManager.activeTabIndex
+
+    if (tabs.isEmpty()) {
+        WebPreviewStateManager.init(context)
+    }
+
+    val currentTab = tabs.getOrNull(activeTabIndex) ?: tabs.firstOrNull() ?: WebTabItem(initialUrl = "http://127.0.0.1:3000")
 
     var urlInput by remember { mutableStateOf(currentTab.url) }
     var webViewRef by remember { mutableStateOf<WebView?>(null) }
@@ -110,6 +190,8 @@ fun WebPreviewScreen() {
         }
         urlInput = target
         currentTab.url = target
+        currentTab.title = WebPreviewStateManager.getDisplayTitle(target)
+        WebPreviewStateManager.save(context)
         webViewRef?.loadUrl(target)
         focusManager.clearFocus()
     }
@@ -147,6 +229,7 @@ fun WebPreviewScreen() {
                                 activeTabIndex = index
                                 urlInput = tab.url
                                 webViewRef?.loadUrl(tab.url)
+                                WebPreviewStateManager.save(context)
                             }
                         }
                         .padding(horizontal = 10.dp, vertical = 6.dp),
@@ -176,6 +259,7 @@ fun WebPreviewScreen() {
                                     val newActive = tabs[activeTabIndex]
                                     urlInput = newActive.url
                                     webViewRef?.loadUrl(newActive.url)
+                                    WebPreviewStateManager.save(context)
                                 }
                         )
                     }
@@ -185,11 +269,12 @@ fun WebPreviewScreen() {
             // Add Tab Button (+)
             IconButton(
                 onClick = {
-                    val newTab = WebTabItem(url = "http://127.0.0.1:5173", title = ":5173")
+                    val newTab = WebTabItem(initialUrl = "http://127.0.0.1:5173", initialTitle = ":5173")
                     tabs.add(newTab)
                     activeTabIndex = tabs.size - 1
                     urlInput = newTab.url
                     webViewRef?.loadUrl(newTab.url)
+                    WebPreviewStateManager.save(context)
                 },
                 modifier = Modifier.size(28.dp)
             ) {
@@ -313,8 +398,8 @@ fun WebPreviewScreen() {
                 .fillMaxWidth()
         ) {
             AndroidView(
-                factory = { context ->
-                    WebView(context).apply {
+                factory = { ctx ->
+                    WebView(ctx).apply {
                         layoutParams = ViewGroup.LayoutParams(
                             ViewGroup.LayoutParams.MATCH_PARENT,
                             ViewGroup.LayoutParams.MATCH_PARENT
@@ -323,11 +408,16 @@ fun WebPreviewScreen() {
                             javaScriptEnabled = true
                             domStorageEnabled = true
                             databaseEnabled = true
+                            allowFileAccess = true
                             useWideViewPort = true
                             loadWithOverviewMode = true
                             mixedContentMode = WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
                             cacheMode = WebSettings.LOAD_DEFAULT
                         }
+
+                        val cookieManager = CookieManager.getInstance()
+                        cookieManager.setAcceptCookie(true)
+                        cookieManager.setAcceptThirdPartyCookies(this, true)
 
                         webChromeClient = object : WebChromeClient() {
                             override fun onProgressChanged(view: WebView?, newProgress: Int) {
@@ -339,6 +429,7 @@ fun WebPreviewScreen() {
                                 if (!title.isNullOrEmpty()) {
                                     val shortTitle = if (title.length > 14) title.take(12) + ".." else title
                                     currentTab.title = shortTitle
+                                    WebPreviewStateManager.save(context)
                                 }
                             }
                         }
@@ -351,6 +442,7 @@ fun WebPreviewScreen() {
                                 url?.let {
                                     urlInput = it
                                     currentTab.url = it
+                                    WebPreviewStateManager.save(context)
                                 }
                             }
 
@@ -361,6 +453,7 @@ fun WebPreviewScreen() {
                                 url?.let {
                                     urlInput = it
                                     currentTab.url = it
+                                    WebPreviewStateManager.save(context)
                                 }
                             }
                         }

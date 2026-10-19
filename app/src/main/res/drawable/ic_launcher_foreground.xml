@@ -4,28 +4,91 @@
     android:height="108dp"
     android:viewportWidth="108"
     android:viewportHeight="108">
-    <group
-        android:scaleX="0.8"
-        android:scaleY="0.8"
-        android:translateX="10.8"
-        android:translateY="10.8">
-        <!-- WiFi Arc 1 (Crisp White) -->
+    <group>
+        <!-- Container Box Corner Brackets -->
         <path
             android:fillColor="#00000000"
-            android:strokeColor="#FFFFFF"
-            android:strokeWidth="5.5"
+            android:strokeColor="#39C5CF"
+            android:strokeWidth="2.5"
             android:strokeLineCap="round"
-            android:pathData="M 32,46 A 26,26 0 0 1 76,46" />
-        <!-- WiFi Arc 2 (Themed Accent Glow) -->
+            android:strokeLineJoin="round"
+            android:pathData="M 21,29 L 21,23 L 27,23" />
         <path
             android:fillColor="#00000000"
-            android:strokeColor="#FFDAD6"
-            android:strokeWidth="5"
+            android:strokeColor="#39C5CF"
+            android:strokeWidth="2.5"
             android:strokeLineCap="round"
-            android:pathData="M 40,55 A 16,16 0 0 1 68,55" />
-        <!-- Fiber Optic Pulse / Fast Lightning -->
+            android:strokeLineJoin="round"
+            android:pathData="M 81,23 L 87,23 L 87,29" />
         <path
-            android:fillColor="#FFFFFF"
-            android:pathData="M 57,48 L 47,63 L 53,63 L 49,76 L 62,59 L 56,59 Z" />
+            android:fillColor="#00000000"
+            android:strokeColor="#39C5CF"
+            android:strokeWidth="2.5"
+            android:strokeLineCap="round"
+            android:strokeLineJoin="round"
+            android:pathData="M 21,79 L 21,85 L 27,85" />
+        <path
+            android:fillColor="#00000000"
+            android:strokeColor="#39C5CF"
+            android:strokeWidth="2.5"
+            android:strokeLineCap="round"
+            android:strokeLineJoin="round"
+            android:pathData="M 81,85 L 87,85 L 87,79" />
+
+        <!-- Terminal Console Main Body -->
+        <path
+            android:fillColor="#090D13"
+            android:strokeColor="#39C5CF"
+            android:strokeWidth="2"
+            android:pathData="M 31,31 h 46 a 7,7 0 0 1 7,7 v 30 a 7,7 0 0 1 -7,7 h -46 a 7,7 0 0 1 -7,-7 v -30 a 7,7 0 0 1 7,-7 z" />
+
+        <!-- Terminal Title Bar Divider -->
+        <path
+            android:fillColor="#00000000"
+            android:strokeColor="#21262D"
+            android:strokeWidth="1.5"
+            android:pathData="M 24,42 L 84,42" />
+
+        <!-- Terminal Window Control Dots -->
+        <path
+            android:fillColor="#FF5F56"
+            android:pathData="M 31,37 A 2,2 0 1 1 31,37.01" />
+        <path
+            android:fillColor="#FFBD2E"
+            android:pathData="M 37,37 A 2,2 0 1 1 37,37.01" />
+        <path
+            android:fillColor="#27C93F"
+            android:pathData="M 43,37 A 2,2 0 1 1 43,37.01" />
+
+        <!-- Command Prompt Chevron: > -->
+        <path
+            android:fillColor="#00000000"
+            android:strokeColor="#39C5CF"
+            android:strokeWidth="3.2"
+            android:strokeLineCap="round"
+            android:strokeLineJoin="round"
+            android:pathData="M 34,51 L 42,56.5 L 34,62" />
+
+        <!-- Blinking Terminal Cursor: _ -->
+        <path
+            android:fillColor="#00000000"
+            android:strokeColor="#58A6FF"
+            android:strokeWidth="3.2"
+            android:strokeLineCap="round"
+            android:pathData="M 47,62 L 57,62" />
+
+        <!-- Secondary Code Indicators -->
+        <path
+            android:fillColor="#00000000"
+            android:strokeColor="#484F58"
+            android:strokeWidth="2"
+            android:strokeLineCap="round"
+            android:pathData="M 64,54 L 74,54" />
+        <path
+            android:fillColor="#00000000"
+            android:strokeColor="#30363D"
+            android:strokeWidth="2"
+            android:strokeLineCap="round"
+            android:pathData="M 64,59 L 71,59" />
     </group>
 </vector>

@@ -435,7 +435,8 @@ fun TerminalScreen(
                         color = Color.White
                     ),
                     cursorBrush = SolidColor(DevPrimary),
-                    singleLine = true,
+                    singleLine = false,
+                    maxLines = 1,
                     keyboardOptions = KeyboardOptions(
                         imeAction = ImeAction.None,
                         keyboardType = KeyboardType.Ascii,
