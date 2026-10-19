@@ -57,6 +57,53 @@ class KeepAliveService : Service() {
             }
             context.startService(intent)
         }
+
+        fun updateNotification(context: Context) {
+            if (!isRunning) return
+            try {
+                val active = TerminalSessionManager.getActiveSession()
+                val sessionCount = TerminalSessionManager.sessions.size
+                val statusText = if (active.isRunning) "Menjalankan perintah..." else "Siap"
+                val dir = active.getDisplayDir()
+
+                val manager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+                val openAppIntent = Intent(context, MainActivity::class.java).apply {
+                    flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
+                }
+                val pendingOpenIntent = PendingIntent.getActivity(
+                    context,
+                    0,
+                    openAppIntent,
+                    PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+                )
+
+                val killIntent = Intent(context, KeepAliveService::class.java).apply {
+                    action = ACTION_KILL_ALL
+                }
+                val pendingKillIntent = PendingIntent.getService(
+                    context,
+                    1,
+                    killIntent,
+                    PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+                )
+
+                val notification = NotificationCompat.Builder(context, CHANNEL_ID)
+                    .setContentTitle("DevBox Linux Container ($sessionCount Sesi)")
+                    .setContentText("${active.name}: $dir [$statusText]")
+                    .setSmallIcon(android.R.drawable.ic_dialog_info)
+                    .setOngoing(true)
+                    .setContentIntent(pendingOpenIntent)
+                    .setPriority(NotificationCompat.PRIORITY_LOW)
+                    .addAction(
+                        android.R.drawable.ic_menu_close_clear_cancel,
+                        "Matikan Container & Keluar",
+                        pendingKillIntent
+                    )
+                    .build()
+
+                manager.notify(NOTIFICATION_ID, notification)
+            } catch (_: Exception) {}
+        }
     }
 
     override fun onCreate() {
@@ -153,16 +200,21 @@ class KeepAliveService : Service() {
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
         )
 
+        val active = TerminalSessionManager.getActiveSession()
+        val sessionCount = TerminalSessionManager.sessions.size
+        val statusText = if (active.isRunning) "Menjalankan perintah..." else "Siap"
+        val dir = active.getDisplayDir()
+
         return NotificationCompat.Builder(this, CHANNEL_ID)
-            .setContentTitle("DevBox Chroot Aktif")
-            .setContentText("CPU WakeLock aktif. Container Linux & AI Agent berjalan.")
+            .setContentTitle("DevBox Linux Container ($sessionCount Sesi)")
+            .setContentText("${active.name}: $dir [$statusText]")
             .setSmallIcon(android.R.drawable.ic_dialog_info)
             .setOngoing(true)
             .setContentIntent(pendingOpenIntent)
             .setPriority(NotificationCompat.PRIORITY_LOW)
             .addAction(
                 android.R.drawable.ic_menu_close_clear_cancel,
-                "Matikan & Keluar",
+                "Matikan Container & Keluar",
                 pendingKillIntent
             )
             .build()

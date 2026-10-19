@@ -63,6 +63,16 @@ import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
+import android.os.Handler
+import android.os.Looper
+import android.view.KeyEvent
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onKeyEvent
+import androidx.compose.ui.input.key.type
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import com.arbdev.devbox.service.KeepAliveService
 import com.arbdev.devbox.terminal.TerminalSessionManager
 import com.arbdev.devbox.ui.theme.DevPrimary
 import com.arbdev.devbox.ui.theme.TerminalBackground
@@ -79,6 +89,8 @@ fun TerminalScreen(
 ) {
     val context = LocalContext.current
     val clipboardManager = LocalClipboardManager.current
+    val keyboardController = LocalSoftwareKeyboardController.current
+    val mainHandler = remember { Handler(Looper.getMainLooper()) }
     val scope = rememberCoroutineScope()
     val focusRequester = remember { FocusRequester() }
 
@@ -86,6 +98,14 @@ fun TerminalScreen(
     val activeIndex = TerminalSessionManager.activeIndex.intValue
 
     var inputState by remember { mutableStateOf(TextFieldValue("")) }
+
+    LaunchedEffect(Unit) {
+        KeepAliveService.startService(context)
+    }
+
+    LaunchedEffect(activeSession.isRunning, activeSession.currentDir, TerminalSessionManager.sessions.size) {
+        KeepAliveService.updateNotification(context)
+    }
 
     // Modifier states for keyboard
     var isCtrlActive by remember { mutableStateOf(false) }
@@ -111,7 +131,7 @@ fun TerminalScreen(
     }
 
     fun submitCommand() {
-        val text = inputState.text
+        val text = inputState.text.replace("\n", "").trim()
         if (text.isBlank()) return
         if (activeSession.isRunning) {
             activeSession.sendInputToProcess(text)
@@ -120,6 +140,10 @@ fun TerminalScreen(
         }
         inputState = TextFieldValue("")
         focusRequester.requestFocus()
+        mainHandler.postDelayed({
+            focusRequester.requestFocus()
+            keyboardController?.show()
+        }, 50)
     }
 
     LaunchedEffect(initialCommand) {
@@ -381,10 +405,30 @@ fun TerminalScreen(
 
                 BasicTextField(
                     value = inputState,
-                    onValueChange = { inputState = it },
+                    onValueChange = { newValue ->
+                        if (newValue.text.contains("\n")) {
+                            val clean = newValue.text.replace("\n", "").trim()
+                            if (clean.isNotBlank()) {
+                                inputState = TextFieldValue(clean)
+                                submitCommand()
+                            } else {
+                                inputState = TextFieldValue("")
+                            }
+                        } else {
+                            inputState = newValue
+                        }
+                    },
                     modifier = Modifier
                         .weight(1f)
-                        .focusRequester(focusRequester),
+                        .focusRequester(focusRequester)
+                        .onKeyEvent { keyEvent ->
+                            if (keyEvent.type == KeyEventType.KeyDown && (keyEvent.key == Key.Enter || keyEvent.nativeKeyEvent.keyCode == KeyEvent.KEYCODE_ENTER)) {
+                                submitCommand()
+                                true
+                            } else {
+                                false
+                            }
+                        },
                     textStyle = TextStyle(
                         fontFamily = FontFamily.Monospace,
                         fontSize = 13.sp,
@@ -393,11 +437,14 @@ fun TerminalScreen(
                     cursorBrush = SolidColor(DevPrimary),
                     singleLine = true,
                     keyboardOptions = KeyboardOptions(
-                        imeAction = ImeAction.Send,
-                        keyboardType = KeyboardType.Ascii
+                        imeAction = ImeAction.None,
+                        keyboardType = KeyboardType.Ascii,
+                        autoCorrect = false
                     ),
                     keyboardActions = KeyboardActions(
-                        onSend = { submitCommand() }
+                        onAny = {
+                            submitCommand()
+                        }
                     ),
                     decorationBox = { innerTextField ->
                         Box(modifier = Modifier.fillMaxWidth()) {
