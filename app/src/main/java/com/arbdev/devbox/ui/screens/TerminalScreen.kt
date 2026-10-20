@@ -174,7 +174,8 @@ fun TerminalScreen(
     LaunchedEffect(TerminalSessionManager.sessions.size) {
         while (isActive) {
             val activeIds = TerminalSessionManager.sessions.map { it.id }
-            orphanProcesses = ChrootManager.getOrphanChrootProcesses(activeIds)
+            val activePids = TerminalSessionManager.sessions.mapNotNull { it.getProcessPid() }
+            orphanProcesses = ChrootManager.getOrphanChrootProcesses(activeIds, activePids)
             kotlinx.coroutines.delay(4000)
         }
     }
@@ -599,7 +600,8 @@ fun TerminalScreen(
                             coroutineScope.launch {
                                 isCleaningOrphans = true
                                 val activeIds = TerminalSessionManager.sessions.map { it.id }
-                                val killed = ChrootManager.killOrphanChrootProcesses(activeIds)
+                                val activePids = TerminalSessionManager.sessions.mapNotNull { it.getProcessPid() }
+                                val killed = ChrootManager.killOrphanChrootProcesses(activeIds, activePids)
                                 orphanProcesses = emptyList()
                                 isCleaningOrphans = false
                                 Toast.makeText(context, "$killed sesi latar belakang berhasil dimatikan", Toast.LENGTH_SHORT).show()
@@ -980,7 +982,8 @@ fun TerminalScreen(
                                         coroutineScope.launch {
                                             isCleaningOrphans = true
                                             val activeIds = TerminalSessionManager.sessions.map { it.id }
-                                            val killed = ChrootManager.killOrphanChrootProcesses(activeIds)
+                                            val activePids = TerminalSessionManager.sessions.mapNotNull { it.getProcessPid() }
+                                            val killed = ChrootManager.killOrphanChrootProcesses(activeIds, activePids)
                                             orphanProcesses = emptyList()
                                             isCleaningOrphans = false
                                             Toast.makeText(context, "$killed sesi latar belakang berhasil dimatikan", Toast.LENGTH_SHORT).show()

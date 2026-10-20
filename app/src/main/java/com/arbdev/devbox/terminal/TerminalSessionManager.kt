@@ -174,6 +174,10 @@ class NativeTerminalSession(
     private var lastRows = 0
 
     fun sendText(text: String) {
+        if (!isRunning || outputStream == null) {
+            AppLogger.w("NativeTerminal", "Sesi [$name] mati/terputus. Meluncurkan ulang sesi...")
+            initializeProcess()
+        }
         sessionScope.launch(Dispatchers.IO) {
             val out = outputStream ?: return@launch
             try {
@@ -187,6 +191,10 @@ class NativeTerminalSession(
     }
 
     fun sendBytes(bytes: ByteArray) {
+        if (!isRunning || outputStream == null) {
+            AppLogger.w("NativeTerminal", "Sesi [$name] mati/terputus. Meluncurkan ulang sesi...")
+            initializeProcess()
+        }
         sessionScope.launch(Dispatchers.IO) {
             val out = outputStream ?: return@launch
             try {
@@ -248,7 +256,7 @@ class NativeTerminalSession(
         }
     }
 
-    private fun getProcessPid(): Long? {
+    fun getProcessPid(): Long? {
         val proc = process ?: return null
         return try {
             val method = proc.javaClass.getMethod("pid")

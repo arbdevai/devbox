@@ -230,14 +230,40 @@ XDG_EOF
      */
     suspend fun getOrphanChrootProcesses(
         activeSessionIds: List<String>,
+        activePids: List<Long> = emptyList(),
         rootfs: String = activeRootfs
     ): List<ChrootProcessInfo> = withContext(Dispatchers.IO) {
+        val pidListStr = activePids.filter { it > 0 }.joinToString(" ")
         val script = """
+            active_pids="$pidListStr"
+            active_descendants=""
+            for ap in ${'$'}active_pids; do
+                for child in ${'$'}(pgrep -P ${'$'}ap 2>/dev/null); do
+                    active_descendants="${'$'}active_descendants ${'$'}child"
+                    for grandchild in ${'$'}(pgrep -P ${'$'}child 2>/dev/null); do
+                        active_descendants="${'$'}active_descendants ${'$'}grandchild"
+                    done
+                done
+            done
+
             for p in /proc/[0-9]*; do
               if [ "$(readlink ${'$'}p/root 2>/dev/null)" = '$rootfs' ]; then
                 pid=${'$'}(basename ${'$'}p)
+
+                # Proteksi 1: Lewati jika PID termasuk di pohon proses sesi aktif
+                is_active=0
+                for ap in ${'$'}active_pids ${'$'}active_descendants; do
+                    if [ -n "${'$'}ap" ] && [ "${'$'}ap" = "${'$'}pid" ]; then
+                        is_active=1
+                        break
+                    fi
+                done
+                if [ "${'$'}is_active" -eq 1 ]; then
+                    continue
+                fi
+
                 comm=${'$'}(cat ${'$'}p/comm 2>/dev/null)
-                sid=${'$'}(tr '\0' '\n' < ${'$'}p/environ 2>/dev/null | grep -a '^DEVBOX_SESSION_ID=' | cut -d= -f2)
+                sid=${'$'}(tr '\0' '\n' < ${'$'}p/environ 2>/dev/null | grep -a '^DEVBOX_SESSION_ID=' | head -n1 | cut -d= -f2)
                 rss=${'$'}(awk '/VmRSS/{print ${'$'}2}' ${'$'}p/status 2>/dev/null || echo 0)
                 echo "${'$'}pid|${'$'}comm|${'$'}sid|${'$'}rss"
               fi
@@ -253,9 +279,15 @@ XDG_EOF
             if (parts.size >= 4) {
                 val pid = parts[0].toIntOrNull() ?: continue
                 val comm = parts[1].trim()
-                val sid = parts[2].trim().takeIf { it.isNotEmpty() }
+                val rawSid = parts[2].trim()
                 val rssKb = parts[3].toLongOrNull() ?: 0L
 
+                // Proteksi 2: Jika sid berisi "Binary file" atau error string, jangan anggap orphan
+                if (rawSid.contains("Binary file") || rawSid.contains("matches")) {
+                    continue
+                }
+
+                val sid = rawSid.takeIf { it.isNotEmpty() }
                 // Sesi usang: sid tidak ada (legacy/crash lama) atau sid tidak aktif di DevBox
                 if (sid == null || !activeSessionIds.contains(sid)) {
                     orphans.add(ChrootProcessInfo(pid, comm, sid, rssKb))
@@ -271,15 +303,22 @@ XDG_EOF
      */
     suspend fun killOrphanChrootProcesses(
         activeSessionIds: List<String>,
+        activePids: List<Long> = emptyList(),
         rootfs: String = activeRootfs
     ): Int = withContext(Dispatchers.IO) {
-        val orphans = getOrphanChrootProcesses(activeSessionIds, rootfs)
+        val orphans = getOrphanChrootProcesses(activeSessionIds, activePids, rootfs)
         if (orphans.isEmpty()) return@withContext 0
 
-        val pidsToKill = orphans.map { it.pid }.joinToString(" ")
+        // Proteksi 3: Filter agar tidak ada activePids yang terbunuh
+        val safeOrphans = orphans.filter { orphan ->
+            !activePids.contains(orphan.pid.toLong())
+        }
+        if (safeOrphans.isEmpty()) return@withContext 0
+
+        val pidsToKill = safeOrphans.map { it.pid }.joinToString(" ")
         RootExecutor.execute("kill -9 $pidsToKill 2>/dev/null || true")
-        AppLogger.i("ChrootManager", "Berhasil membersihkan ${orphans.size} proses orphan di chroot: $pidsToKill")
-        orphans.size
+        AppLogger.i("ChrootManager", "Berhasil membersihkan ${safeOrphans.size} proses orphan di chroot: $pidsToKill")
+        safeOrphans.size
     }
 
     suspend fun toggleCodeServer(enable: Boolean, rootfs: String = activeRootfs): Result<Unit> {

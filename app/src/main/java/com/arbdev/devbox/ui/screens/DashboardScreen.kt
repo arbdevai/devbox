@@ -134,7 +134,8 @@ fun DashboardScreen(
             state = ChrootManager.getChrootState()
             isInitialLoading = false
             val activeIds = TerminalSessionManager.sessions.map { it.id }
-            orphanProcesses = ChrootManager.getOrphanChrootProcesses(activeIds)
+            val activePids = TerminalSessionManager.sessions.mapNotNull { it.getProcessPid() }
+            orphanProcesses = ChrootManager.getOrphanChrootProcesses(activeIds, activePids)
             wakeLockActive = KeepAliveService.isRunning
             isRefreshing = false
         }
@@ -147,7 +148,8 @@ fun DashboardScreen(
         // Pemindaian berkala background sesi usang
         while (isActive) {
             val activeIds = TerminalSessionManager.sessions.map { it.id }
-            orphanProcesses = ChrootManager.getOrphanChrootProcesses(activeIds)
+            val activePids = TerminalSessionManager.sessions.mapNotNull { it.getProcessPid() }
+            orphanProcesses = ChrootManager.getOrphanChrootProcesses(activeIds, activePids)
             kotlinx.coroutines.delay(5000)
         }
     }
@@ -345,7 +347,8 @@ fun DashboardScreen(
                             scope.launch {
                                 isCleaningOrphans = true
                                 val activeIds = TerminalSessionManager.sessions.map { it.id }
-                                val killed = ChrootManager.killOrphanChrootProcesses(activeIds)
+                                val activePids = TerminalSessionManager.sessions.mapNotNull { it.getProcessPid() }
+                                val killed = ChrootManager.killOrphanChrootProcesses(activeIds, activePids)
                                 orphanProcesses = emptyList()
                                 isCleaningOrphans = false
                                 refreshState()
