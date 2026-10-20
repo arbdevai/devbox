@@ -19,6 +19,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -182,6 +183,7 @@ fun TerminalScreen(
         modifier = Modifier
             .fillMaxSize()
             .background(TerminalBackground)
+            .imePadding()
     ) {
         // Multi-Session Tab Row
         ScrollableTabRow(
@@ -471,8 +473,8 @@ fun TerminalScreen(
                     val charWidth = (terminalFontSize * 0.6f).sp.toPx()
                     val charHeight = (terminalFontSize * 1.25f).sp.toPx()
                     if (charWidth > 0 && charHeight > 0) {
-                        val cols = (maxWidth.toPx() / charWidth).toInt().coerceIn(40, 160)
-                        val rows = (maxHeight.toPx() / charHeight).toInt().coerceIn(15, 60)
+                        val cols = (maxWidth.toPx() / charWidth).toInt().coerceIn(20, 200)
+                        val rows = (maxHeight.toPx() / charHeight).toInt().coerceIn(4, 100)
                         activeSession.updateWindowSize(cols, rows)
                     }
                 }
