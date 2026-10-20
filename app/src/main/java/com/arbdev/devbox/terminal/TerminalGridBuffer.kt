@@ -94,6 +94,8 @@ class TerminalGridBuffer(
         private set
     var isSgrMouseMode: Boolean = false
         private set
+    var isApplicationCursorKeys: Boolean = false
+        private set
 
     // Modern Protocols (OSC 0/1/2, OSC 52, OSC 8)
     var windowTitle: String = "coder@devbox:~"
@@ -554,6 +556,7 @@ class TerminalGridBuffer(
                 if (isCsiPrivate) {
                     for (p in params) {
                         when (p) {
+                            1 -> isApplicationCursorKeys = true // DECCKM Mode
                             1049 -> { // Masuk ke Alternate Screen Buffer (nano, agy, htop)
                                 isAltBuffer = true
                                 for (r in 0 until maxRows) {
@@ -577,6 +580,7 @@ class TerminalGridBuffer(
                 if (isCsiPrivate) {
                     for (p in params) {
                         when (p) {
+                            1 -> isApplicationCursorKeys = false // Reset ke normal cursor keys
                             1049 -> { // Keluar dari Alternate Screen Buffer
                                 isAltBuffer = false
                                 scrollTop = 0

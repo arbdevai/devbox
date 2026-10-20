@@ -51,6 +51,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
@@ -122,13 +123,31 @@ fun TerminalScreen(
     var isAltActive by remember { mutableStateOf(false) }
     var isShiftActive by remember { mutableStateOf(false) }
 
-    // Input state untuk Compose BasicTextField (menangani FlorisBoard, Gboard, dll.)
-    val zeroWidthPrefix = "\u200B"
-    var inputTfv by remember { mutableStateOf(TextFieldValue(zeroWidthPrefix, TextRange(zeroWidthPrefix.length))) }
+    // Input state untuk Compose BasicTextField (kompatibel penuh dengan FlorisBoard, Gboard, dll.)
+    val asciiPrefix = "XX"
+    var inputTfv by remember { mutableStateOf(TextFieldValue(asciiPrefix, TextRange(asciiPrefix.length))) }
     val focusRequester = remember { FocusRequester() }
 
     val verticalScrollState = rememberScrollState()
     val horizontalScrollState = rememberScrollState()
+
+    // Helper navigasi tombol panah yang menghormati DECCKM (Application Cursor Mode pada TUI seperti agy)
+    val sendArrowUp = {
+        if (activeSession.buffer.isApplicationCursorKeys) activeSession.sendText("\u001BOA")
+        else activeSession.sendText("\u001B[A")
+    }
+    val sendArrowDown = {
+        if (activeSession.buffer.isApplicationCursorKeys) activeSession.sendText("\u001BOB")
+        else activeSession.sendText("\u001B[B")
+    }
+    val sendArrowRight = {
+        if (activeSession.buffer.isApplicationCursorKeys) activeSession.sendText("\u001BOC")
+        else activeSession.sendText("\u001B[C")
+    }
+    val sendArrowLeft = {
+        if (activeSession.buffer.isApplicationCursorKeys) activeSession.sendText("\u001BOD")
+        else activeSession.sendText("\u001B[D")
+    }
 
     LaunchedEffect(Unit) {
         KeepAliveService.startService(context)
@@ -139,10 +158,17 @@ fun TerminalScreen(
         KeepAliveService.updateNotification(context)
     }
 
-    // Auto-scroll ke paling bawah saat ada teks baru yang masuk ke buffer
-    LaunchedEffect(activeSession.buffer.version.intValue) {
-        if (verticalScrollState.maxValue > 0) {
-            verticalScrollState.scrollTo(verticalScrollState.maxValue)
+    // Auto-scroll cerdas: kunci posisi 0 jika AltBuffer (TUI), dan scroll ke bawah pada normal buffer hanya jika dekat posisi terbawah
+    LaunchedEffect(activeSession.buffer.version.intValue, activeSession.buffer.isAltBuffer) {
+        if (activeSession.buffer.isAltBuffer) {
+            if (verticalScrollState.value != 0) {
+                verticalScrollState.scrollTo(0)
+            }
+        } else {
+            val isNearBottom = verticalScrollState.value >= (verticalScrollState.maxValue - 120).coerceAtLeast(0)
+            if (isNearBottom && verticalScrollState.maxValue > 0) {
+                verticalScrollState.scrollTo(verticalScrollState.maxValue)
+            }
         }
     }
 
@@ -373,12 +399,15 @@ fun TerminalScreen(
             value = inputTfv,
             onValueChange = { newTfv ->
                 val newText = newTfv.text
-                if (newText.length < zeroWidthPrefix.length || !newText.startsWith(zeroWidthPrefix)) {
+                if (newText.length < asciiPrefix.length) {
                     // Tombol hapus (Backspace) ditekan pada FlorisBoard / keyboard virtual
-                    activeSession.sendBytes(byteArrayOf(127))
-                    inputTfv = TextFieldValue(zeroWidthPrefix, TextRange(zeroWidthPrefix.length))
-                } else {
-                    val typed = newText.removePrefix(zeroWidthPrefix)
+                    val deleteCount = asciiPrefix.length - newText.length
+                    repeat(deleteCount) {
+                        activeSession.sendBytes(byteArrayOf(127))
+                    }
+                    inputTfv = TextFieldValue(asciiPrefix, TextRange(asciiPrefix.length))
+                } else if (newText.startsWith(asciiPrefix)) {
+                    val typed = newText.substring(asciiPrefix.length)
                     if (typed.isNotEmpty()) {
                         if (isCtrlActive) {
                             for (ch in typed) {
@@ -402,12 +431,24 @@ fun TerminalScreen(
                             val sanitized = typed.replace("\r\n", "\r").replace("\n", "\r")
                             activeSession.sendText(sanitized)
                         }
-                        inputTfv = TextFieldValue(zeroWidthPrefix, TextRange(zeroWidthPrefix.length))
+                        if (!activeSession.buffer.isAltBuffer && verticalScrollState.maxValue > 0) {
+                            verticalScrollState.scrollTo(verticalScrollState.maxValue)
+                        }
+                        inputTfv = TextFieldValue(asciiPrefix, TextRange(asciiPrefix.length))
                     }
+                } else {
+                    // Penanganan paste teks atau penggantian seluruh buffer oleh IME
+                    val typed = newText
+                    if (typed.isNotEmpty()) {
+                        val sanitized = typed.replace("\r\n", "\r").replace("\n", "\r")
+                        activeSession.sendText(sanitized)
+                    }
+                    inputTfv = TextFieldValue(asciiPrefix, TextRange(asciiPrefix.length))
                 }
             },
             modifier = Modifier
                 .size(1.dp)
+                .alpha(0.01f)
                 .focusRequester(focusRequester)
                 .onKeyEvent { keyEvent ->
                     if (keyEvent.type == KeyEventType.KeyDown) {
@@ -425,19 +466,19 @@ fun TerminalScreen(
                                 true
                             }
                             Key.DirectionUp -> {
-                                activeSession.sendText("\u001B[A")
+                                sendArrowUp()
                                 true
                             }
                             Key.DirectionDown -> {
-                                activeSession.sendText("\u001B[B")
+                                sendArrowDown()
                                 true
                             }
                             Key.DirectionLeft -> {
-                                activeSession.sendText("\u001B[D")
+                                sendArrowLeft()
                                 true
                             }
                             Key.DirectionRight -> {
-                                activeSession.sendText("\u001B[C")
+                                sendArrowRight()
                                 true
                             }
                             Key.Escape -> {
@@ -590,22 +631,22 @@ fun TerminalScreen(
 
                 // Arrow Left ◀
                 TerminalModifierKey(label = "◀") {
-                    activeSession.sendText("\u001B[D")
+                    sendArrowLeft()
                 }
 
                 // Arrow Down ▼ (Memilih menu agy)
                 TerminalModifierKey(label = "▼") {
-                    activeSession.sendText("\u001B[B")
+                    sendArrowDown()
                 }
 
                 // Arrow Up ▲ (Memilih menu agy)
                 TerminalModifierKey(label = "▲") {
-                    activeSession.sendText("\u001B[A")
+                    sendArrowUp()
                 }
 
                 // Arrow Right ▶
                 TerminalModifierKey(label = "▶") {
-                    activeSession.sendText("\u001B[C")
+                    sendArrowRight()
                 }
 
                 // HOME
@@ -793,7 +834,11 @@ fun TerminalCanvas(
 
     // Trigger recompose saat buffer terminal diperbarui
     val version = session.buffer.version.intValue
-    val lineCount = remember(version) { session.buffer.getLineCount().coerceAtLeast(session.buffer.maxRows) }
+    val isAltBuffer = session.buffer.isAltBuffer
+    val lineCount = remember(version, isAltBuffer) {
+        if (isAltBuffer) session.buffer.maxRows
+        else session.buffer.getLineCount().coerceAtLeast(session.buffer.maxRows)
+    }
     val totalWidthPx = (session.buffer.maxCols * charWidth).toInt().coerceAtLeast(1)
     val totalHeightPx = (lineCount * charHeight).toInt().coerceAtLeast(1)
 
@@ -802,16 +847,21 @@ fun TerminalCanvas(
 
     Box(
         modifier = modifier
-            .verticalScroll(verticalScrollState)
+            .then(
+                if (!isAltBuffer) Modifier.verticalScroll(verticalScrollState)
+                else Modifier
+            )
             .horizontalScroll(horizontalScrollState)
             .padding(horizontal = 6.dp, vertical = 4.dp)
-            .pointerInput(session.buffer.isMouseTrackingEnabled, fontSizeSp) {
+            .pointerInput(session.buffer.isMouseTrackingEnabled, fontSizeSp, isAltBuffer) {
                 detectTapGestures { offset ->
                     onFocusRequest()
 
                     if (charWidth > 0 && charHeight > 0) {
-                        val col = (offset.x / charWidth).toInt().coerceIn(0, session.buffer.maxCols - 1)
-                        val line = (offset.y / charHeight).toInt().coerceIn(0, (session.buffer.getLineCount() - 1).coerceAtLeast(0))
+                        val actualX = offset.x + horizontalScrollState.value
+                        val actualY = if (!isAltBuffer) offset.y + verticalScrollState.value else offset.y
+                        val col = (actualX / charWidth).toInt().coerceIn(0, session.buffer.maxCols - 1)
+                        val line = (actualY / charHeight).toInt().coerceIn(0, (session.buffer.getLineCount() - 1).coerceAtLeast(0))
                         val historyCount = if (session.buffer.isAltBuffer) 0 else session.buffer.getScrollbackSnapshot().size
                         val activeRow = line - historyCount
 
@@ -840,51 +890,127 @@ fun TerminalCanvas(
             val isCursorVisible = session.buffer.isCursorVisible
             val historyCount = if (session.buffer.isAltBuffer) 0 else session.buffer.getScrollbackSnapshot().size
 
-            for (lineIdx in 0 until lineCount) {
+            // Viewport culling: Hanya render baris yang masuk dalam viewport layar
+            val scrollY = if (isAltBuffer) 0f else verticalScrollState.value.toFloat()
+            val viewportHeight = if (isAltBuffer || verticalScrollState.viewportSize == 0) {
+                totalHeightPx.toFloat()
+            } else {
+                verticalScrollState.viewportSize.toFloat()
+            }
+
+            val firstVisibleLine = if (charHeight > 0) {
+                ((scrollY - charHeight) / charHeight).toInt().coerceIn(0, lineCount - 1)
+            } else 0
+            val lastVisibleLine = if (charHeight > 0) {
+                ((scrollY + viewportHeight + charHeight) / charHeight).toInt().coerceIn(0, lineCount - 1)
+            } else lineCount - 1
+
+            val textBatch = StringBuilder()
+
+            for (lineIdx in firstVisibleLine..lastVisibleLine) {
                 val line = session.buffer.getLineAt(lineIdx) ?: continue
                 val yTop = lineIdx * charHeight
                 val yText = yTop + baselineOffset
 
-                // 1. Gambar latar belakang sel (Backgrounds)
-                var col = 0
-                while (col < maxCols) {
-                    val cell = line[col]
-                    val isCursor = (isCursorVisible && (lineIdx - historyCount) == cursorRow && col == cursorCol)
-                    val bg = if (isCursor) Color(0xFF61AFEF) else cell.bgColor
+                // 1. Gambar latar belakang sel (Batched runs dengan warna sama)
+                var bgCol = 0
+                while (bgCol < maxCols) {
+                    val startCol = bgCol
+                    val cell = line[bgCol]
+                    val isCursor = (isCursorVisible && (lineIdx - historyCount) == cursorRow && bgCol == cursorCol)
+                    val runBg = if (isCursor) Color(0xFF61AFEF) else cell.bgColor
 
-                    if (bg != Color.Transparent) {
-                        val cellW = if (cell.isWide) charWidth * 2 else charWidth
+                    val step = if (cell.isWide) 2 else 1
+                    var runLen = step
+                    bgCol += step
+
+                    while (bgCol < maxCols) {
+                        val nextCell = line[bgCol]
+                        val nextIsCursor = (isCursorVisible && (lineIdx - historyCount) == cursorRow && bgCol == cursorCol)
+                        val nextBg = if (nextIsCursor) Color(0xFF61AFEF) else nextCell.bgColor
+                        if (nextBg == runBg) {
+                            val nextStep = if (nextCell.isWide) 2 else 1
+                            runLen += nextStep
+                            bgCol += nextStep
+                        } else {
+                            break
+                        }
+                    }
+
+                    if (runBg != Color.Transparent) {
                         drawRect(
-                            color = bg,
-                            topLeft = Offset(col * charWidth, yTop),
-                            size = Size(cellW, charHeight)
+                            color = runBg,
+                            topLeft = Offset(startCol * charWidth, yTop),
+                            size = Size(runLen * charWidth, charHeight)
                         )
                     }
-                    col++
                 }
 
-                // 2. Gambar karakter teks (Glyphs)
-                col = 0
+                // 2. Gambar karakter teks (Batched text runs per style untuk 60 FPS di CPU low-end)
+                var col = 0
                 while (col < maxCols) {
                     val cell = line[col]
                     if (cell.isWideContinuation) {
                         col++
                         continue
                     }
+
                     val isCursor = (isCursorVisible && (lineIdx - historyCount) == cursorRow && col == cursorCol)
                     val fg = if (isCursor) Color.Black else cell.fgColor
+                    val isBold = cell.isBold
+                    val isUnderline = cell.isUnderline || cell.hyperlinkUrl != null
 
-                    textPaint.color = fg.toArgb()
-                    textPaint.isFakeBoldText = cell.isBold
-                    textPaint.isUnderlineText = cell.isUnderline || cell.hyperlinkUrl != null
-
-                    val x = col * charWidth
+                    // Karakter dengan extra combining mark
                     if (cell.extraChar != null) {
-                        nativeCanvas.drawText("${cell.char}${cell.extraChar}", x, yText, textPaint)
-                    } else if (cell.char != ' ') {
-                        nativeCanvas.drawText(cell.char.toString(), x, yText, textPaint)
+                        textPaint.color = fg.toArgb()
+                        textPaint.isFakeBoldText = isBold
+                        textPaint.isUnderlineText = isUnderline
+                        nativeCanvas.drawText("${cell.char}${cell.extraChar}", col * charWidth, yText, textPaint)
+                        col++
+                        continue
                     }
-                    col++
+
+                    // Karakter wide (CJK / wide symbol)
+                    if (cell.isWide) {
+                        textPaint.color = fg.toArgb()
+                        textPaint.isFakeBoldText = isBold
+                        textPaint.isUnderlineText = isUnderline
+                        nativeCanvas.drawText(cell.char.toString(), col * charWidth, yText, textPaint)
+                        col++
+                        continue
+                    }
+
+                    // Kumpulkan rentetan karakter normal dengan style dan warna yang persis sama
+                    val startCol = col
+                    textBatch.setLength(0)
+
+                    while (col < maxCols) {
+                        val curCell = line[col]
+                        if (curCell.isWideContinuation || curCell.isWide || curCell.extraChar != null) {
+                            break
+                        }
+                        val curIsCursor = (isCursorVisible && (lineIdx - historyCount) == cursorRow && col == cursorCol)
+                        val curFg = if (curIsCursor) Color.Black else curCell.fgColor
+                        val curBold = curCell.isBold
+                        val curUnderline = curCell.isUnderline || curCell.hyperlinkUrl != null
+
+                        if (curFg == fg && curBold == isBold && curUnderline == isUnderline) {
+                            textBatch.append(curCell.char)
+                            col++
+                        } else {
+                            break
+                        }
+                    }
+
+                    if (textBatch.isNotEmpty()) {
+                        val runStr = textBatch.toString()
+                        if (runStr.isNotBlank()) {
+                            textPaint.color = fg.toArgb()
+                            textPaint.isFakeBoldText = isBold
+                            textPaint.isUnderlineText = isUnderline
+                            nativeCanvas.drawText(runStr, startCol * charWidth, yText, textPaint)
+                        }
+                    }
                 }
 
                 // Kursor di luar batas kolom karakter
