@@ -181,6 +181,30 @@ class TerminalGridBuffer(
                                 resetScreen()
                                 parserState = ParserState.NORMAL
                             }
+                            'M' -> {
+                                // Reverse Index (RI): pindah kursor ke atas 1 baris, scroll down jika di baris 0
+                                if (cursorRow > 0) {
+                                    cursorRow--
+                                } else {
+                                    val target = activeGrid
+                                    for (r in maxRows - 1 downTo 1) {
+                                        for (c in 0 until maxCols) target[r][c].copyFrom(target[r - 1][c])
+                                    }
+                                    for (c in 0 until maxCols) target[0][c].reset()
+                                }
+                                parserState = ParserState.NORMAL
+                            }
+                            'D' -> {
+                                // Index (IND): pindah kursor ke bawah 1 baris, scroll up jika di akhir
+                                newline()
+                                parserState = ParserState.NORMAL
+                            }
+                            'E' -> {
+                                // Next Line (NEL): kolom 0 + baris baru
+                                cursorCol = 0
+                                newline()
+                                parserState = ParserState.NORMAL
+                            }
                             else -> parserState = ParserState.NORMAL
                         }
                     }
@@ -298,6 +322,20 @@ class TerminalGridBuffer(
                 cursorCol = (cursorCol - count).coerceAtLeast(0)
             }
 
+            // Cursor Next Line: [E (pindah baris ke bawah dan kolom ke-0)
+            'E' -> {
+                val count = if (params.isNotEmpty() && params[0] > 0) params[0] else 1
+                cursorRow = (cursorRow + count).coerceAtMost(maxRows - 1)
+                cursorCol = 0
+            }
+
+            // Cursor Previous Line: [F (pindah baris ke atas dan kolom ke-0) -> Sangat penting untuk TUI agy/bubbletea/survey
+            'F' -> {
+                val count = if (params.isNotEmpty() && params[0] > 0) params[0] else 1
+                cursorRow = (cursorRow - count).coerceAtLeast(0)
+                cursorCol = 0
+            }
+
             // Cursor Horizontal Absolute: [G (Pindah langsung ke kolom ke-N) -> Kunci untuk agy logo
             'G' -> {
                 val col = if (params.isNotEmpty() && params[0] > 0) params[0] - 1 else 0
@@ -343,6 +381,86 @@ class TerminalGridBuffer(
                     0 -> for (c in cursorCol until maxCols) target[cursorRow][c].reset()
                     1 -> for (c in 0..cursorCol) target[cursorRow][c].reset()
                     2 -> for (c in 0 until maxCols) target[cursorRow][c].reset()
+                }
+            }
+
+            // Erase Character: [X (hapus N karakter dari kursor ke kanan jadi spasi tanpa geser kursor)
+            'X' -> {
+                val count = if (params.isNotEmpty() && params[0] > 0) params[0] else 1
+                val target = activeGrid
+                val limit = (cursorCol + count).coerceAtMost(maxCols)
+                for (c in cursorCol until limit) {
+                    target[cursorRow][c].reset()
+                }
+            }
+
+            // Delete Character: [P (hapus N karakter di kursor dan geser sisa baris ke kiri)
+            'P' -> {
+                val count = if (params.isNotEmpty() && params[0] > 0) params[0] else 1
+                val target = activeGrid
+                val safeCount = count.coerceAtMost(maxCols - cursorCol)
+                for (c in cursorCol until maxCols - safeCount) {
+                    target[cursorRow][c].copyFrom(target[cursorRow][c + safeCount])
+                }
+                for (c in (maxCols - safeCount) until maxCols) {
+                    target[cursorRow][c].reset()
+                }
+            }
+
+            // Insert Character: [@ (sisipkan N spasi di kursor dan geser karakter ke kanan)
+            '@' -> {
+                val count = if (params.isNotEmpty() && params[0] > 0) params[0] else 1
+                val target = activeGrid
+                val safeCount = count.coerceAtMost(maxCols - cursorCol)
+                for (c in maxCols - 1 downTo cursorCol + safeCount) {
+                    target[cursorRow][c].copyFrom(target[cursorRow][c - safeCount])
+                }
+                for (c in cursorCol until cursorCol + safeCount) {
+                    target[cursorRow][c].reset()
+                }
+            }
+
+            // Insert Lines: [L (sisipkan N baris kosong di baris kursor)
+            'L' -> {
+                val count = if (params.isNotEmpty() && params[0] > 0) params[0] else 1
+                val target = activeGrid
+                val safeCount = count.coerceAtMost(maxRows - cursorRow)
+                for (r in maxRows - 1 downTo cursorRow + safeCount) {
+                    for (c in 0 until maxCols) target[r][c].copyFrom(target[r - safeCount][c])
+                }
+                for (r in cursorRow until cursorRow + safeCount) {
+                    for (c in 0 until maxCols) target[r][c].reset()
+                }
+            }
+
+            // Delete Lines: [M (hapus N baris di baris kursor dan geser baris bawah ke atas)
+            'M' -> {
+                val count = if (params.isNotEmpty() && params[0] > 0) params[0] else 1
+                val target = activeGrid
+                val safeCount = count.coerceAtMost(maxRows - cursorRow)
+                for (r in cursorRow until maxRows - safeCount) {
+                    for (c in 0 until maxCols) target[r][c].copyFrom(target[r + safeCount][c])
+                }
+                for (r in (maxRows - safeCount) until maxRows) {
+                    for (c in 0 until maxCols) target[r][c].reset()
+                }
+            }
+
+            // Scroll Up: [S (geser layar ke atas N baris)
+            'S' -> {
+                val count = if (params.isNotEmpty() && params[0] > 0) params[0] else 1
+                repeat(count) { scrollUp() }
+            }
+
+            // Scroll Down: [T (geser layar ke bawah N baris)
+            'T' -> {
+                val count = if (params.isNotEmpty() && params[0] > 0) params[0] else 1
+                val target = activeGrid
+                repeat(count) {
+                    for (r in maxRows - 1 downTo 1) {
+                        for (c in 0 until maxCols) target[r][c].copyFrom(target[r - 1][c])
+                    }
+                    for (c in 0 until maxCols) target[0][c].reset()
                 }
             }
 
@@ -503,52 +621,101 @@ class TerminalGridBuffer(
 
     /**
      * Mengubah isi matriks layar saat ini menjadi Compose AnnotatedString siap render.
+     * Menggunakan batching SpanStyle untuk efisiensi tinggi pada CPU Helio G35 (anti-lag saat ngetik).
      */
     fun renderToAnnotatedString(): AnnotatedString {
         synchronized(lock) {
             val target = activeGrid
             return buildAnnotatedString {
-                for (r in 0 until maxRows) {
-                    val line = target[r]
-                    // Cari panjang baris tanpa trailing spaces yang berlebihan
-                    var lastNonSpace = maxCols - 1
-                    while (lastNonSpace >= 0 && line[lastNonSpace].char == ' ' && line[lastNonSpace].bgColor == Color.Transparent) {
-                        lastNonSpace--
+                // 1. Render riwayat scrollback jika sedang di layar normal (bukan fullscreen alt buffer)
+                if (!isAltBuffer && scrollback.isNotEmpty()) {
+                    val maxScrollbackRender = 300
+                    val startIdx = (scrollback.size - maxScrollbackRender).coerceAtLeast(0)
+                    for (idx in startIdx until scrollback.size) {
+                        renderLine(this, scrollback[idx], -1, -1)
+                        append('\n')
                     }
+                }
 
-                    val endCol = (lastNonSpace + 1).coerceAtMost(maxCols)
-
-                    for (c in 0 until endCol) {
-                        val cell = line[c]
-                        val isCursorHere = (isCursorVisible && r == cursorRow && c == cursorCol)
-
-                        val effectiveFg = if (isCursorHere) Color.Black else cell.fgColor
-                        val effectiveBg = if (isCursorHere) Color(0xFF61AFEF) else cell.bgColor
-
-                        pushStyle(
-                            SpanStyle(
-                                color = effectiveFg,
-                                background = effectiveBg,
-                                fontWeight = if (cell.isBold) FontWeight.Bold else FontWeight.Normal,
-                                textDecoration = if (cell.isUnderline) TextDecoration.Underline else TextDecoration.None
-                            )
-                        )
-                        append(cell.char)
-                        pop()
+                // 2. Tentukan baris aktif terakhir yang perlu dirender di grid
+                var lastActiveRow = if (isAltBuffer) maxRows - 1 else cursorRow
+                if (!isAltBuffer) {
+                    for (r in maxRows - 1 downTo cursorRow + 1) {
+                        val hasContent = target[r].any { it.char != ' ' || it.bgColor != Color.Transparent }
+                        if (hasContent) {
+                            lastActiveRow = r
+                            break
+                        }
                     }
+                }
 
-                    // Tampilkan kursor jika kursor berada di akhir baris kosong
-                    if (isCursorVisible && r == cursorRow && cursorCol >= endCol && cursorCol < maxCols) {
-                        pushStyle(SpanStyle(background = Color(0xFF61AFEF), color = Color.Black))
-                        append(' ')
-                        pop()
-                    }
-
-                    if (r < maxRows - 1) {
+                // 3. Render setiap baris aktif dengan batching gaya ANSI
+                for (r in 0..lastActiveRow) {
+                    renderLine(this, target[r], r, cursorCol)
+                    if (r < lastActiveRow) {
                         append('\n')
                     }
                 }
             }
+        }
+    }
+
+    private fun renderLine(
+        builder: AnnotatedString.Builder,
+        line: Array<TerminalCell>,
+        rowIdx: Int,
+        cursorColIdx: Int
+    ) {
+        var lastNonSpace = maxCols - 1
+        while (lastNonSpace >= 0 && line[lastNonSpace].char == ' ' && line[lastNonSpace].bgColor == Color.Transparent) {
+            lastNonSpace--
+        }
+        val endCol = (lastNonSpace + 1).coerceAtMost(maxCols)
+
+        var col = 0
+        while (col < endCol) {
+            val isCursorHere = (isCursorVisible && rowIdx == cursorRow && col == cursorColIdx)
+            val cell = line[col]
+            val fg = if (isCursorHere) Color.Black else cell.fgColor
+            val bg = if (isCursorHere) Color(0xFF61AFEF) else cell.bgColor
+            val bold = cell.isBold
+            val underline = cell.isUnderline
+
+            val sb = StringBuilder()
+            while (col < endCol) {
+                val curCursor = (isCursorVisible && rowIdx == cursorRow && col == cursorColIdx)
+                val curCell = line[col]
+                val curFg = if (curCursor) Color.Black else curCell.fgColor
+                val curBg = if (curCursor) Color(0xFF61AFEF) else curCell.bgColor
+                if (curFg != fg || curBg != bg || curCell.isBold != bold || curCell.isUnderline != underline) {
+                    break
+                }
+                sb.append(curCell.char)
+                col++
+            }
+
+            val isDefaultStyle = (fg == defaultFg && bg == Color.Transparent && !bold && !underline)
+            if (isDefaultStyle) {
+                builder.append(sb.toString())
+            } else {
+                builder.pushStyle(
+                    SpanStyle(
+                        color = fg,
+                        background = bg,
+                        fontWeight = if (bold) FontWeight.Bold else FontWeight.Normal,
+                        textDecoration = if (underline) TextDecoration.Underline else TextDecoration.None
+                    )
+                )
+                builder.append(sb.toString())
+                builder.pop()
+            }
+        }
+
+        // Tampilkan kursor jika kursor berada setelah karakter terakhir baris
+        if (isCursorVisible && rowIdx == cursorRow && cursorColIdx >= endCol && cursorColIdx < maxCols) {
+            builder.pushStyle(SpanStyle(background = Color(0xFF61AFEF), color = Color.Black))
+            builder.append(' ')
+            builder.pop()
         }
     }
 

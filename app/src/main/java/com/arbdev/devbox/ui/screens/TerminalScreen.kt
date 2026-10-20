@@ -29,8 +29,6 @@ import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.ContentPaste
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Terminal
-import androidx.compose.material3.FilterChip
-import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.ScrollableTabRow
@@ -45,6 +43,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
@@ -373,7 +372,8 @@ fun TerminalScreen(
                             }
                             isCtrlActive = false
                         } else {
-                            activeSession.sendText(typed)
+                            val sanitized = typed.replace("\r\n", "\r").replace("\n", "\r")
+                            activeSession.sendText(sanitized)
                         }
                         inputTfv = TextFieldValue(zeroWidthPrefix, TextRange(zeroWidthPrefix.length))
                     }
@@ -427,11 +427,7 @@ fun TerminalScreen(
                 keyboardType = KeyboardType.Ascii,
                 imeAction = ImeAction.None
             ),
-            keyboardActions = KeyboardActions(
-                onAny = {
-                    activeSession.sendText("\r")
-                }
-            ),
+            keyboardActions = KeyboardActions.Default,
             cursorBrush = SolidColor(Color.Transparent),
             textStyle = TextStyle(color = Color.Transparent, fontSize = 1.sp)
         )
@@ -638,7 +634,7 @@ fun TerminalModifierKey(
     val containerBg = when {
         isSignal -> Color(0xFF3E1214)
         highlight -> DevPrimary.copy(alpha = 0.25f)
-        else -> Color(0xFF1C1C1C)
+        else -> Color(0xFF1E1E1E)
     }
 
     val textColor = when {
@@ -647,23 +643,24 @@ fun TerminalModifierKey(
         else -> Color.White
     }
 
-    FilterChip(
-        selected = false,
-        onClick = onClick,
-        shape = RoundedCornerShape(6.dp),
-        label = {
-            Text(
-                text = label,
-                fontSize = 11.sp,
-                fontWeight = FontWeight.Bold,
-                fontFamily = FontFamily.Monospace,
-                color = textColor
-            )
-        },
-        colors = FilterChipDefaults.filterChipColors(
-            containerColor = containerBg
+    Box(
+        modifier = Modifier
+            .clip(RoundedCornerShape(6.dp))
+            .background(containerBg)
+            .clickable {
+                onClick()
+            }
+            .padding(horizontal = 10.dp, vertical = 6.dp),
+        contentAlignment = Alignment.Center
+    ) {
+        Text(
+            text = label,
+            fontSize = 11.sp,
+            fontWeight = FontWeight.Bold,
+            fontFamily = FontFamily.Monospace,
+            color = textColor
         )
-    )
+    }
 }
 
 @Composable
@@ -672,22 +669,25 @@ fun TerminalToggleKey(
     isActive: Boolean,
     onClick: () -> Unit
 ) {
-    FilterChip(
-        selected = isActive,
-        onClick = onClick,
-        shape = RoundedCornerShape(6.dp),
-        label = {
-            Text(
-                text = label,
-                fontSize = 11.sp,
-                fontWeight = FontWeight.Bold,
-                fontFamily = FontFamily.Monospace,
-                color = if (isActive) Color.Black else Color.White
-            )
-        },
-        colors = FilterChipDefaults.filterChipColors(
-            containerColor = Color(0xFF1C1C1C),
-            selectedContainerColor = DevPrimary
+    val containerBg = if (isActive) DevPrimary else Color(0xFF1E1E1E)
+    val textColor = if (isActive) Color.Black else Color.White
+
+    Box(
+        modifier = Modifier
+            .clip(RoundedCornerShape(6.dp))
+            .background(containerBg)
+            .clickable {
+                onClick()
+            }
+            .padding(horizontal = 10.dp, vertical = 6.dp),
+        contentAlignment = Alignment.Center
+    ) {
+        Text(
+            text = label,
+            fontSize = 11.sp,
+            fontWeight = FontWeight.Bold,
+            fontFamily = FontFamily.Monospace,
+            color = textColor
         )
-    )
+    }
 }

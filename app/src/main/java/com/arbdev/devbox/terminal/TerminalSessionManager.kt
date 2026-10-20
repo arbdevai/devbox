@@ -78,7 +78,7 @@ class NativeTerminalSession(
                     "mountpoint -q '$targetRootfs/sys' || mount -t sysfs sysfs '$targetRootfs/sys'; " +
                     "mountpoint -q '$targetRootfs/mnt/sdcard' || mount --bind /sdcard '$targetRootfs/mnt/sdcard' 2>/dev/null; " +
                     "chown -R 1000:1000 '$targetRootfs/home/coder' 2>/dev/null; chmod -R u+rwX '$targetRootfs/home/coder' 2>/dev/null; " +
-                    "cd '$targetRootfs' && exec chroot '$targetRootfs' /usr/bin/env -i HOME=/home/coder USER=coder LOGNAME=coder SHELL=/bin/bash TERM=xterm-256color COLORTERM=truecolor PATH=/home/coder/.local/bin:/home/coder/.cargo/bin:/home/coder/go/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin /usr/bin/setpriv --reuid 1000 --regid 1000 --init-groups /bin/bash -c 'cd /home/coder 2>/dev/null || cd /; if [ -x /usr/bin/script ]; then exec /usr/bin/script -qefc \"/bin/bash -l\" /dev/null; else exec /bin/bash -l; fi'"
+                    "cd '$targetRootfs' && exec chroot '$targetRootfs' /usr/bin/env -i HOME=/home/coder USER=coder LOGNAME=coder SHELL=/bin/bash TERM=xterm-256color COLORTERM=truecolor PATH=/home/coder/.local/bin:/home/coder/.cargo/bin:/home/coder/go/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin /usr/bin/setpriv --reuid 1000 --regid 1000 --init-groups /bin/bash -c 'cd /home/coder 2>/dev/null || cd /; if [ -x /usr/bin/script ]; then exec /usr/bin/script -qefc \"stty rows 30 cols 80 2>/dev/null; exec /bin/bash -l\" /dev/null; else exec /bin/bash -l; fi'"
 
             val pb = ProcessBuilder(suBinary, "-c", chrootCmd)
             pb.redirectErrorStream(true) // Gabungkan stderr ke stdout stream
