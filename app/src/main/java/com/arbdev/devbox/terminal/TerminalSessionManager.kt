@@ -24,8 +24,10 @@ import java.io.OutputStream
  */
 class NativeTerminalSession(
     val id: String = java.util.UUID.randomUUID().toString(),
-    var name: String = "Sesi 1"
+    initialName: String = "Sesi 1"
 ) {
+    var name by mutableStateOf(initialName)
+    var isCustomName by mutableStateOf(false)
     var isRunning by mutableStateOf(false)
     var currentTitle by mutableStateOf("coder@devbox:~")
     var currentDir by mutableStateOf("/home/coder")
@@ -47,7 +49,9 @@ class NativeTerminalSession(
         buffer.onTitleChanged = { title ->
             mainHandler.post {
                 currentTitle = title
-                name = title.take(15)
+                if (!isCustomName && title.isNotBlank()) {
+                    name = cleanSessionTitle(title)
+                }
             }
         }
         buffer.onClipboardCopy = { text ->
@@ -116,7 +120,6 @@ class NativeTerminalSession(
                         val count = stream.read(byteBuffer)
                         if (count == -1) break
                         if (count > 0) {
-                            AppLogger.i("NativeTerminal", "readerJob <- PTY ($count bytes)")
                             buffer.write(byteBuffer, 0, count)
                         }
                     }
@@ -140,8 +143,6 @@ class NativeTerminalSession(
     private var lastRows = 0
 
     fun sendText(text: String) {
-        val preview = if (text.length > 20) text.take(15) + "..." else text
-        AppLogger.i("NativeTerminal", "sendText -> PTY ($preview, ${text.length} chars)")
         sessionScope.launch(Dispatchers.IO) {
             val out = outputStream ?: return@launch
             try {
@@ -155,7 +156,6 @@ class NativeTerminalSession(
     }
 
     fun sendBytes(bytes: ByteArray) {
-        AppLogger.i("NativeTerminal", "sendBytes -> PTY (${bytes.size} bytes)")
         sessionScope.launch(Dispatchers.IO) {
             val out = outputStream ?: return@launch
             try {
@@ -258,6 +258,20 @@ class NativeTerminalSession(
             process?.destroy()
         } catch (_: Exception) {}
     }
+
+    companion object {
+        fun cleanSessionTitle(raw: String): String {
+            val clean = raw.trim()
+            val afterColon = if (clean.contains(":")) clean.substringAfter(":").trim() else clean
+            val afterAt = if (afterColon.contains("@")) afterColon.substringAfter("@").trim() else afterColon
+            val folder = if (afterAt.contains("/")) afterAt.substringAfterLast("/").trim() else afterAt
+            return when {
+                folder.isBlank() || folder == "~" -> "bash"
+                folder.length > 14 -> folder.take(14)
+                else -> folder
+            }
+        }
+    }
 }
 
 object TerminalSessionManager {
@@ -279,7 +293,7 @@ object TerminalSessionManager {
     fun createNewSession(customName: String? = null): NativeTerminalSession {
         val sessionNumber = sessions.size + 1
         val name = customName ?: "Sesi $sessionNumber"
-        val newSession = NativeTerminalSession(name = name)
+        val newSession = NativeTerminalSession(initialName = name)
         sessions.add(newSession)
         activeIndex.intValue = sessions.size - 1
         return newSession
@@ -292,8 +306,11 @@ object TerminalSessionManager {
             sessionToClose.finish()
             sessions.removeAt(index)
 
-            val newActive = activeIndex.intValue.coerceIn(0, sessions.size - 1)
-            activeIndex.intValue = newActive
+            val current = activeIndex.intValue
+            when {
+                index < current -> activeIndex.intValue = current - 1
+                index == current -> activeIndex.intValue = current.coerceAtMost(sessions.size - 1)
+            }
         }
     }
 

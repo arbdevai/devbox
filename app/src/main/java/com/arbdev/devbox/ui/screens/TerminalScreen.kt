@@ -85,10 +85,13 @@ import androidx.compose.ui.unit.DpOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.arbdev.devbox.service.KeepAliveService
+import com.arbdev.devbox.terminal.NativeTerminalSession
 import com.arbdev.devbox.terminal.TerminalSessionManager
 import com.arbdev.devbox.util.AppLogger
 import com.arbdev.devbox.ui.theme.DevOnSurface
+import com.arbdev.devbox.ui.theme.DevOnSurfaceVariant
 import com.arbdev.devbox.ui.theme.DevPrimary
+import com.arbdev.devbox.ui.theme.DevSecondary
 import com.arbdev.devbox.ui.theme.DevSurface
 import com.arbdev.devbox.ui.theme.TerminalBackground
 import com.arbdev.devbox.ui.theme.TerminalCyan
@@ -129,11 +132,16 @@ fun TerminalScreen(
     // Dialog proteksi teks clipboard sangat panjang (anti-loop CLI)
     var pendingLargePaste by remember { mutableStateOf<String?>(null) }
 
+    // Dialog ubah nama sesi
+    var sessionToRename by remember { mutableStateOf<NativeTerminalSession?>(null) }
+    var renameInputText by remember { mutableStateOf("") }
+
     // View input terminal berbasis BaseInputConnection (gaya Termux, tanpa Compose TextField delay)
     var terminalInputView by remember { mutableStateOf<TerminalInputView?>(null) }
 
-    val verticalScrollState = rememberScrollState()
-    val horizontalScrollState = rememberScrollState()
+    // Scroll state terisolasi per sesi (mencegah desinkronisasi viewport saat switch antar sesi)
+    val verticalScrollState = remember(activeSession.id) { ScrollState(0) }
+    val horizontalScrollState = remember(activeSession.id) { ScrollState(0) }
 
     // Helper navigasi tombol panah yang menghormati DECCKM (Application Cursor Mode pada TUI seperti agy)
     val sendArrowUp = {
@@ -211,6 +219,17 @@ fun TerminalScreen(
                     selected = activeIndex == index,
                     onClick = {
                         TerminalSessionManager.activeIndex.intValue = index
+                    },
+                    modifier = Modifier.pointerInput(session.id) {
+                        detectTapGestures(
+                            onTap = {
+                                TerminalSessionManager.activeIndex.intValue = index
+                            },
+                            onLongPress = {
+                                sessionToRename = session
+                                renameInputText = session.name
+                            }
+                        )
                     },
                     text = {
                         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -544,6 +563,61 @@ fun TerminalScreen(
                 dismissButton = {
                     TextButton(onClick = { pendingLargePaste = null }) {
                         Text("Batal")
+                    }
+                }
+            )
+        }
+
+        // Dialog Ubah Nama Sesi (Rename Session)
+        sessionToRename?.let { sess ->
+            AlertDialog(
+                onDismissRequest = { sessionToRename = null },
+                title = { Text("Ubah Nama Sesi", fontWeight = FontWeight.Bold) },
+                text = {
+                    Column {
+                        Text(
+                            "Ketik nama kustom untuk sesi ini atau pilih 'Auto Detect' untuk mengikuti nama proses/folder secara otomatis.",
+                            fontSize = 12.sp,
+                            color = DevOnSurfaceVariant
+                        )
+                        Spacer(modifier = Modifier.height(10.dp))
+                        androidx.compose.material3.OutlinedTextField(
+                            value = renameInputText,
+                            onValueChange = { renameInputText = it },
+                            label = { Text("Nama Sesi") },
+                            singleLine = true,
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                    }
+                },
+                confirmButton = {
+                    TextButton(
+                        onClick = {
+                            if (renameInputText.isNotBlank()) {
+                                sess.name = renameInputText.trim()
+                                sess.isCustomName = true
+                            }
+                            sessionToRename = null
+                        }
+                    ) {
+                        Text("Simpan", color = DevPrimary, fontWeight = FontWeight.Bold)
+                    }
+                },
+                dismissButton = {
+                    Row {
+                        TextButton(
+                            onClick = {
+                                sess.isCustomName = false
+                                sess.name = NativeTerminalSession.cleanSessionTitle(sess.currentTitle)
+                                sessionToRename = null
+                            }
+                        ) {
+                            Text("Auto Detect", color = DevSecondary)
+                        }
+                        Spacer(modifier = Modifier.width(4.dp))
+                        TextButton(onClick = { sessionToRename = null }) {
+                            Text("Batal")
+                        }
                     }
                 }
             )
