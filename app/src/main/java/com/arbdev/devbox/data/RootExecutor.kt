@@ -68,12 +68,13 @@ object RootExecutor {
             return@withContext true
         }
         val res = executeSync("id", silent = true)
-        val available = res.isSuccess && res.stdout.contains("uid=0")
+        val cmdResult = res.getOrNull()
+        val available = res.isSuccess && (cmdResult?.stdout?.contains("uid=0") == true)
         cachedRootAvailable = available
         if (available) {
-            AppLogger.i("RootExecutor", "Akses root (su) terverifikasi: ${res.stdout}")
+            AppLogger.i("RootExecutor", "Akses root (su) terverifikasi: ${cmdResult?.stdout}")
         } else {
-            AppLogger.w("RootExecutor", "Akses root gagal / ditolak (exit: ${res.exitCode}, out: ${res.stdout})")
+            AppLogger.w("RootExecutor", "Akses root gagal / ditolak (exit: ${cmdResult?.exitCode}, out: ${cmdResult?.stdout})")
         }
         available
     }
