@@ -135,24 +135,31 @@ class NativeTerminalSession(
         }
     }
 
+    private var lastCols = 0
+    private var lastRows = 0
+
     fun sendText(text: String) {
-        val out = outputStream ?: return
-        try {
-            val bytes = text.toByteArray(Charsets.UTF_8)
-            out.write(bytes)
-            out.flush()
-        } catch (e: Exception) {
-            AppLogger.e("NativeTerminal", "Gagal kirim teks ke [$name]: ${e.message}")
+        sessionScope.launch(Dispatchers.IO) {
+            val out = outputStream ?: return@launch
+            try {
+                val bytes = text.toByteArray(Charsets.UTF_8)
+                out.write(bytes)
+                out.flush()
+            } catch (e: Exception) {
+                AppLogger.e("NativeTerminal", "Gagal kirim teks ke [$name]: ${e.message}")
+            }
         }
     }
 
     fun sendBytes(bytes: ByteArray) {
-        val out = outputStream ?: return
-        try {
-            out.write(bytes)
-            out.flush()
-        } catch (e: Exception) {
-            AppLogger.e("NativeTerminal", "Gagal kirim bytes ke [$name]: ${e.message}")
+        sessionScope.launch(Dispatchers.IO) {
+            val out = outputStream ?: return@launch
+            try {
+                out.write(bytes)
+                out.flush()
+            } catch (e: Exception) {
+                AppLogger.e("NativeTerminal", "Gagal kirim bytes ke [$name]: ${e.message}")
+            }
         }
     }
 
@@ -182,6 +189,9 @@ class NativeTerminalSession(
     }
 
     fun updateWindowSize(cols: Int, rows: Int) {
+        if (cols == lastCols && rows == lastRows) return
+        lastCols = cols
+        lastRows = rows
         buffer.resize(cols, rows)
         val pid = getProcessPid() ?: return
         sessionScope.launch(Dispatchers.IO) {

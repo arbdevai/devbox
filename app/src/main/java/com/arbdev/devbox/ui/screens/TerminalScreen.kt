@@ -24,9 +24,6 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.text.BasicTextField
-import androidx.compose.foundation.text.KeyboardActions
-import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
@@ -53,8 +50,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.focus.FocusRequester
-import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.viewinterop.AndroidView
+import com.arbdev.devbox.terminal.TerminalInputView
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
@@ -74,14 +71,9 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.AnnotatedString
-import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.input.ImeAction
-import androidx.compose.ui.text.input.KeyboardCapitalization
-import androidx.compose.ui.text.input.KeyboardType
-import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.arbdev.devbox.service.KeepAliveService
@@ -123,10 +115,8 @@ fun TerminalScreen(
     var isAltActive by remember { mutableStateOf(false) }
     var isShiftActive by remember { mutableStateOf(false) }
 
-    // Input state untuk Compose BasicTextField (kompatibel penuh dengan FlorisBoard, Gboard, dll.)
-    val asciiPrefix = "XX"
-    var inputTfv by remember { mutableStateOf(TextFieldValue(asciiPrefix, TextRange(asciiPrefix.length))) }
-    val focusRequester = remember { FocusRequester() }
+    // View input terminal berbasis BaseInputConnection (gaya Termux, tanpa Compose TextField delay)
+    var terminalInputView by remember { mutableStateOf<TerminalInputView?>(null) }
 
     val verticalScrollState = rememberScrollState()
     val horizontalScrollState = rememberScrollState()
@@ -151,7 +141,7 @@ fun TerminalScreen(
 
     LaunchedEffect(Unit) {
         KeepAliveService.startService(context)
-        focusRequester.requestFocus()
+        terminalInputView?.requestKeyboard()
     }
 
     LaunchedEffect(activeSession.isRunning, activeSession.currentDir, TerminalSessionManager.sessions.size) {
@@ -286,7 +276,7 @@ fun TerminalScreen(
                 // Toggle Soft Keyboard
                 IconButton(
                     onClick = {
-                        focusRequester.requestFocus()
+                        terminalInputView?.requestKeyboard()
                         keyboardController?.show()
                     },
                     modifier = Modifier.size(30.dp)
@@ -394,23 +384,14 @@ fun TerminalScreen(
             }
         }
 
-        // Hidden Compose BasicTextField for capturing soft keyboard input (FlorisBoard / Gboard)
-        BasicTextField(
-            value = inputTfv,
-            onValueChange = { newTfv ->
-                val newText = newTfv.text
-                if (newText.length < asciiPrefix.length) {
-                    // Tombol hapus (Backspace) ditekan pada FlorisBoard / keyboard virtual
-                    val deleteCount = asciiPrefix.length - newText.length
-                    repeat(deleteCount) {
-                        activeSession.sendBytes(byteArrayOf(127))
-                    }
-                    inputTfv = TextFieldValue(asciiPrefix, TextRange(asciiPrefix.length))
-                } else if (newText.startsWith(asciiPrefix)) {
-                    val typed = newText.substring(asciiPrefix.length)
-                    if (typed.isNotEmpty()) {
+        // Native Terminal Input View berbasis BaseInputConnection (Arsitektur Input Termux)
+        AndroidView(
+            factory = { ctx ->
+                TerminalInputView(ctx).apply {
+                    onCommitText = { text ->
                         if (isCtrlActive) {
-                            for (ch in typed) {
+                            val bytes = mutableListOf<Byte>()
+                            for (ch in text) {
                                 val code = when (ch.lowercaseChar()) {
                                     'c' -> 3
                                     'd' -> 4
@@ -424,77 +405,56 @@ fun TerminalScreen(
                                     in 'a'..'z' -> (ch.lowercaseChar() - 'a' + 1)
                                     else -> ch.code
                                 }
-                                activeSession.sendBytes(byteArrayOf(code.toByte()))
+                                bytes.add(code.toByte())
                             }
+                            activeSession.sendBytes(bytes.toByteArray())
                             isCtrlActive = false
                         } else {
-                            val sanitized = typed.replace("\r\n", "\r").replace("\n", "\r")
+                            val sanitized = text.replace("\r\n", "\r").replace("\n", "\r")
                             activeSession.sendText(sanitized)
                         }
-                        inputTfv = TextFieldValue(asciiPrefix, TextRange(asciiPrefix.length))
                     }
-                } else {
-                    // Penanganan paste teks atau penggantian seluruh buffer oleh IME
-                    val typed = newText
-                    if (typed.isNotEmpty()) {
-                        val sanitized = typed.replace("\r\n", "\r").replace("\n", "\r")
-                        activeSession.sendText(sanitized)
+                    onBackspace = {
+                        activeSession.sendBytes(byteArrayOf(127))
                     }
-                    inputTfv = TextFieldValue(asciiPrefix, TextRange(asciiPrefix.length))
-                }
-            },
-            modifier = Modifier
-                .size(1.dp)
-                .alpha(0.01f)
-                .focusRequester(focusRequester)
-                .onKeyEvent { keyEvent ->
-                    if (keyEvent.type == KeyEventType.KeyDown) {
-                        when (keyEvent.key) {
-                            Key.Enter -> {
-                                activeSession.sendText("\r")
-                                true
-                            }
-                            Key.Backspace -> {
-                                activeSession.sendBytes(byteArrayOf(127))
-                                true
-                            }
-                            Key.Tab -> {
-                                activeSession.sendBytes(byteArrayOf(9))
-                                true
-                            }
-                            Key.DirectionUp -> {
+                    onSendKey = { keyCode ->
+                        when (keyCode) {
+                            android.view.KeyEvent.KEYCODE_DPAD_UP -> {
                                 sendArrowUp()
                                 true
                             }
-                            Key.DirectionDown -> {
+                            android.view.KeyEvent.KEYCODE_DPAD_DOWN -> {
                                 sendArrowDown()
                                 true
                             }
-                            Key.DirectionLeft -> {
+                            android.view.KeyEvent.KEYCODE_DPAD_LEFT -> {
                                 sendArrowLeft()
                                 true
                             }
-                            Key.DirectionRight -> {
+                            android.view.KeyEvent.KEYCODE_DPAD_RIGHT -> {
                                 sendArrowRight()
                                 true
                             }
-                            Key.Escape -> {
+                            android.view.KeyEvent.KEYCODE_TAB -> {
+                                activeSession.sendBytes(byteArrayOf(9))
+                                true
+                            }
+                            android.view.KeyEvent.KEYCODE_ESCAPE -> {
                                 activeSession.sendBytes(byteArrayOf(27))
                                 true
                             }
                             else -> false
                         }
-                    } else false
-                },
-            keyboardOptions = KeyboardOptions(
-                capitalization = KeyboardCapitalization.None,
-                autoCorrectEnabled = false,
-                keyboardType = KeyboardType.Ascii,
-                imeAction = ImeAction.None
-            ),
-            keyboardActions = KeyboardActions.Default,
-            cursorBrush = SolidColor(Color.Transparent),
-            textStyle = TextStyle(color = Color.Transparent, fontSize = 1.sp)
+                    }
+                    terminalInputView = this
+                }
+            },
+            update = { view ->
+                terminalInputView = view
+            },
+            modifier = Modifier
+                .size(1.dp)
+                .alpha(0.01f)
         )
 
         // Native 2D VT100 Matrix Canvas / Terminal Text Area with Direct Glyph Drawing
@@ -524,7 +484,7 @@ fun TerminalScreen(
                 verticalScrollState = verticalScrollState,
                 horizontalScrollState = horizontalScrollState,
                 onFocusRequest = {
-                    focusRequester.requestFocus()
+                    terminalInputView?.requestKeyboard()
                     keyboardController?.show()
                 },
                 onTapUrl = { url ->
