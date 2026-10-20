@@ -257,8 +257,7 @@ class NativeTerminalSession(
                         "if [[ \$target == /dev/pts/* ]]; then " +
                         "stty -F \"\$target\" rows $rows cols $cols 2>/dev/null; " +
                         "fi; done; done"
-                val pb = ProcessBuilder("su", "-c", cmd)
-                pb.start().waitFor()
+                com.arbdev.devbox.data.RootExecutor.executeSync(cmd, silent = true)
             } catch (_: Exception) {}
         }
     }
@@ -311,8 +310,7 @@ class NativeTerminalSession(
                         "if grep -z '^DEVBOX_SESSION_ID=$sessionId' \"\$p/environ\" 2>/dev/null >/dev/null; then " +
                         "kill -9 \"\$(basename \$p)\" 2>/dev/null; " +
                         "fi; fi; done"
-                val pb = ProcessBuilder(suBinary, "-c", killCmd)
-                pb.start().waitFor()
+                com.arbdev.devbox.data.RootExecutor.executeSync(killCmd, silent = true)
             } catch (_: Exception) {}
         }
 

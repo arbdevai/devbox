@@ -24,6 +24,7 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.gestures.detectTapGestures
@@ -1097,7 +1098,7 @@ fun TerminalScreen(
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .background(Color(0xFF0D0D0D))
+                .background(TerminalBackground)
                 .padding(vertical = 4.dp),
             verticalArrangement = Arrangement.spacedBy(4.dp)
         ) {
@@ -1251,20 +1252,27 @@ fun TerminalModifierKey(
 ) {
     val containerBg = when {
         isSignal -> Color(0xFF3E1214)
-        highlight -> DevPrimary.copy(alpha = 0.25f)
-        else -> Color(0xFF1E1E1E)
+        highlight -> Color(0x3300FF66)
+        else -> Color(0xFF0E1A11)
     }
 
     val textColor = when {
         isSignal -> Color(0xFFFF7B72)
-        highlight -> DevPrimary
-        else -> Color.White
+        highlight -> Color(0xFF00FF66)
+        else -> Color(0xFF88FFB0)
+    }
+
+    val borderStroke = when {
+        isSignal -> BorderStroke(1.dp, Color(0x44FF4444))
+        highlight -> BorderStroke(1.dp, Color(0xFF00FF66))
+        else -> BorderStroke(0.5.dp, Color(0x2200FF66))
     }
 
     Box(
         modifier = Modifier
             .clip(RoundedCornerShape(6.dp))
             .background(containerBg)
+            .border(borderStroke, RoundedCornerShape(6.dp))
             .clickable {
                 onClick()
             }
@@ -1287,13 +1295,15 @@ fun TerminalToggleKey(
     isActive: Boolean,
     onClick: () -> Unit
 ) {
-    val containerBg = if (isActive) DevPrimary else Color(0xFF1E1E1E)
-    val textColor = if (isActive) Color.Black else Color.White
+    val containerBg = if (isActive) Color(0xFF00FF66) else Color(0xFF0E1A11)
+    val textColor = if (isActive) Color(0xFF030804) else Color(0xFF88FFB0)
+    val borderStroke = if (isActive) BorderStroke(1.dp, Color(0xFF00FF66)) else BorderStroke(0.5.dp, Color(0x2200FF66))
 
     Box(
         modifier = Modifier
             .clip(RoundedCornerShape(6.dp))
             .background(containerBg)
+            .border(borderStroke, RoundedCornerShape(6.dp))
             .clickable {
                 onClick()
             }
@@ -1571,7 +1581,7 @@ fun TerminalCanvas(
             .pointerInput(session.buffer.isMouseTrackingEnabled, fontSizeSp, isAltBuffer) {
                 detectTapGestures(
                     onTap = { offset ->
-                        if (currentActionMode != null) {
+                        if (currentActionMode != null || selectionStart != null) {
                             currentActionMode?.finish()
                             currentActionMode = null
                             selectionStart = null
@@ -1582,21 +1592,20 @@ fun TerminalCanvas(
                             if (charWidth > 0 && charHeight > 0) {
                                 val actualX = offset.x + horizontalScrollState.value
                                 val actualY = if (!isAltBuffer) offset.y + verticalScrollState.value else offset.y
+                                val maxLine = (if (isAltBuffer) session.buffer.maxRows else session.buffer.getLineCount()) - 1
                                 val col = (actualX / charWidth).toInt().coerceIn(0, session.buffer.maxCols - 1)
-                                val line = (actualY / charHeight).toInt().coerceIn(0, (session.buffer.getLineCount() - 1).coerceAtLeast(0))
+                                val line = (actualY / charHeight).toInt().coerceIn(0, maxLine.coerceAtLeast(0))
                                 val historyCount = if (session.buffer.isAltBuffer) 0 else session.buffer.getScrollbackSnapshot().size
                                 val activeRow = line - historyCount
 
-                                if (session.buffer.isMouseTrackingEnabled) {
+                                val detectedUrl = session.buffer.getUrlAt(line, col)
+                                if (detectedUrl != null) {
+                                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                    onTapUrl(detectedUrl)
+                                } else if (session.buffer.isMouseTrackingEnabled) {
                                     if (activeRow in 0 until session.buffer.maxRows) {
                                         session.sendMouseEvent(0, col, activeRow, true)
                                         session.sendMouseEvent(0, col, activeRow, false)
-                                    }
-                                } else {
-                                    val detectedUrl = session.buffer.getUrlAt(line, col)
-                                    if (detectedUrl != null) {
-                                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                                        onTapUrl(detectedUrl)
                                     }
                                 }
                             }
@@ -1610,18 +1619,19 @@ fun TerminalCanvas(
                         haptic.performHapticFeedback(HapticFeedbackType.LongPress)
                         onFocusRequest()
 
+                        currentActionMode?.finish()
+                        currentActionMode = null
+
                         if (charWidth > 0 && charHeight > 0) {
                             val actualX = offset.x + horizontalScrollState.value
                             val actualY = if (!isAltBuffer) offset.y + verticalScrollState.value else offset.y
+                            val maxLine = (if (isAltBuffer) session.buffer.maxRows else session.buffer.getLineCount()) - 1
                             val col = (actualX / charWidth).toInt().coerceIn(0, session.buffer.maxCols - 1)
-                            val line = (actualY / charHeight).toInt().coerceIn(0, (session.buffer.getLineCount() - 1).coerceAtLeast(0))
+                            val line = (actualY / charHeight).toInt().coerceIn(0, maxLine.coerceAtLeast(0))
 
                             val (wStart, wEnd) = findWordBounds(line, col)
                             selectionStart = GridPoint(line, wStart)
                             selectionEnd = GridPoint(line, wEnd)
-
-                            currentActionMode?.finish()
-                            currentActionMode = view.startActionMode(actionModeCallback, ActionMode.TYPE_FLOATING)
                         }
                     },
                     onDrag = { change, _ ->
@@ -1629,19 +1639,21 @@ fun TerminalCanvas(
                         if (charWidth > 0 && charHeight > 0) {
                             val actualX = change.position.x + horizontalScrollState.value
                             val actualY = if (!isAltBuffer) change.position.y + verticalScrollState.value else change.position.y
+                            val maxLine = (if (isAltBuffer) session.buffer.maxRows else session.buffer.getLineCount()) - 1
                             val col = (actualX / charWidth).toInt().coerceIn(0, session.buffer.maxCols - 1)
-                            val line = (actualY / charHeight).toInt().coerceIn(0, (session.buffer.getLineCount() - 1).coerceAtLeast(0))
+                            val line = (actualY / charHeight).toInt().coerceIn(0, maxLine.coerceAtLeast(0))
                             selectionEnd = GridPoint(line, col)
-                            currentActionMode?.invalidateContentRect()
                         }
                     },
                     onDragEnd = {
-                        if (currentActionMode == null && selectionStart != null) {
+                        if (selectionStart != null && selectionEnd != null) {
+                            currentActionMode?.finish()
                             currentActionMode = view.startActionMode(actionModeCallback, ActionMode.TYPE_FLOATING)
                         }
                     },
                     onDragCancel = {
-                        if (currentActionMode == null && selectionStart != null) {
+                        if (selectionStart != null && selectionEnd != null) {
+                            currentActionMode?.finish()
                             currentActionMode = view.startActionMode(actionModeCallback, ActionMode.TYPE_FLOATING)
                         }
                     }
@@ -1696,8 +1708,8 @@ fun TerminalCanvas(
                     val pt = GridPoint(lineIdx, bgCol)
                     val isSelected = hasSelection && selMin != null && selMax != null && pt >= selMin && pt <= selMax
                     val runBg = when {
-                        isSelected -> Color(0x7738BDF8)
-                        isCursor -> Color(0xFF61AFEF)
+                        isSelected -> Color(0x5500FF66)
+                        isCursor -> Color(0xFF00FF66)
                         else -> cell.bgColor
                     }
 
@@ -1711,8 +1723,8 @@ fun TerminalCanvas(
                         val nextPt = GridPoint(lineIdx, bgCol)
                         val nextIsSelected = hasSelection && selMin != null && selMax != null && nextPt >= selMin && nextPt <= selMax
                         val nextBg = when {
-                            nextIsSelected -> Color(0x7738BDF8)
-                            nextIsCursor -> Color(0xFF61AFEF)
+                            nextIsSelected -> Color(0x5500FF66)
+                            nextIsCursor -> Color(0xFF00FF66)
                             else -> nextCell.bgColor
                         }
                         if (nextBg == runBg) {
@@ -1747,7 +1759,7 @@ fun TerminalCanvas(
                     val isCursor = (isCursorVisible && (lineIdx - historyCount) == cursorRow && col == cursorCol)
                     val fg = when {
                         isSelected -> Color.White
-                        isCursor -> Color.Black
+                        isCursor -> Color(0xFF030804)
                         else -> cell.fgColor
                     }
                     val isBold = cell.isBold || isSelected
@@ -1787,7 +1799,7 @@ fun TerminalCanvas(
                         val curIsCursor = (isCursorVisible && (lineIdx - historyCount) == cursorRow && col == cursorCol)
                         val curFg = when {
                             curIsSelected -> Color.White
-                            curIsCursor -> Color.Black
+                            curIsCursor -> Color(0xFF030804)
                             else -> curCell.fgColor
                         }
                         val curBold = curCell.isBold || curIsSelected
@@ -1815,7 +1827,7 @@ fun TerminalCanvas(
                 // Kursor di luar batas kolom karakter
                 if (isCursorVisible && (lineIdx - historyCount) == cursorRow && cursorCol >= maxCols) {
                     drawRect(
-                        color = Color(0xFF61AFEF),
+                        color = Color(0xFF00FF66),
                         topLeft = Offset((maxCols - 1) * charWidth, yTop),
                         size = Size(charWidth, charHeight)
                     )

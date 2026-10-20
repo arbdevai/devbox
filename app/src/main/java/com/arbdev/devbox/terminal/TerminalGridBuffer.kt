@@ -16,7 +16,7 @@ import java.nio.charset.StandardCharsets
 data class TerminalCell(
     var char: Char = ' ',
     var extraChar: Char? = null,
-    var fgColor: Color = Color(0xFFDCDCDC),
+    var fgColor: Color = Color(0xFF00FF66),
     var bgColor: Color = Color.Transparent,
     var isBold: Boolean = false,
     var isUnderline: Boolean = false,
@@ -28,7 +28,7 @@ data class TerminalCell(
     fun reset() {
         char = ' '
         extraChar = null
-        fgColor = Color(0xFFDCDCDC)
+        fgColor = Color(0xFF00FF66)
         bgColor = Color.Transparent
         isBold = false
         isUnderline = false
@@ -107,8 +107,8 @@ class TerminalGridBuffer(
     var onClipboardCopy: ((String) -> Unit)? = null
     var onBell: (() -> Unit)? = null
 
-    // Current Drawing Style
-    private val defaultFg = Color(0xFFDCDCDC)
+    // Current Drawing Style (Hacker Phosphor Green)
+    private val defaultFg = Color(0xFF00FF66)
     private val defaultBg = Color.Transparent
     private var currentFg = defaultFg
     private var currentBg = defaultBg
@@ -734,16 +734,16 @@ class TerminalGridBuffer(
         return when (index.coerceIn(0, 15)) {
             0 -> Color(0xFF1E1E1E) // Black
             1 -> Color(0xFFE06C75) // Red
-            2 -> Color(0xFF98C379) // Green
-            3 -> Color(0xFFE5C07B) // Yellow
-            4 -> Color(0xFF61AFEF) // Blue
+            2 -> Color(0xFF00FF66) // Green (Hacker Phosphor)
+            3 -> Color(0xFFFFD700) // Yellow
+            4 -> Color(0xFF38BDF8) // Blue
             5 -> Color(0xFFC678DD) // Magenta
-            6 -> Color(0xFF56B6C2) // Cyan
-            7 -> Color(0xFFABB2BF) // Light Gray
+            6 -> Color(0xFF00FFFF) // Cyan
+            7 -> Color(0xFF00FF66) // Normal text / light gray mapped to Hacker Green
             8 -> Color(0xFF5C6370) // Dark Gray
-            9 -> Color(0xFFBE5046) // Bright Red
-            10 -> Color(0xFFA3D487) // Bright Green
-            11 -> Color(0xFFF0D18C) // Bright Yellow
+            9 -> Color(0xFFFF4444) // Bright Red
+            10 -> Color(0xFF00FF66) // Bright Green
+            11 -> Color(0xFFFFF07A) // Bright Yellow
             12 -> Color(0xFF7EC0EE) // Bright Blue
             13 -> Color(0xFFD896FF) // Bright Magenta
             14 -> Color(0xFF6FE2EF) // Bright Cyan
@@ -839,8 +839,8 @@ class TerminalGridBuffer(
             }
 
             val isCursorHere = (isCursorVisible && rowIdx == cursorRow && col == cursorColIdx)
-            val fg = if (isCursorHere) Color.Black else cell.fgColor
-            val bg = if (isCursorHere) Color(0xFF61AFEF) else cell.bgColor
+            val fg = if (isCursorHere) Color(0xFF030804) else cell.fgColor
+            val bg = if (isCursorHere) Color(0xFF00FF66) else cell.bgColor
             val bold = cell.isBold
             val underline = cell.isUnderline
 
@@ -852,8 +852,8 @@ class TerminalGridBuffer(
                     continue
                 }
                 val curCursor = (isCursorVisible && rowIdx == cursorRow && col == cursorColIdx)
-                val curFg = if (curCursor) Color.Black else curCell.fgColor
-                val curBg = if (curCursor) Color(0xFF61AFEF) else curCell.bgColor
+                val curFg = if (curCursor) Color(0xFF030804) else curCell.fgColor
+                val curBg = if (curCursor) Color(0xFF00FF66) else curCell.bgColor
                 if (curFg != fg || curBg != bg || curCell.isBold != bold || curCell.isUnderline != underline) {
                     break
                 }
@@ -883,7 +883,7 @@ class TerminalGridBuffer(
 
         // Tampilkan kursor jika kursor berada setelah karakter terakhir baris
         if (isCursorVisible && rowIdx == cursorRow && cursorColIdx >= endCol && cursorColIdx < maxCols) {
-            builder.pushStyle(SpanStyle(background = Color(0xFF61AFEF), color = Color.Black))
+            builder.pushStyle(SpanStyle(background = Color(0xFF00FF66), color = Color(0xFF030804)))
             builder.append(' ')
             builder.pop()
         }
@@ -929,7 +929,7 @@ class TerminalGridBuffer(
             for (i in 0 until count) {
                 val c = cursorCol + i
                 if (c < maxCols) {
-                    row[c] = TerminalCell('*', fgColor = Color(0xFF61AFEF), isBold = true)
+                    row[c] = TerminalCell('*', fgColor = Color(0xFF00FF66), isBold = true)
                 }
             }
             cursorCol = (cursorCol + count).coerceAtMost(maxCols - 1)
