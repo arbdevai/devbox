@@ -140,7 +140,8 @@ class NativeTerminalSession(
     private var lastRows = 0
 
     fun sendText(text: String) {
-        AppLogger.i("NativeTerminal", "sendText -> PTY: '$text'")
+        val preview = if (text.length > 20) text.take(15) + "..." else text
+        AppLogger.i("NativeTerminal", "sendText -> PTY ($preview, ${text.length} chars)")
         sessionScope.launch(Dispatchers.IO) {
             val out = outputStream ?: return@launch
             try {
@@ -167,11 +168,11 @@ class NativeTerminalSession(
     }
 
     fun pasteText(text: String) {
-        if (buffer.isBracketedPasteMode) {
-            sendText("\u001B[200~$text\u001B[201~")
-        } else {
-            sendText(text)
-        }
+        // Normalisasi karakter baris baru dan kirim teks murni langsung ke PTY.
+        // Hindari escape sequence bracketed paste (\u001B[200~...\u001B[201~) yang merusak
+        // token/kode OAuth CLI (antigravity, gh, git, curl) dan input prompt interaktif.
+        val sanitized = text.replace("\r\n", "\r").replace("\n", "\r")
+        sendText(sanitized)
     }
 
     fun sendMouseEvent(button: Int, col: Int, row: Int, isPress: Boolean) {

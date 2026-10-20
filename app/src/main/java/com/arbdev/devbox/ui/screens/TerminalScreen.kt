@@ -866,8 +866,6 @@ fun TerminalCanvas(
                 ((scrollY + viewportHeight + charHeight) / charHeight).toInt().coerceIn(0, lineCount - 1)
             } else lineCount - 1
 
-            AppLogger.i("TerminalCanvas", "Canvas redraw v$v: kursor=($cursorRow,$cursorCol), visible=${firstVisibleLine}..${lastVisibleLine}")
-
             val textBatch = StringBuilder()
 
             for (lineIdx in firstVisibleLine..lastVisibleLine) {
