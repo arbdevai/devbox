@@ -32,8 +32,11 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.ContentPaste
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.Terminal
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.ScrollableTabRow
@@ -75,12 +78,15 @@ import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.DpOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.arbdev.devbox.service.KeepAliveService
 import com.arbdev.devbox.terminal.TerminalSessionManager
 import com.arbdev.devbox.util.AppLogger
+import com.arbdev.devbox.ui.theme.DevOnSurface
 import com.arbdev.devbox.ui.theme.DevPrimary
+import com.arbdev.devbox.ui.theme.DevSurface
 import com.arbdev.devbox.ui.theme.TerminalBackground
 import com.arbdev.devbox.ui.theme.TerminalCyan
 import com.arbdev.devbox.ui.theme.TerminalGreen
@@ -775,6 +781,13 @@ fun TerminalCanvas(
     modifier: Modifier = Modifier
 ) {
     val density = LocalDensity.current
+    val haptic = LocalHapticFeedback.current
+    val clipboardManager = LocalClipboardManager.current
+    val context = LocalContext.current
+
+    var showContextMenu by remember { mutableStateOf(false) }
+    var menuOffset by remember { mutableStateOf(Offset.Zero) }
+
     val fontSizePx = with(density) { fontSizeSp.sp.toPx() }
 
     val textPaint = remember(fontSizeSp, density) {
@@ -814,30 +827,38 @@ fun TerminalCanvas(
             .horizontalScroll(horizontalScrollState)
             .padding(horizontal = 6.dp, vertical = 4.dp)
             .pointerInput(session.buffer.isMouseTrackingEnabled, fontSizeSp, isAltBuffer) {
-                detectTapGestures { offset ->
-                    onFocusRequest()
+                detectTapGestures(
+                    onTap = { offset ->
+                        onFocusRequest()
 
-                    if (charWidth > 0 && charHeight > 0) {
-                        val actualX = offset.x + horizontalScrollState.value
-                        val actualY = if (!isAltBuffer) offset.y + verticalScrollState.value else offset.y
-                        val col = (actualX / charWidth).toInt().coerceIn(0, session.buffer.maxCols - 1)
-                        val line = (actualY / charHeight).toInt().coerceIn(0, (session.buffer.getLineCount() - 1).coerceAtLeast(0))
-                        val historyCount = if (session.buffer.isAltBuffer) 0 else session.buffer.getScrollbackSnapshot().size
-                        val activeRow = line - historyCount
+                        if (charWidth > 0 && charHeight > 0) {
+                            val actualX = offset.x + horizontalScrollState.value
+                            val actualY = if (!isAltBuffer) offset.y + verticalScrollState.value else offset.y
+                            val col = (actualX / charWidth).toInt().coerceIn(0, session.buffer.maxCols - 1)
+                            val line = (actualY / charHeight).toInt().coerceIn(0, (session.buffer.getLineCount() - 1).coerceAtLeast(0))
+                            val historyCount = if (session.buffer.isAltBuffer) 0 else session.buffer.getScrollbackSnapshot().size
+                            val activeRow = line - historyCount
 
-                        if (session.buffer.isMouseTrackingEnabled) {
-                            if (activeRow in 0 until session.buffer.maxRows) {
-                                session.sendMouseEvent(0, col, activeRow, true)
-                                session.sendMouseEvent(0, col, activeRow, false)
-                            }
-                        } else {
-                            val detectedUrl = session.buffer.getUrlAt(line, col)
-                            if (detectedUrl != null) {
-                                onTapUrl(detectedUrl)
+                            if (session.buffer.isMouseTrackingEnabled) {
+                                if (activeRow in 0 until session.buffer.maxRows) {
+                                    session.sendMouseEvent(0, col, activeRow, true)
+                                    session.sendMouseEvent(0, col, activeRow, false)
+                                }
+                            } else {
+                                val detectedUrl = session.buffer.getUrlAt(line, col)
+                                if (detectedUrl != null) {
+                                    onTapUrl(detectedUrl)
+                                }
                             }
                         }
+                    },
+                    onLongPress = { offset ->
+                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                        onFocusRequest()
+                        menuOffset = offset
+                        showContextMenu = true
                     }
-                }
+                )
             }
     ) {
         Canvas(
@@ -983,6 +1004,107 @@ fun TerminalCanvas(
                     )
                 }
             }
+        }
+
+        // Android-style Floating Context Menu pada Tekan Lama (Long-Press) seperti Termux
+        DropdownMenu(
+            expanded = showContextMenu,
+            onDismissRequest = { showContextMenu = false },
+            offset = DpOffset(
+                x = with(density) { menuOffset.x.toDp() },
+                y = with(density) { menuOffset.y.toDp() }
+            ),
+            modifier = Modifier.background(DevSurface)
+        ) {
+            DropdownMenuItem(
+                text = { Text("Tempel", color = DevOnSurface, fontWeight = FontWeight.Medium) },
+                leadingIcon = {
+                    Icon(
+                        imageVector = Icons.Default.ContentPaste,
+                        contentDescription = "Tempel",
+                        tint = DevPrimary,
+                        modifier = Modifier.size(18.dp)
+                    )
+                },
+                onClick = {
+                    showContextMenu = false
+                    val clip = clipboardManager.getText()?.text
+                    if (!clip.isNullOrEmpty()) {
+                        session.pasteText(clip)
+                        Toast.makeText(context, "Ditempel ke terminal", Toast.LENGTH_SHORT).show()
+                    } else {
+                        Toast.makeText(context, "Clipboard kosong", Toast.LENGTH_SHORT).show()
+                    }
+                }
+            )
+
+            DropdownMenuItem(
+                text = { Text("Salin Layar", color = DevOnSurface, fontWeight = FontWeight.Medium) },
+                leadingIcon = {
+                    Icon(
+                        imageVector = Icons.Default.ContentCopy,
+                        contentDescription = "Salin",
+                        tint = TerminalText,
+                        modifier = Modifier.size(18.dp)
+                    )
+                },
+                onClick = {
+                    showContextMenu = false
+                    val text = session.buffer.getTranscriptText()
+                    if (text.isNotEmpty()) {
+                        clipboardManager.setText(AnnotatedString(text))
+                        Toast.makeText(context, "Layar terminal disalin ke clipboard", Toast.LENGTH_SHORT).show()
+                    } else {
+                        Toast.makeText(context, "Tidak ada teks untuk disalin", Toast.LENGTH_SHORT).show()
+                    }
+                }
+            )
+
+            DropdownMenuItem(
+                text = { Text("Bagikan", color = DevOnSurface, fontWeight = FontWeight.Medium) },
+                leadingIcon = {
+                    Icon(
+                        imageVector = Icons.Default.Share,
+                        contentDescription = "Bagikan",
+                        tint = TerminalText,
+                        modifier = Modifier.size(18.dp)
+                    )
+                },
+                onClick = {
+                    showContextMenu = false
+                    val text = session.buffer.getTranscriptText()
+                    if (text.isNotEmpty()) {
+                        try {
+                            val sendIntent = Intent().apply {
+                                action = Intent.ACTION_SEND
+                                putExtra(Intent.EXTRA_TEXT, text)
+                                type = "text/plain"
+                            }
+                            context.startActivity(Intent.createChooser(sendIntent, "Bagikan Output Terminal"))
+                        } catch (e: Exception) {
+                            Toast.makeText(context, "Gagal membagikan: ${e.message}", Toast.LENGTH_SHORT).show()
+                        }
+                    } else {
+                        Toast.makeText(context, "Tidak ada teks untuk dibagikan", Toast.LENGTH_SHORT).show()
+                    }
+                }
+            )
+
+            DropdownMenuItem(
+                text = { Text("Reset Layar (Ctrl+L)", color = DevOnSurface, fontWeight = FontWeight.Medium) },
+                leadingIcon = {
+                    Icon(
+                        imageVector = Icons.Default.Refresh,
+                        contentDescription = "Reset Layar",
+                        tint = TerminalText,
+                        modifier = Modifier.size(18.dp)
+                    )
+                },
+                onClick = {
+                    showContextMenu = false
+                    session.sendBytes(byteArrayOf(12))
+                }
+            )
         }
     }
 }
