@@ -1196,7 +1196,7 @@ fun TerminalScreen(
                 }
             }
 
-            // Row 2: POSIX Signals, Shortcuts & Programming Symbols
+            // Row 2: Tombol Fungsi F1 - F12 & Simbol Shell Pemrograman
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -1205,40 +1205,25 @@ fun TerminalScreen(
                 horizontalArrangement = Arrangement.spacedBy(4.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                // Ctrl+C (Dedicated SIGINT Kill)
-                TerminalModifierKey(label = "Ctrl+C", isSignal = true) {
-                    activeSession.cancelActiveProcess()
-                    Toast.makeText(context, "SIGINT (Ctrl+C) terkirim", Toast.LENGTH_SHORT).show()
-                }
-
-                // Ctrl+Z (SIGTSTP Suspend)
-                TerminalModifierKey(label = "Ctrl+Z") {
-                    activeSession.sendBytes(byteArrayOf(26))
-                }
-
-                // Ctrl+D (EOF / Logout)
-                TerminalModifierKey(label = "Ctrl+D") {
-                    activeSession.sendBytes(byteArrayOf(4))
-                }
-
-                // Ctrl+L (Clear Screen)
-                TerminalModifierKey(label = "Ctrl+L") {
-                    activeSession.sendBytes(byteArrayOf(12))
-                }
-
-                // Ctrl+A (Jump to beginning of line)
-                TerminalModifierKey(label = "Ctrl+A") {
-                    activeSession.sendBytes(byteArrayOf(1))
-                }
-
-                // Ctrl+E (Jump to end of line)
-                TerminalModifierKey(label = "Ctrl+E") {
-                    activeSession.sendBytes(byteArrayOf(5))
-                }
-
-                // Ctrl+R (Reverse history search)
-                TerminalModifierKey(label = "Ctrl+R") {
-                    activeSession.sendBytes(byteArrayOf(18))
+                // Tombol Fungsi F1 - F12 (Standar VT100/XTerm untuk mc, htop, nano, dsb.)
+                val functionKeys = listOf(
+                    "F1" to "\u001BOP",
+                    "F2" to "\u001BOQ",
+                    "F3" to "\u001BOR",
+                    "F4" to "\u001BOS",
+                    "F5" to "\u001B[15~",
+                    "F6" to "\u001B[17~",
+                    "F7" to "\u001B[18~",
+                    "F8" to "\u001B[19~",
+                    "F9" to "\u001B[20~",
+                    "F10" to "\u001B[21~",
+                    "F11" to "\u001B[23~",
+                    "F12" to "\u001B[24~"
+                )
+                functionKeys.forEach { (label, seq) ->
+                    TerminalModifierKey(label = label) {
+                        activeSession.sendText(seq)
+                    }
                 }
 
                 // Shell & Programming Symbols
