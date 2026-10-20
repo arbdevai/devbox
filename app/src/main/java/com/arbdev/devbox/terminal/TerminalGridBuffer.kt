@@ -982,23 +982,67 @@ class TerminalGridBuffer(
     fun getUrlAt(absoluteRow: Int, col: Int): String? {
         synchronized(lock) {
             val line = getLineAt(absoluteRow) ?: return null
-            if (col !in 0 until maxCols) return null
-            val cell = line[col]
-            if (cell.hyperlinkUrl != null) return cell.hyperlinkUrl
+            val cell = line.getOrNull(col)
+            if (cell?.hyperlinkUrl != null) return cleanUrl(cell.hyperlinkUrl!!)
 
-            // Deteksi otomatis URL teks standar (https:// atau http://)
-            val sb = StringBuilder()
-            for (c in 0 until maxCols) {
-                if (!line[c].isWideContinuation) {
-                    sb.append(line[c].char)
+            // Helper untuk mengekstrak baris teks murni
+            fun extractLine(row: Int): String {
+                val l = getLineAt(row) ?: return ""
+                val sb = StringBuilder()
+                for (c in 0 until maxCols) {
+                    if (!l[c].isWideContinuation) {
+                        sb.append(l[c].char)
+                    }
+                }
+                return sb.toString()
+            }
+
+            val currentLine = extractLine(absoluteRow)
+            val prevLine = if (absoluteRow > 0) extractLine(absoluteRow - 1) else ""
+            val nextLine = extractLine(absoluteRow + 1)
+
+            val urlRegex = Regex("https?://[^\\s<>\"]+")
+
+            // 1. Coba cari match di baris aktif dengan toleransi hitbox sentuhan jari (±6 karakter)
+            val matchesOnCurrent = urlRegex.findAll(currentLine).toList()
+            for (m in matchesOnCurrent) {
+                val expandedRange = (m.range.first - 6)..(m.range.last + 6)
+                if (col in expandedRange) {
+                    return cleanUrl(m.value)
                 }
             }
-            val lineStr = sb.toString()
-            val urlRegex = Regex("https?://[^\\s<>\"]+")
-            val match = urlRegex.findAll(lineStr).find { m ->
-                col in m.range
+
+            // 2. Jika hanya ada 1 URL di baris tersebut, pilih langsung (ramah sentuhan di layar HP)
+            if (matchesOnCurrent.size == 1) {
+                return cleanUrl(matchesOnCurrent[0].value)
+            } else if (matchesOnCurrent.size > 1) {
+                val closest = matchesOnCurrent.minByOrNull { m ->
+                    val mid = (m.range.first + m.range.last) / 2
+                    kotlin.math.abs(mid - col)
+                }
+                if (closest != null) return cleanUrl(closest.value)
             }
-            return match?.value
+
+            // 3. Coba cari di teks gabungan (URL panjang yang terpotong/wrapped antar baris)
+            val candidateStrings = listOf(
+                currentLine.trimEnd() + nextLine.trimStart(),
+                prevLine.trimEnd() + currentLine.trimStart()
+            )
+            for (cs in candidateStrings) {
+                val m = urlRegex.find(cs)
+                if (m != null) {
+                    return cleanUrl(m.value)
+                }
+            }
+
+            return null
         }
+    }
+
+    private fun cleanUrl(raw: String): String {
+        var res = raw.trim()
+        res = res.trimStart('(', '[', '{', '<', '"', '\'', '`')
+        res = res.trimEnd(')', ']', '}', '>', '.', ',', ';', '!', '"', '\'', '`', ':')
+        return res
     }
 }

@@ -144,15 +144,8 @@ fun DashboardScreen(
 
     LaunchedEffect(Unit) {
         refreshState()
-        // Cek update otomatis di background & bersihkan APK usang
+        // Cek update otomatis di background & bersihkan APK usang (dithrottle)
         UpdateManager.checkForUpdates(context)
-        // Pemindaian berkala background sesi usang (dithrottle 12 detik agar hemat baterai/CPU)
-        while (isActive) {
-            val activeIds = TerminalSessionManager.sessions.map { it.id }
-            val activePids = TerminalSessionManager.sessions.mapNotNull { it.getProcessPid() }
-            orphanProcesses = ChrootManager.getOrphanChrootProcesses(activeIds, activePids)
-            kotlinx.coroutines.delay(12000)
-        }
     }
 
     Column(

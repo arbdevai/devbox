@@ -25,6 +25,7 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -182,13 +183,12 @@ fun TerminalScreen(
     var isCleaningOrphans by remember { mutableStateOf(false) }
     var showSessionManagerDialog by remember { mutableStateOf(false) }
 
-    // Pemindaian otomatis berkala untuk mendeteksi proses orphan dari crash/force close sebelumnya (dithrottle 15s)
-    LaunchedEffect(TerminalSessionManager.sessions.size) {
-        while (isActive) {
+    // Pemindaian proses orphan HANYA dilakukan saat dialog manajer sesi dibuka (nol pemanggilan su liar di background)
+    LaunchedEffect(showSessionManagerDialog) {
+        if (showSessionManagerDialog) {
             val activeIds = TerminalSessionManager.sessions.map { it.id }
             val activePids = TerminalSessionManager.sessions.mapNotNull { it.getProcessPid() }
             orphanProcesses = ChrootManager.getOrphanChrootProcesses(activeIds, activePids)
-            kotlinx.coroutines.delay(15000)
         }
     }
 
@@ -1399,6 +1399,13 @@ fun TerminalCanvas(
 
         val targetCell = line[col]
         if (targetCell.char == ' ') {
+            // Jika menekan spasi, cari kata terdekat di sebelah kiri atau kanan
+            var left = col
+            while (left > 0 && line[left - 1].char == ' ') left--
+            if (left > 0) return findWordBounds(lineIdx, left - 1)
+            var right = col
+            while (right < maxC - 1 && line[right + 1].char == ' ') right++
+            if (right < maxC - 1) return findWordBounds(lineIdx, right + 1)
             return col to col
         }
 
@@ -1460,7 +1467,10 @@ fun TerminalCanvas(
                 menu.add(Menu.NONE, 3, 3, android.R.string.selectAll).apply {
                     setShowAsAction(MenuItem.SHOW_AS_ACTION_IF_ROOM)
                 }
-                menu.add(Menu.NONE, 4, 4, "Bagikan").apply {
+                menu.add(Menu.NONE, 5, 4, "Salin Baris").apply {
+                    setShowAsAction(MenuItem.SHOW_AS_ACTION_IF_ROOM)
+                }
+                menu.add(Menu.NONE, 4, 5, "Bagikan").apply {
                     setShowAsAction(MenuItem.SHOW_AS_ACTION_IF_ROOM)
                 }
                 return true
@@ -1499,9 +1509,27 @@ fun TerminalCanvas(
                     }
                     3 -> { // Pilih Semua
                         val totalLines = if (isAltBuffer) session.buffer.maxRows else session.buffer.getLineCount()
-                        selectionStart = GridPoint(0, 0)
-                        selectionEnd = GridPoint((totalLines - 1).coerceAtLeast(0), session.buffer.maxCols - 1)
+                        val s = GridPoint(0, 0)
+                        val e = GridPoint((totalLines - 1).coerceAtLeast(0), session.buffer.maxCols - 1)
+                        selectionStart = s
+                        selectionEnd = e
+                        val text = getSelectedText(s, e)
+                        if (text.isNotEmpty()) {
+                            clipboardManager.setText(AnnotatedString(text))
+                            Toast.makeText(context, "Semua teks disalin (${text.length} karakter)", Toast.LENGTH_SHORT).show()
+                        }
                         mode.invalidateContentRect()
+                        return true
+                    }
+                    5 -> { // Salin Baris yang Aktif
+                        val lineIdx = selectionStart?.line ?: 0
+                        val line = session.buffer.getLineAt(lineIdx)
+                        val lineText = line?.filter { !it.isWideContinuation }?.map { it.char }?.joinToString("")?.trimEnd() ?: ""
+                        if (lineText.isNotEmpty()) {
+                            clipboardManager.setText(AnnotatedString(lineText))
+                            Toast.makeText(context, "Baris disalin", Toast.LENGTH_SHORT).show()
+                        }
+                        mode.finish()
                         return true
                     }
                     4 -> { // Bagikan
@@ -1582,13 +1610,18 @@ fun TerminalCanvas(
                                 } else {
                                     val detectedUrl = session.buffer.getUrlAt(line, col)
                                     if (detectedUrl != null) {
+                                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
                                         onTapUrl(detectedUrl)
                                     }
                                 }
                             }
                         }
-                    },
-                    onLongPress = { offset ->
+                    }
+                )
+            }
+            .pointerInput(fontSizeSp, isAltBuffer) {
+                detectDragGesturesAfterLongPress(
+                    onDragStart = { offset ->
                         haptic.performHapticFeedback(HapticFeedbackType.LongPress)
                         onFocusRequest()
 
@@ -1603,6 +1636,27 @@ fun TerminalCanvas(
                             selectionEnd = GridPoint(line, wEnd)
 
                             currentActionMode?.finish()
+                            currentActionMode = view.startActionMode(actionModeCallback, ActionMode.TYPE_FLOATING)
+                        }
+                    },
+                    onDrag = { change, _ ->
+                        change.consume()
+                        if (charWidth > 0 && charHeight > 0) {
+                            val actualX = change.position.x + horizontalScrollState.value
+                            val actualY = if (!isAltBuffer) change.position.y + verticalScrollState.value else change.position.y
+                            val col = (actualX / charWidth).toInt().coerceIn(0, session.buffer.maxCols - 1)
+                            val line = (actualY / charHeight).toInt().coerceIn(0, (session.buffer.getLineCount() - 1).coerceAtLeast(0))
+                            selectionEnd = GridPoint(line, col)
+                            currentActionMode?.invalidateContentRect()
+                        }
+                    },
+                    onDragEnd = {
+                        if (currentActionMode == null && selectionStart != null) {
+                            currentActionMode = view.startActionMode(actionModeCallback, ActionMode.TYPE_FLOATING)
+                        }
+                    },
+                    onDragCancel = {
+                        if (currentActionMode == null && selectionStart != null) {
                             currentActionMode = view.startActionMode(actionModeCallback, ActionMode.TYPE_FLOATING)
                         }
                     }

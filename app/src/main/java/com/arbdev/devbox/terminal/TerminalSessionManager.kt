@@ -115,11 +115,11 @@ class NativeTerminalSession(
             isRunning = true
             AppLogger.i("NativeTerminal", "Sesi [$name] aktif (PID terhubung, PTY siap, SID: $id)")
 
-            // Pantau proses aktif / agent CLI (agy, python, node, dll) di sesi ini (dithrottle 5s, silent mode agar tidak spamming log)
+            // Pantau proses aktif / agent CLI (agy, python, node, dll) di sesi ini (dithrottle 30s, silent mode agar hemat baterai/CPU & tidak spam su)
             val sessionId = id
             processMonitorJob = sessionScope.launch {
                 while (isActive && isRunning) {
-                    kotlinx.coroutines.delay(5000)
+                    kotlinx.coroutines.delay(30000)
                     try {
                         val checkCmd = "for p in /proc/[0-9]*; do " +
                                 "if [ \"\$(readlink \$p/root 2>/dev/null)\" = '$targetRootfs' ]; then " +
