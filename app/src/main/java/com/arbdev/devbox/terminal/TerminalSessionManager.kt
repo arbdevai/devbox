@@ -31,6 +31,8 @@ class NativeTerminalSession(
     var isRunning by mutableStateOf(false)
     var currentTitle by mutableStateOf("coder@devbox:~")
     var currentDir by mutableStateOf("/home/coder")
+    var activeAgentName by mutableStateOf<String?>(null)
+    var isAgentRunning by mutableStateOf(false)
 
     val buffer = TerminalGridBuffer(maxCols = 80, maxRows = 30)
 
@@ -38,6 +40,7 @@ class NativeTerminalSession(
     private var outputStream: OutputStream? = null
     private var inputStream: InputStream? = null
     private var readerJob: Job? = null
+    private var processMonitorJob: Job? = null
 
     private val sessionScope = CoroutineScope(Dispatchers.IO)
     private val mainHandler = Handler(Looper.getMainLooper())
@@ -99,7 +102,7 @@ class NativeTerminalSession(
                     "mountpoint -q '$targetRootfs/sys' || mount -t sysfs sysfs '$targetRootfs/sys'; " +
                     "mountpoint -q '$targetRootfs/mnt/sdcard' || mount --bind /sdcard '$targetRootfs/mnt/sdcard' 2>/dev/null; " +
                     "chown -R 1000:1000 '$targetRootfs/home/coder' 2>/dev/null; chmod -R u+rwX '$targetRootfs/home/coder' 2>/dev/null; " +
-                    "cd '$targetRootfs' && exec chroot '$targetRootfs' /usr/bin/env -i HOME=/home/coder USER=coder LOGNAME=coder SHELL=/bin/bash TERM=xterm-256color COLORTERM=truecolor PATH=/home/coder/.local/bin:/home/coder/.cargo/bin:/home/coder/go/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin /usr/bin/setpriv --reuid 1000 --regid 1000 --init-groups /bin/bash -c 'cd /home/coder 2>/dev/null || cd /; if [ -x /usr/bin/script ]; then exec /usr/bin/script -qefc \"stty rows 30 cols 80 2>/dev/null; exec /bin/bash -l\" /dev/null; else exec /bin/bash -l; fi'"
+                    "cd '$targetRootfs' && exec chroot '$targetRootfs' /usr/bin/env -i HOME=/home/coder USER=coder LOGNAME=coder SHELL=/bin/bash TERM=xterm-256color COLORTERM=truecolor DEVBOX_SESSION_ID='$id' PATH=/home/coder/.local/bin:/home/coder/.cargo/bin:/home/coder/go/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin /usr/bin/setpriv --reuid 1000 --regid 1000 --init-groups /bin/bash -c 'cd /home/coder 2>/dev/null || cd /; if [ -x /usr/bin/script ]; then exec /usr/bin/script -qefc \"stty rows 30 cols 80 2>/dev/null; exec /bin/bash -l\" /dev/null; else exec /bin/bash -l; fi'"
 
             val pb = ProcessBuilder(suBinary, "-c", chrootCmd)
             pb.redirectErrorStream(true) // Gabungkan stderr ke stdout stream
@@ -109,7 +112,35 @@ class NativeTerminalSession(
             inputStream = proc.inputStream
 
             isRunning = true
-            AppLogger.i("NativeTerminal", "Sesi [$name] aktif (PID terhubung, PTY siap)")
+            AppLogger.i("NativeTerminal", "Sesi [$name] aktif (PID terhubung, PTY siap, SID: $id)")
+
+            // Pantau proses aktif / agent CLI (agy, python, node, dll) di sesi ini
+            val sessionId = id
+            processMonitorJob = sessionScope.launch {
+                while (isActive && isRunning) {
+                    kotlinx.coroutines.delay(2000)
+                    try {
+                        val checkCmd = "for p in /proc/[0-9]*; do " +
+                                "if [ \"\$(readlink \$p/root 2>/dev/null)\" = '$targetRootfs' ]; then " +
+                                "if grep -z '^DEVBOX_SESSION_ID=$sessionId' \"\$p/environ\" 2>/dev/null >/dev/null; then " +
+                                "comm=\$(cat \$p/comm 2>/dev/null); " +
+                                "if [ \"\$comm\" != 'script' ] && [ \"\$comm\" != 'bash' ] && [ \"\$comm\" != 'stty' ] && [ \"\$comm\" != 'setpriv' ]; then " +
+                                "echo \"\$comm\"; break; " +
+                                "fi; fi; fi; done"
+                        val res = com.arbdev.devbox.data.RootExecutor.executeSync(checkCmd)
+                        val detected = res.getOrNull()?.stdout?.trim().orEmpty()
+                        mainHandler.post {
+                            if (detected.isNotBlank()) {
+                                activeAgentName = detected
+                                isAgentRunning = true
+                            } else {
+                                activeAgentName = null
+                                isAgentRunning = false
+                            }
+                        }
+                    } catch (_: Exception) {}
+                }
+            }
 
             // Mulai membaca output secara asynchronous di background IO thread
             readerJob = sessionScope.launch {
@@ -252,6 +283,24 @@ class NativeTerminalSession(
     fun finish() {
         isRunning = false
         readerJob?.cancel()
+        processMonitorJob?.cancel()
+        val sessionId = id
+        val targetRootfs = ChrootManager.activeRootfs
+        val suBinary = findSuPath()
+
+        // Matikan seluruh pohon proses turunan (agy, python, node, script, bash) di dalam chroot
+        sessionScope.launch(Dispatchers.IO) {
+            try {
+                val killCmd = "for p in /proc/[0-9]*; do " +
+                        "if [ \"\$(readlink \$p/root 2>/dev/null)\" = '$targetRootfs' ]; then " +
+                        "if grep -z '^DEVBOX_SESSION_ID=$sessionId' \"\$p/environ\" 2>/dev/null >/dev/null; then " +
+                        "kill -9 \"\$(basename \$p)\" 2>/dev/null; " +
+                        "fi; fi; done"
+                val pb = ProcessBuilder(suBinary, "-c", killCmd)
+                pb.start().waitFor()
+            } catch (_: Exception) {}
+        }
+
         try {
             outputStream?.close()
             inputStream?.close()

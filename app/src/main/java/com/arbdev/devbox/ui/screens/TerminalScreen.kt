@@ -7,6 +7,19 @@ import android.view.Menu
 import android.view.MenuItem
 import android.view.View
 import android.widget.Toast
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.Crossfade
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.background
@@ -19,15 +32,18 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -35,13 +51,20 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.ContentPaste
+import androidx.compose.material.icons.filled.DeleteSweep
+import androidx.compose.material.icons.filled.Layers
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.Terminal
+import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.ScrollableTabRow
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Tab
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -51,13 +74,18 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.viewinterop.AndroidView
+import com.arbdev.devbox.data.ChrootManager
+import com.arbdev.devbox.data.ChrootProcessInfo
 import com.arbdev.devbox.terminal.TerminalInputView
+import kotlinx.coroutines.isActive
+import kotlinx.coroutines.launch
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
@@ -135,6 +163,21 @@ fun TerminalScreen(
     // Dialog ubah nama sesi
     var sessionToRename by remember { mutableStateOf<NativeTerminalSession?>(null) }
     var renameInputText by remember { mutableStateOf("") }
+
+    // Manajer Sesi & Pemantau Background Sesi Usang (Orphan Process Manager)
+    val coroutineScope = rememberCoroutineScope()
+    var orphanProcesses by remember { mutableStateOf<List<ChrootProcessInfo>>(emptyList()) }
+    var isCleaningOrphans by remember { mutableStateOf(false) }
+    var showSessionManagerDialog by remember { mutableStateOf(false) }
+
+    // Pemindaian otomatis berkala untuk mendeteksi proses orphan dari crash/force close sebelumnya
+    LaunchedEffect(TerminalSessionManager.sessions.size) {
+        while (isActive) {
+            val activeIds = TerminalSessionManager.sessions.map { it.id }
+            orphanProcesses = ChrootManager.getOrphanChrootProcesses(activeIds)
+            kotlinx.coroutines.delay(4000)
+        }
+    }
 
     // View input terminal berbasis BaseInputConnection (gaya Termux, tanpa Compose TextField delay)
     var terminalInputView by remember { mutableStateOf<TerminalInputView?>(null) }
@@ -239,6 +282,41 @@ fun TerminalScreen(
                                 fontWeight = if (activeIndex == index) FontWeight.Bold else FontWeight.Normal,
                                 color = if (activeIndex == index) DevPrimary else Color.Gray
                             )
+                            if (session.isAgentRunning && session.activeAgentName != null) {
+                                Spacer(modifier = Modifier.width(4.dp))
+                                val infiniteTransition = rememberInfiniteTransition(label = "tabPulse_${session.id}")
+                                val pulseAlpha by infiniteTransition.animateFloat(
+                                    initialValue = 0.35f,
+                                    targetValue = 1.0f,
+                                    animationSpec = infiniteRepeatable(
+                                        animation = tween(750, easing = LinearEasing),
+                                        repeatMode = RepeatMode.Reverse
+                                    ),
+                                    label = "pulseAlpha"
+                                )
+                                Surface(
+                                    color = Color(0xFF1B5E20).copy(alpha = pulseAlpha),
+                                    shape = RoundedCornerShape(4.dp)
+                                ) {
+                                    Row(
+                                        modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Box(
+                                            modifier = Modifier
+                                                .size(5.dp)
+                                                .background(Color(0xFF00E676), shape = CircleShape)
+                                        )
+                                        Spacer(modifier = Modifier.width(3.dp))
+                                        Text(
+                                            text = session.activeAgentName ?: "",
+                                            fontSize = 9.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            color = Color.White
+                                        )
+                                    }
+                                }
+                            }
                             if (TerminalSessionManager.sessions.size > 1) {
                                 Spacer(modifier = Modifier.width(4.dp))
                                 IconButton(
@@ -304,9 +382,59 @@ fun TerminalScreen(
                     fontSize = 9.sp,
                     color = if (activeSession.isRunning) DevPrimary else Color.Gray
                 )
+                if (activeSession.isAgentRunning && activeSession.activeAgentName != null) {
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Surface(
+                        color = Color(0xFF0D3315),
+                        border = BorderStroke(1.dp, Color(0xFF00E676)),
+                        shape = RoundedCornerShape(4.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            val infiniteTransition = rememberInfiniteTransition(label = "barPulse")
+                            val pulseAlpha by infiniteTransition.animateFloat(
+                                initialValue = 0.35f,
+                                targetValue = 1.0f,
+                                animationSpec = infiniteRepeatable(
+                                    animation = tween(700, easing = LinearEasing),
+                                    repeatMode = RepeatMode.Reverse
+                                ),
+                                label = "barPulseAlpha"
+                            )
+                            Box(
+                                modifier = Modifier
+                                    .size(5.dp)
+                                    .background(Color(0xFF00E676).copy(alpha = pulseAlpha), shape = CircleShape)
+                            )
+                            Spacer(modifier = Modifier.width(3.dp))
+                            Text(
+                                text = "${activeSession.activeAgentName}",
+                                fontFamily = FontFamily.Monospace,
+                                fontSize = 9.sp,
+                                color = Color(0xFF00E676),
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                    }
+                }
             }
 
             Row(verticalAlignment = Alignment.CenterVertically) {
+                // Manajer Sesi & Pembersih Background Orphan Sessions
+                IconButton(
+                    onClick = { showSessionManagerDialog = true },
+                    modifier = Modifier.size(30.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Layers,
+                        contentDescription = "Kelola Sesi",
+                        tint = if (orphanProcesses.isNotEmpty()) Color(0xFFFF9800) else DevPrimary,
+                        modifier = Modifier.size(16.dp)
+                    )
+                }
+
                 // Toggle Soft Keyboard
                 IconButton(
                     onClick = {
@@ -421,6 +549,82 @@ fun TerminalScreen(
             }
         }
 
+        // Banner Peringatan Sesi Latar Belakang Usang (Orphan Processes)
+        AnimatedVisibility(
+            visible = orphanProcesses.isNotEmpty(),
+            enter = expandVertically() + fadeIn(),
+            exit = shrinkVertically() + fadeOut()
+        ) {
+            val totalRamMb = orphanProcesses.sumOf { it.memoryKb } / 1024
+            Surface(
+                color = Color(0xFF231602),
+                shape = RoundedCornerShape(6.dp),
+                border = BorderStroke(1.dp, Color(0xFFFF9800).copy(alpha = 0.7f)),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 8.dp, vertical = 3.dp)
+            ) {
+                Row(
+                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Warning,
+                            contentDescription = null,
+                            tint = Color(0xFFFF9800),
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Column {
+                            Text(
+                                text = "${orphanProcesses.size} Sesi Usang Terdeteksi (~${totalRamMb} MB)",
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 11.sp,
+                                color = Color.White
+                            )
+                            Text(
+                                text = "Sisa dari crash lama. Matikan agar RAM HP hemat.",
+                                fontSize = 9.sp,
+                                color = Color(0xFFB0BEC5)
+                            )
+                        }
+                    }
+                    Button(
+                        onClick = {
+                            coroutineScope.launch {
+                                isCleaningOrphans = true
+                                val activeIds = TerminalSessionManager.sessions.map { it.id }
+                                val killed = ChrootManager.killOrphanChrootProcesses(activeIds)
+                                orphanProcesses = emptyList()
+                                isCleaningOrphans = false
+                                Toast.makeText(context, "$killed sesi latar belakang berhasil dimatikan", Toast.LENGTH_SHORT).show()
+                            }
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFF9800)),
+                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
+                        shape = RoundedCornerShape(4.dp),
+                        enabled = !isCleaningOrphans,
+                        modifier = Modifier.height(28.dp)
+                    ) {
+                        if (isCleaningOrphans) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(12.dp),
+                                color = Color.Black,
+                                strokeWidth = 2.dp
+                            )
+                        } else {
+                            Text("Matikan", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color.Black)
+                        }
+                    }
+                }
+            }
+        }
+
         // Native Terminal Input View berbasis BaseInputConnection (Arsitektur Input Termux)
         AndroidView(
             factory = { ctx ->
@@ -515,23 +719,29 @@ fun TerminalScreen(
                 }
             }
 
-            TerminalCanvas(
-                session = activeSession,
-                fontSizeSp = terminalFontSize,
-                verticalScrollState = verticalScrollState,
-                horizontalScrollState = horizontalScrollState,
-                onFocusRequest = {
-                    terminalInputView?.requestKeyboard()
-                    keyboardController?.show()
-                },
-                onTapUrl = { url ->
-                    activeUrlPrompt = url
-                },
-                onPasteLarge = { largeText ->
-                    pendingLargePaste = largeText
-                },
-                modifier = Modifier.fillMaxSize()
-            )
+            Crossfade(
+                targetState = activeSession,
+                animationSpec = tween(120),
+                label = "SessionCrossfade"
+            ) { currentSession ->
+                TerminalCanvas(
+                    session = currentSession,
+                    fontSizeSp = terminalFontSize,
+                    verticalScrollState = verticalScrollState,
+                    horizontalScrollState = horizontalScrollState,
+                    onFocusRequest = {
+                        terminalInputView?.requestKeyboard()
+                        keyboardController?.show()
+                    },
+                    onTapUrl = { url ->
+                        activeUrlPrompt = url
+                    },
+                    onPasteLarge = { largeText ->
+                        pendingLargePaste = largeText
+                    },
+                    modifier = Modifier.fillMaxSize()
+                )
+            }
         }
 
         // Dialog Konfirmasi Tempel Teks Sangat Panjang (Mencegah Shell/CLI Looping akibat accidental log paste)
@@ -653,6 +863,183 @@ fun TerminalScreen(
                         }
                     ) {
                         Text("Salin URL")
+                    }
+                }
+            )
+        }
+
+        // Dialog Kelola Sesi DevBox & Pembersih Latar Belakang (Orphan Processes)
+        if (showSessionManagerDialog) {
+            AlertDialog(
+                onDismissRequest = { showSessionManagerDialog = false },
+                title = {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(
+                            imageVector = Icons.Default.Layers,
+                            contentDescription = null,
+                            tint = DevPrimary,
+                            modifier = Modifier.size(20.dp)
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("Manajer Sesi & Latar Belakang", fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                    }
+                },
+                text = {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .verticalScroll(rememberScrollState())
+                    ) {
+                        // Seksi 1: Sesi Aktif
+                        Text(
+                            text = "SESI AKTIF (${TerminalSessionManager.sessions.size})",
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = DevPrimary
+                        )
+                        Spacer(modifier = Modifier.height(6.dp))
+
+                        TerminalSessionManager.sessions.forEachIndexed { idx, s ->
+                            Surface(
+                                color = if (idx == activeIndex) Color(0xFF1E281E) else Color(0xFF181818),
+                                shape = RoundedCornerShape(6.dp),
+                                border = BorderStroke(1.dp, if (idx == activeIndex) DevPrimary else Color.DarkGray),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(vertical = 3.dp)
+                                    .clickable {
+                                        TerminalSessionManager.activeIndex.intValue = idx
+                                        showSessionManagerDialog = false
+                                    }
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.SpaceBetween
+                                ) {
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Row(verticalAlignment = Alignment.CenterVertically) {
+                                            Text(
+                                                text = "${idx + 1}. ${s.name}",
+                                                fontSize = 12.sp,
+                                                fontWeight = FontWeight.Bold,
+                                                color = if (idx == activeIndex) DevPrimary else Color.White
+                                            )
+                                            if (s.isAgentRunning && s.activeAgentName != null) {
+                                                Spacer(modifier = Modifier.width(6.dp))
+                                                Text(
+                                                    text = "• ${s.activeAgentName}",
+                                                    fontSize = 10.sp,
+                                                    color = Color(0xFF00E676),
+                                                    fontWeight = FontWeight.SemiBold
+                                                )
+                                            }
+                                        }
+                                        Text(
+                                            text = "Dir: ${s.getDisplayDir()}",
+                                            fontSize = 10.sp,
+                                            color = DevOnSurfaceVariant
+                                        )
+                                    }
+                                    if (TerminalSessionManager.sessions.size > 1) {
+                                        IconButton(
+                                            onClick = {
+                                                TerminalSessionManager.closeSession(idx)
+                                            },
+                                            modifier = Modifier.size(24.dp)
+                                        ) {
+                                            Icon(
+                                                imageVector = Icons.Default.Close,
+                                                contentDescription = "Tutup Sesi",
+                                                tint = Color.Red,
+                                                modifier = Modifier.size(14.dp)
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        Spacer(modifier = Modifier.height(14.dp))
+
+                        // Seksi 2: Sesi Latar Belakang Lama (Orphan Processes)
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = "SESI USANG BACKGROUND (${orphanProcesses.size})",
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = if (orphanProcesses.isNotEmpty()) Color(0xFFFF9800) else Color.Gray
+                            )
+                            if (orphanProcesses.isNotEmpty()) {
+                                TextButton(
+                                    onClick = {
+                                        coroutineScope.launch {
+                                            isCleaningOrphans = true
+                                            val activeIds = TerminalSessionManager.sessions.map { it.id }
+                                            val killed = ChrootManager.killOrphanChrootProcesses(activeIds)
+                                            orphanProcesses = emptyList()
+                                            isCleaningOrphans = false
+                                            Toast.makeText(context, "$killed sesi latar belakang berhasil dimatikan", Toast.LENGTH_SHORT).show()
+                                        }
+                                    },
+                                    enabled = !isCleaningOrphans,
+                                    contentPadding = PaddingValues(horizontal = 6.dp, vertical = 2.dp)
+                                ) {
+                                    Text("Matikan Semua", fontSize = 11.sp, color = Color(0xFFFF9800), fontWeight = FontWeight.Bold)
+                                }
+                            }
+                        }
+                        Spacer(modifier = Modifier.height(4.dp))
+
+                        if (orphanProcesses.isEmpty()) {
+                            Text(
+                                text = "✓ Tidak ada sesi usang di latar belakang (RAM bersih)",
+                                fontSize = 11.sp,
+                                color = Color(0xFF81C784)
+                            )
+                        } else {
+                            orphanProcesses.forEach { orphan ->
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(vertical = 2.dp),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text(
+                                        text = "PID ${orphan.pid}: ${orphan.name}",
+                                        fontFamily = FontFamily.Monospace,
+                                        fontSize = 11.sp,
+                                        color = Color(0xFFFFCC80)
+                                    )
+                                    Text(
+                                        text = "${orphan.memoryKb / 1024} MB",
+                                        fontFamily = FontFamily.Monospace,
+                                        fontSize = 11.sp,
+                                        color = DevOnSurfaceVariant
+                                    )
+                                }
+                            }
+                        }
+                    }
+                },
+                confirmButton = {
+                    TextButton(
+                        onClick = {
+                            TerminalSessionManager.createNewSession()
+                            showSessionManagerDialog = false
+                        }
+                    ) {
+                        Text("+ Tambah Sesi", color = DevPrimary, fontWeight = FontWeight.Bold)
+                    }
+                },
+                dismissButton = {
+                    TextButton(onClick = { showSessionManagerDialog = false }) {
+                        Text("Tutup")
                     }
                 }
             )

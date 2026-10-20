@@ -4,6 +4,13 @@ import com.arbdev.devbox.util.AppLogger
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
+data class ChrootProcessInfo(
+    val pid: Int,
+    val name: String,
+    val sessionId: String?,
+    val memoryKb: Long = 0
+)
+
 data class ChrootState(
     val isRootGranted: Boolean = false,
     val isRootfsExists: Boolean = false,
@@ -62,9 +69,9 @@ object ChrootManager {
         val mountRes = RootExecutor.execute("mountpoint -q '$rootfs/proc' && echo 'MOUNTED'")
         val isMounted = mountRes.getOrNull()?.stdout?.contains("MOUNTED") == true
 
-        // Hitung proses yang berjalan khusus di dalam rootfs DevBox
+        // Hitung proses yang berjalan khusus di dalam rootfs DevBox menggunakan readlink /proc/*/root
         val procCountRes = RootExecutor.execute(
-            "ps -eo pid,args | grep -E 'chroot $rootfs' | grep -v grep | wc -l"
+            "for p in /proc/[0-9]*; do if [ \"\$(readlink \$p/root 2>/dev/null)\" = '$rootfs' ]; then echo 1; fi; done | wc -l"
         )
         val activeProcs = procCountRes.getOrNull()?.stdout?.trim()?.toIntOrNull() ?: 0
 
@@ -188,7 +195,11 @@ XDG_EOF
     fun killDevboxProcessesAndUnmountSync(rootfs: String = activeRootfs): Result<String> {
         val script = """
             fuser -k -9 '$rootfs' 2>/dev/null || true
-            ps -eo pid,args | grep 'chroot $rootfs' | grep -v grep | awk '{print ${'$'}1}' | xargs -r kill -9 2>/dev/null || true
+            for p in /proc/[0-9]*; do
+                if [ "$(readlink ${'$'}p/root 2>/dev/null)" = '$rootfs' ]; then
+                    kill -9 "${'$'}(basename ${'$'}p)" 2>/dev/null || true
+                fi
+            done
             umount -l '$rootfs/mnt/sdcard' 2>/dev/null || true
             umount -l '$rootfs/sys' 2>/dev/null || true
             umount -l '$rootfs/proc' 2>/dev/null || true
@@ -210,6 +221,65 @@ XDG_EOF
 
     suspend fun killDevboxProcessesAndUnmount(rootfs: String = activeRootfs): Result<String> {
         return killDevboxProcessesAndUnmountSync(rootfs)
+    }
+
+    /**
+     * Memindai proses di dalam chroot yang tergolong orphan / sesi usang.
+     * Suatu proses dianggap orphan jika root-nya adalah chroot dan DEVBOX_SESSION_ID-nya
+     * tidak terdapat di dalam daftar activeSessionIds saat ini.
+     */
+    suspend fun getOrphanChrootProcesses(
+        activeSessionIds: List<String>,
+        rootfs: String = activeRootfs
+    ): List<ChrootProcessInfo> = withContext(Dispatchers.IO) {
+        val script = """
+            for p in /proc/[0-9]*; do
+              if [ "$(readlink ${'$'}p/root 2>/dev/null)" = '$rootfs' ]; then
+                pid=${'$'}(basename ${'$'}p)
+                comm=${'$'}(cat ${'$'}p/comm 2>/dev/null)
+                sid=${'$'}(grep -z '^DEVBOX_SESSION_ID=' ${'$'}p/environ 2>/dev/null | tr -d '\0' | cut -d= -f2)
+                rss=${'$'}(awk '/VmRSS/{print ${'$'}2}' ${'$'}p/status 2>/dev/null || echo 0)
+                echo "${'$'}pid|${'$'}comm|${'$'}sid|${'$'}rss"
+              fi
+            done
+        """.trimIndent()
+
+        val res = RootExecutor.execute(script)
+        val lines = res.getOrNull()?.stdout?.lines().orEmpty()
+        val orphans = mutableListOf<ChrootProcessInfo>()
+
+        for (line in lines) {
+            val parts = line.split("|")
+            if (parts.size >= 4) {
+                val pid = parts[0].toIntOrNull() ?: continue
+                val comm = parts[1].trim()
+                val sid = parts[2].trim().takeIf { it.isNotEmpty() }
+                val rssKb = parts[3].toLongOrNull() ?: 0L
+
+                // Sesi usang: sid tidak ada (legacy/crash lama) atau sid tidak aktif di DevBox
+                if (sid == null || !activeSessionIds.contains(sid)) {
+                    orphans.add(ChrootProcessInfo(pid, comm, sid, rssKb))
+                }
+            }
+        }
+        orphans
+    }
+
+    /**
+     * Mematikan semua proses orphan yang tertinggal di chroot dari crash/force close sebelumnya.
+     * Tidak akan mematikan proses sesi aktif DevBox!
+     */
+    suspend fun killOrphanChrootProcesses(
+        activeSessionIds: List<String>,
+        rootfs: String = activeRootfs
+    ): Int = withContext(Dispatchers.IO) {
+        val orphans = getOrphanChrootProcesses(activeSessionIds, rootfs)
+        if (orphans.isEmpty()) return@withContext 0
+
+        val pidsToKill = orphans.map { it.pid }.joinToString(" ")
+        RootExecutor.execute("kill -9 $pidsToKill 2>/dev/null || true")
+        AppLogger.i("ChrootManager", "Berhasil membersihkan ${orphans.size} proses orphan di chroot: $pidsToKill")
+        orphans.size
     }
 
     suspend fun toggleCodeServer(enable: Boolean, rootfs: String = activeRootfs): Result<Unit> {
