@@ -1,6 +1,7 @@
 package com.arbdev.devbox.terminal
 
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.snapshots.Snapshot
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.SpanStyle
@@ -771,6 +772,9 @@ class TerminalGridBuffer(
 
     private fun notifyUpdate() {
         version.intValue++
+        try {
+            Snapshot.sendApplyNotifications()
+        } catch (_: Exception) {}
     }
 
     /**

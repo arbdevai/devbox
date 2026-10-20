@@ -8,6 +8,7 @@ import android.view.inputmethod.BaseInputConnection
 import android.view.inputmethod.EditorInfo
 import android.view.inputmethod.InputConnection
 import android.view.inputmethod.InputMethodManager
+import com.arbdev.devbox.util.AppLogger
 
 /**
  * Native Android View dengan BaseInputConnection murni (Arsitektur Input standar Termux).
@@ -38,6 +39,7 @@ class TerminalInputView(context: Context) : View(context) {
         return object : BaseInputConnection(this, false) {
             override fun commitText(text: CharSequence?, newCursorPosition: Int): Boolean {
                 if (!text.isNullOrEmpty()) {
+                    AppLogger.i("TerminalInput", "commitText diterima dari keyboard: '$text'")
                     onCommitText?.invoke(text.toString())
                 }
                 return true
@@ -45,6 +47,7 @@ class TerminalInputView(context: Context) : View(context) {
 
             override fun deleteSurroundingText(beforeLength: Int, afterLength: Int): Boolean {
                 if (beforeLength > 0) {
+                    AppLogger.i("TerminalInput", "deleteSurroundingText (Backspace): beforeLength=$beforeLength")
                     repeat(beforeLength) { onBackspace?.invoke() }
                     return true
                 }
@@ -53,6 +56,7 @@ class TerminalInputView(context: Context) : View(context) {
 
             override fun sendKeyEvent(event: KeyEvent?): Boolean {
                 if (event != null && event.action == KeyEvent.ACTION_DOWN) {
+                    AppLogger.i("TerminalInput", "sendKeyEvent: keyCode=${event.keyCode}")
                     if (event.keyCode == KeyEvent.KEYCODE_DEL) {
                         onBackspace?.invoke()
                         return true

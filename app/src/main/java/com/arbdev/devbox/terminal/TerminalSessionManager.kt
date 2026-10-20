@@ -116,6 +116,7 @@ class NativeTerminalSession(
                         val count = stream.read(byteBuffer)
                         if (count == -1) break
                         if (count > 0) {
+                            AppLogger.i("NativeTerminal", "readerJob <- PTY ($count bytes)")
                             buffer.write(byteBuffer, 0, count)
                         }
                     }
@@ -139,6 +140,7 @@ class NativeTerminalSession(
     private var lastRows = 0
 
     fun sendText(text: String) {
+        AppLogger.i("NativeTerminal", "sendText -> PTY: '$text'")
         sessionScope.launch(Dispatchers.IO) {
             val out = outputStream ?: return@launch
             try {
@@ -152,6 +154,7 @@ class NativeTerminalSession(
     }
 
     fun sendBytes(bytes: ByteArray) {
+        AppLogger.i("NativeTerminal", "sendBytes -> PTY (${bytes.size} bytes)")
         sessionScope.launch(Dispatchers.IO) {
             val out = outputStream ?: return@launch
             try {

@@ -79,6 +79,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.arbdev.devbox.service.KeepAliveService
 import com.arbdev.devbox.terminal.TerminalSessionManager
+import com.arbdev.devbox.util.AppLogger
 import com.arbdev.devbox.ui.theme.DevPrimary
 import com.arbdev.devbox.ui.theme.TerminalBackground
 import com.arbdev.devbox.ui.theme.TerminalCyan
@@ -842,6 +843,7 @@ fun TerminalCanvas(
         Canvas(
             modifier = Modifier.size(width = totalWidthDp, height = totalHeightDp)
         ) {
+            val v = session.buffer.version.intValue // Daftarkan state di draw phase agar realtime redraw
             val nativeCanvas = drawContext.canvas.nativeCanvas
             val maxCols = session.buffer.maxCols
             val cursorRow = session.buffer.cursorRow
@@ -863,6 +865,8 @@ fun TerminalCanvas(
             val lastVisibleLine = if (charHeight > 0) {
                 ((scrollY + viewportHeight + charHeight) / charHeight).toInt().coerceIn(0, lineCount - 1)
             } else lineCount - 1
+
+            AppLogger.i("TerminalCanvas", "Canvas redraw v$v: kursor=($cursorRow,$cursorCol), visible=${firstVisibleLine}..${lastVisibleLine}")
 
             val textBatch = StringBuilder()
 
