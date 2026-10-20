@@ -12,6 +12,7 @@ import com.arbdev.devbox.util.AppLogger
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import java.io.File
@@ -236,13 +237,19 @@ class NativeTerminalSession(
         }
     }
 
+    private var resizeJob: Job? = null
+
     fun updateWindowSize(cols: Int, rows: Int) {
         if (cols == lastCols && rows == lastRows) return
         lastCols = cols
         lastRows = rows
         buffer.resize(cols, rows)
         val pid = getProcessPid() ?: return
-        sessionScope.launch(Dispatchers.IO) {
+
+        // Debounce: batalkan pemanggilan stty sebelumnya jika ukuran berubah cepat (anti-fork explosion Magisk)
+        resizeJob?.cancel()
+        resizeJob = sessionScope.launch(Dispatchers.IO) {
+            delay(150)
             try {
                 val cmd = "for p in \$(pgrep -P $pid 2>/dev/null); do " +
                         "for fd in /proc/\$p/fd/*; do " +

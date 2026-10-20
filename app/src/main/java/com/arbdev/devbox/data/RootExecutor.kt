@@ -15,12 +15,19 @@ data class CommandResult(
 
 object RootExecutor {
 
-    suspend fun isRootAvailable(): Boolean = withContext(Dispatchers.IO) {
+    @Volatile
+    private var cachedRootAvailable: Boolean? = null
+
+    suspend fun isRootAvailable(forceCheck: Boolean = false): Boolean = withContext(Dispatchers.IO) {
+        if (!forceCheck && cachedRootAvailable == true) {
+            return@withContext true
+        }
         try {
             val process = ProcessBuilder("su", "-c", "id").start()
             val stdout = process.inputStream.bufferedReader().use(BufferedReader::readText)
             val exit = process.waitFor()
             val available = exit == 0 && stdout.contains("uid=0")
+            cachedRootAvailable = available
             if (available) {
                 AppLogger.i("RootExecutor", "Akses root (su) terverifikasi: $stdout")
             } else {
@@ -28,6 +35,7 @@ object RootExecutor {
             }
             available
         } catch (e: Exception) {
+            cachedRootAvailable = false
             AppLogger.e("RootExecutor", "Exception saat cek su", e)
             false
         }

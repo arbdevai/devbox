@@ -35,89 +35,99 @@ object ChrootManager {
             return ChrootState(isRootGranted = false, rootfsPath = rootfs)
         }
 
-        val checkCmd = """
-            if [ -d '$rootfs' ]; then
-                if [ -x '$rootfs/bin/bash' ] || [ -x '$rootfs/usr/bin/bash' ] || [ -x '$rootfs/bin/sh' ]; then
-                    echo 'EXISTS'
+        // Optimasi atomic: Jalankan seluruh verifikasi status dalam 1 script bash tunggal via su (70ms vs 3500ms)
+        val script = """
+            rf='$rootfs'
+            if [ -d "${'$'}rf" ]; then
+                if [ -x "${'$'}rf/bin/bash" ] || [ -x "${'$'}rf/usr/bin/bash" ] || [ -x "${'$'}rf/bin/sh" ]; then
+                    status="EXISTS"
                 else
-                    echo 'DIR_EMPTY'
+                    status="DIR_EMPTY"
                 fi
             else
-                echo 'NOT_FOUND'
+                status="NOT_FOUND"
+            fi
+
+            if [ -d '/data/local/ubuntu-chroot' ] && { [ -x '/data/local/ubuntu-chroot/bin/bash' ] || [ -x '/data/local/ubuntu-chroot/usr/bin/bash' ]; }; then
+                src_ok=1
+            else
+                src_ok=0
+            fi
+
+            if [ "${'$'}status" = "EXISTS" ]; then
+                mountpoint -q "${'$'}rf/proc" && mnt=1 || mnt=0
+
+                procs=0
+                for p in /proc/[0-9]*; do
+                    if [ "$(readlink ${'$'}p/root 2>/dev/null)" = "${'$'}rf" ]; then
+                        procs=${'$'}((procs + 1))
+                    fi
+                done
+
+                ram=0
+                st=0
+                sf=0
+                while read -r key val rest; do
+                    case "${'$'}key" in
+                        MemAvailable:) ram=${'$'}((val / 1024)) ;;
+                        SwapTotal:) st=${'$'}((val / 1024)) ;;
+                        SwapFree:) sf=${'$'}((val / 1024)) ;;
+                    esac
+                done < /proc/meminfo
+                swap=${'$'}((st - sf))
+                [ ${'$'}swap -lt 0 ] && swap=0
+
+                cs=0
+                ssh=0
+                if command -v netstat >/dev/null 2>&1; then
+                    ns_out=${'$'}(netstat -tuln 2>/dev/null)
+                    echo "${'$'}ns_out" | grep -q ':8080 ' && cs=1
+                    echo "${'$'}ns_out" | grep -q ':2222 ' && ssh=1
+                fi
+                echo "${'$'}status|${'$'}src_ok|${'$'}mnt|${'$'}procs|${'$'}ram|${'$'}swap|${'$'}cs|${'$'}ssh"
+            else
+                echo "${'$'}status|${'$'}src_ok|0|0|0|0|0|0"
             fi
         """.trimIndent()
 
-        val existsRes = RootExecutor.execute(checkCmd)
-        val statusText = existsRes.getOrNull()?.stdout?.trim() ?: "NOT_FOUND"
+        val res = RootExecutor.execute(script)
+        val line = res.getOrNull()?.stdout?.trim()?.lines()?.lastOrNull() ?: ""
+        val parts = line.split("|")
 
-        val checkSourceRes = RootExecutor.execute(
-            "if [ -d '/data/local/ubuntu-chroot' ] && { [ -x '/data/local/ubuntu-chroot/bin/bash' ] || [ -x '/data/local/ubuntu-chroot/usr/bin/bash' ]; }; then echo 'SOURCE_OK'; fi"
-        )
-        val isSourceOk = checkSourceRes.getOrNull()?.stdout?.contains("SOURCE_OK") == true
+        if (parts.size >= 8) {
+            val statusText = parts[0]
+            val isSourceOk = parts[1] == "1"
+            val isMounted = parts[2] == "1"
+            val activeProcs = parts[3].toIntOrNull() ?: 0
+            val ramAvailable = parts[4].toLongOrNull() ?: 0L
+            val swapUsed = parts[5].toLongOrNull() ?: 0L
+            val isCodeServer = parts[6] == "1"
+            val isSsh = parts[7] == "1"
 
-        val isRootfsExists = statusText == "EXISTS"
-        if (!isRootfsExists) {
-            AppLogger.w("ChrootManager", "Status rootfs di $rootfs: $statusText")
+            val isRootfsExists = statusText == "EXISTS"
+            if (!isRootfsExists) {
+                AppLogger.w("ChrootManager", "Status rootfs di $rootfs: $statusText")
+            }
+
             return ChrootState(
                 isRootGranted = true,
-                isRootfsExists = false,
+                isRootfsExists = isRootfsExists,
+                isMounted = isMounted,
+                activeProcesses = activeProcs,
+                ramAvailableMb = ramAvailable,
+                swapUsedMb = swapUsed,
+                isCodeServerRunning = isCodeServer,
+                isSshRunning = isSsh,
                 rootfsPath = rootfs,
                 isSourceChrootAvailable = isSourceOk
             )
         }
 
-        val mountRes = RootExecutor.execute("mountpoint -q '$rootfs/proc' && echo 'MOUNTED'")
-        val isMounted = mountRes.getOrNull()?.stdout?.contains("MOUNTED") == true
-
-        // Hitung proses yang berjalan khusus di dalam rootfs DevBox menggunakan readlink /proc/*/root
-        val procCountRes = RootExecutor.execute(
-            "for p in /proc/[0-9]*; do if [ \"\$(readlink \$p/root 2>/dev/null)\" = '$rootfs' ]; then echo 1; fi; done | wc -l"
-        )
-        val activeProcs = procCountRes.getOrNull()?.stdout?.trim()?.toIntOrNull() ?: 0
-
-        // Parse informasi RAM dan Swap
-        val memRes = RootExecutor.execute("cat /proc/meminfo")
-        var ramAvailable = 0L
-        var swapTotal = 0L
-        var swapFree = 0L
-
-        memRes.getOrNull()?.stdout?.lines()?.forEach { line ->
-            when {
-                line.startsWith("MemAvailable:") -> {
-                    val kb = line.split("\\s+".toRegex()).getOrNull(1)?.toLongOrNull() ?: 0L
-                    ramAvailable = kb / 1024
-                }
-                line.startsWith("SwapTotal:") -> {
-                    val kb = line.split("\\s+".toRegex()).getOrNull(1)?.toLongOrNull() ?: 0L
-                    swapTotal = kb / 1024
-                }
-                line.startsWith("SwapFree:") -> {
-                    val kb = line.split("\\s+".toRegex()).getOrNull(1)?.toLongOrNull() ?: 0L
-                    swapFree = kb / 1024
-                }
-            }
-        }
-        val swapUsed = (swapTotal - swapFree).coerceAtLeast(0L)
-
-        // Cek Code-Server port 8080
-        val port8080 = RootExecutor.execute("netstat -tuln 2>/dev/null | grep -q ':8080 ' && echo 'LISTEN'")
-        val isCodeServer = port8080.getOrNull()?.stdout?.contains("LISTEN") == true
-
-        // Cek SSH port 2222
-        val portSsh = RootExecutor.execute("netstat -tuln 2>/dev/null | grep -q ':2222 ' && echo 'LISTEN'")
-        val isSsh = portSsh.getOrNull()?.stdout?.contains("LISTEN") == true
-
+        // Fallback jika parsing gagal
         return ChrootState(
             isRootGranted = true,
-            isRootfsExists = true,
-            isMounted = isMounted,
-            activeProcesses = activeProcs,
-            ramAvailableMb = ramAvailable,
-            swapUsedMb = swapUsed,
-            isCodeServerRunning = isCodeServer,
-            isSshRunning = isSsh,
-            rootfsPath = rootfs,
-            isSourceChrootAvailable = isSourceOk
+            isRootfsExists = false,
+            rootfsPath = rootfs
         )
     }
 

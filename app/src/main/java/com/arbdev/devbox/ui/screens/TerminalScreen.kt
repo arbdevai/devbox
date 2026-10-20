@@ -1,5 +1,6 @@
 package com.arbdev.devbox.ui.screens
 
+import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.view.ActionMode
@@ -25,7 +26,6 @@ import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
-import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
@@ -48,6 +48,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.ContentPaste
@@ -61,6 +62,7 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.ScrollableTabRow
@@ -137,8 +139,18 @@ fun TerminalScreen(
     val activeSession = TerminalSessionManager.getActiveSession()
     val activeIndex = TerminalSessionManager.activeIndex.intValue
 
-    // Ukuran font terminal dengan dukungan pinch-to-zoom (rentang 8sp - 28sp)
-    var terminalFontSize by remember { mutableFloatStateOf(12f) }
+    // Persistensi ukuran font terminal via SharedPreferences (default 12sp, rentang 8sp - 28sp)
+    val prefs = remember { context.getSharedPreferences("devbox_terminal_prefs", Context.MODE_PRIVATE) }
+    var terminalFontSize by remember { mutableFloatStateOf(prefs.getFloat("terminal_font_size", 12f)) }
+
+    // Helper untuk mengubah dan menyimpan ukuran font secara smooth (step 0.5f)
+    val updateFontSize: (Float) -> Unit = { newSize ->
+        val clamped = (Math.round(newSize * 2f) / 2f).coerceIn(8f, 28f)
+        terminalFontSize = clamped
+        prefs.edit().putFloat("terminal_font_size", clamped).apply()
+        Toast.makeText(context, "Ukuran font: ${String.format(java.util.Locale.US, "%.1f", clamped)} sp", Toast.LENGTH_SHORT).show()
+    }
+
     val hapticFeedback = LocalHapticFeedback.current
     var activeUrlPrompt by remember { mutableStateOf<String?>(null) }
 
@@ -170,13 +182,13 @@ fun TerminalScreen(
     var isCleaningOrphans by remember { mutableStateOf(false) }
     var showSessionManagerDialog by remember { mutableStateOf(false) }
 
-    // Pemindaian otomatis berkala untuk mendeteksi proses orphan dari crash/force close sebelumnya
+    // Pemindaian otomatis berkala untuk mendeteksi proses orphan dari crash/force close sebelumnya (dithrottle 15s)
     LaunchedEffect(TerminalSessionManager.sessions.size) {
         while (isActive) {
             val activeIds = TerminalSessionManager.sessions.map { it.id }
             val activePids = TerminalSessionManager.sessions.mapNotNull { it.getProcessPid() }
             orphanProcesses = ChrootManager.getOrphanChrootProcesses(activeIds, activePids)
-            kotlinx.coroutines.delay(4000)
+            kotlinx.coroutines.delay(15000)
         }
     }
 
@@ -186,6 +198,19 @@ fun TerminalScreen(
     // Scroll state terisolasi per sesi (mencegah desinkronisasi viewport saat switch antar sesi)
     val verticalScrollState = remember(activeSession.id) { ScrollState(0) }
     val horizontalScrollState = remember(activeSession.id) { ScrollState(0) }
+
+    // State auto-scroll cerdas: tetap mengikuti baris terbawah kecuali pengguna sengaja scroll ke atas
+    var autoScrollEnabled by remember(activeSession.id) { mutableStateOf(true) }
+
+    // Pantau jika pengguna menggeser scroll manual
+    LaunchedEffect(verticalScrollState.isScrollInProgress) {
+        if (verticalScrollState.isScrollInProgress) {
+            val distFromBottom = verticalScrollState.maxValue - verticalScrollState.value
+            // Jika user scroll ke atas (> 120px dari bawah), tahan auto-scroll agar nyaman membaca teks/log
+            // Jika user scroll kembali mendekati bawah (<= 120px), aktifkan lagi auto-scroll
+            autoScrollEnabled = distFromBottom <= 120
+        }
+    }
 
     // Helper navigasi tombol panah yang menghormati DECCKM (Application Cursor Mode pada TUI seperti agy)
     val sendArrowUp = {
@@ -214,15 +239,18 @@ fun TerminalScreen(
         KeepAliveService.updateNotification(context)
     }
 
-    // Auto-scroll cerdas: kunci posisi 0 jika AltBuffer (TUI), dan scroll ke bawah pada normal buffer hanya jika dekat posisi terbawah
-    LaunchedEffect(activeSession.buffer.version.intValue, activeSession.buffer.isAltBuffer) {
+    // Auto-scroll reaktif: mengikuti penambahan baris atau perubahan ukuran layar/keyboard (verticalScrollState.maxValue)
+    LaunchedEffect(
+        verticalScrollState.maxValue,
+        activeSession.buffer.version.intValue,
+        activeSession.buffer.isAltBuffer
+    ) {
         if (activeSession.buffer.isAltBuffer) {
             if (verticalScrollState.value != 0) {
                 verticalScrollState.scrollTo(0)
             }
         } else {
-            val isNearBottom = verticalScrollState.value >= (verticalScrollState.maxValue - 120).coerceAtLeast(0)
-            if (isNearBottom && verticalScrollState.maxValue > 0) {
+            if (autoScrollEnabled && verticalScrollState.maxValue > 0) {
                 verticalScrollState.scrollTo(verticalScrollState.maxValue)
             }
         }
@@ -232,15 +260,6 @@ fun TerminalScreen(
     LaunchedEffect(initialCommand) {
         initialCommand?.let { cmd ->
             activeSession.runCommand(cmd)
-        }
-    }
-
-    // Gestur Pinch-to-Zoom (Cubit layar untuk zoom in / zoom out font)
-    val zoomModifier = Modifier.pointerInput(Unit) {
-        detectTransformGestures { _, _, zoom, _ ->
-            if (zoom != 1f) {
-                terminalFontSize = (terminalFontSize * zoom).coerceIn(8f, 28f)
-            }
         }
     }
 
@@ -439,6 +458,7 @@ fun TerminalScreen(
                 // Toggle Soft Keyboard
                 IconButton(
                     onClick = {
+                        autoScrollEnabled = true
                         terminalInputView?.requestKeyboard()
                         keyboardController?.show()
                     },
@@ -452,12 +472,10 @@ fun TerminalScreen(
                     )
                 }
 
-                // Font Zoom Out (-)
+                // Font Zoom Out (-) dengan step smooth 0.5f dan auto-save SharedPreferences
                 IconButton(
                     onClick = {
-                        if (terminalFontSize > 8f) {
-                            terminalFontSize = (terminalFontSize - 1f).coerceAtLeast(8f)
-                        }
+                        updateFontSize(terminalFontSize - 0.5f)
                     },
                     modifier = Modifier.size(28.dp)
                 ) {
@@ -470,12 +488,10 @@ fun TerminalScreen(
                     )
                 }
 
-                // Font Zoom In (+)
+                // Font Zoom In (+) dengan step smooth 0.5f dan auto-save SharedPreferences
                 IconButton(
                     onClick = {
-                        if (terminalFontSize < 28f) {
-                            terminalFontSize = (terminalFontSize + 1f).coerceAtMost(28f)
-                        }
+                        updateFontSize(terminalFontSize + 0.5f)
                     },
                     modifier = Modifier.size(28.dp)
                 ) {
@@ -706,7 +722,6 @@ fun TerminalScreen(
                 .weight(1f)
                 .fillMaxWidth()
                 .background(TerminalBackground)
-                .then(zoomModifier)
         ) {
             val density = LocalDensity.current
             LaunchedEffect(maxWidth, maxHeight, terminalFontSize) {
@@ -732,6 +747,7 @@ fun TerminalScreen(
                     verticalScrollState = verticalScrollState,
                     horizontalScrollState = horizontalScrollState,
                     onFocusRequest = {
+                        autoScrollEnabled = true
                         terminalInputView?.requestKeyboard()
                         keyboardController?.show()
                     },
@@ -743,6 +759,35 @@ fun TerminalScreen(
                     },
                     modifier = Modifier.fillMaxSize()
                 )
+            }
+
+            // Tombol Melayang Jump-to-Bottom (muncul saat auto-scroll dijeda karena scroll ke atas)
+            if (!autoScrollEnabled && !activeSession.buffer.isAltBuffer) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(end = 16.dp, bottom = 16.dp),
+                    contentAlignment = Alignment.BottomEnd
+                ) {
+                    FloatingActionButton(
+                        onClick = {
+                            autoScrollEnabled = true
+                            coroutineScope.launch {
+                                verticalScrollState.animateScrollTo(verticalScrollState.maxValue)
+                            }
+                        },
+                        containerColor = DevPrimary,
+                        contentColor = Color.Black,
+                        shape = CircleShape,
+                        modifier = Modifier.size(36.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.ArrowDropDown,
+                            contentDescription = "Scroll ke paling bawah",
+                            modifier = Modifier.size(24.dp)
+                        )
+                    }
+                }
             }
         }
 
