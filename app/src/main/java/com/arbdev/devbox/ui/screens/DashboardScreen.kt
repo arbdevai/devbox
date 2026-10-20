@@ -17,26 +17,40 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.ArrowDropDown
+import androidx.compose.material.icons.filled.ArrowDropUp
 import androidx.compose.material.icons.filled.Assessment
 import androidx.compose.material.icons.filled.BugReport
+import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.CloudDownload
 import androidx.compose.material.icons.filled.Code
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Dns
 import androidx.compose.material.icons.filled.Folder
+import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.Layers
 import androidx.compose.material.icons.filled.PowerSettingsNew
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.SystemUpdate
 import androidx.compose.material.icons.filled.Terminal
+import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
@@ -44,6 +58,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
@@ -67,8 +82,10 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.arbdev.devbox.data.ChrootManager
+import com.arbdev.devbox.data.ChrootProcessInfo
 import com.arbdev.devbox.data.ChrootState
 import com.arbdev.devbox.service.KeepAliveService
+import com.arbdev.devbox.terminal.TerminalSessionManager
 import com.arbdev.devbox.ui.theme.DevError
 import com.arbdev.devbox.ui.theme.DevPrimary
 import com.arbdev.devbox.ui.theme.DevSecondary
@@ -79,6 +96,7 @@ import com.arbdev.devbox.updater.UpdateInfo
 import com.arbdev.devbox.updater.UpdateManager
 import com.arbdev.devbox.updater.UpdateStatus
 import com.arbdev.devbox.util.AppLogger
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 
 @Composable
@@ -90,14 +108,22 @@ fun DashboardScreen(
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     var state by remember { mutableStateOf(ChrootState()) }
+    var isInitialLoading by remember { mutableStateOf(true) }
     var isRefreshing by remember { mutableStateOf(false) }
     var wakeLockActive by remember { mutableStateOf(KeepAliveService.isRunning) }
     var actionMessage by remember { mutableStateOf<String?>(null) }
     var isOperating by remember { mutableStateOf(false) }
 
+    // Sesi Latar Belakang Usang (Orphan Sessions)
+    var orphanProcesses by remember { mutableStateOf<List<ChrootProcessInfo>>(emptyList()) }
+    var isCleaningOrphans by remember { mutableStateOf(false) }
+
     // Dialog Custom Rootfs Path
     var showCustomPathDialog by remember { mutableStateOf(false) }
     var tempPathInput by remember { mutableStateOf(ChrootManager.activeRootfs) }
+
+    // Dialog Changelog Versi Saat Ini
+    var showCurrentChangelogDialog by remember { mutableStateOf(false) }
 
     // In-App Updater State
     val updateStatus by UpdateManager.updateStatus.collectAsState()
@@ -106,6 +132,9 @@ fun DashboardScreen(
         scope.launch {
             isRefreshing = true
             state = ChrootManager.getChrootState()
+            isInitialLoading = false
+            val activeIds = TerminalSessionManager.sessions.map { it.id }
+            orphanProcesses = ChrootManager.getOrphanChrootProcesses(activeIds)
             wakeLockActive = KeepAliveService.isRunning
             isRefreshing = false
         }
@@ -115,6 +144,12 @@ fun DashboardScreen(
         refreshState()
         // Cek update otomatis di background & bersihkan APK usang
         UpdateManager.checkForUpdates(context)
+        // Pemindaian berkala background sesi usang
+        while (isActive) {
+            val activeIds = TerminalSessionManager.sessions.map { it.id }
+            orphanProcesses = ChrootManager.getOrphanChrootProcesses(activeIds)
+            kotlinx.coroutines.delay(5000)
+        }
     }
 
     Column(
@@ -144,12 +179,18 @@ fun DashboardScreen(
                 )
             }
             Row(verticalAlignment = Alignment.CenterVertically) {
-                // In-App Update Icon Button
+                // In-App Update Icon Button with Changelog Dialog
                 IconButton(
                     onClick = {
                         scope.launch {
                             Toast.makeText(context, "Memeriksa pembaruan...", Toast.LENGTH_SHORT).show()
-                            UpdateManager.checkForUpdates(context)
+                            val res = UpdateManager.checkForUpdates(context)
+                            if (res.isSuccess) {
+                                val info = res.getOrNull()
+                                if (info != null && !info.hasUpdate) {
+                                    showCurrentChangelogDialog = true
+                                }
+                            }
                         }
                     }
                 ) {
@@ -258,8 +299,79 @@ fun DashboardScreen(
             }
         }
 
-        // Status Card
-        StatusCard(state = state)
+        // Sesi Usang di Background Banner (Jika Ada)
+        AnimatedVisibility(visible = orphanProcesses.isNotEmpty()) {
+            val totalRamMb = orphanProcesses.sumOf { it.memoryKb } / 1024
+            Card(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(bottom = 12.dp),
+                colors = CardDefaults.cardColors(containerColor = Color(0xFF231602)),
+                shape = RoundedCornerShape(14.dp),
+                border = BorderStroke(1.dp, Color(0xFFFF9800).copy(alpha = 0.7f))
+            ) {
+                Row(
+                    modifier = Modifier.padding(14.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Warning,
+                            contentDescription = null,
+                            tint = Color(0xFFFF9800),
+                            modifier = Modifier.size(20.dp)
+                        )
+                        Spacer(modifier = Modifier.width(10.dp))
+                        Column {
+                            Text(
+                                text = "${orphanProcesses.size} Sesi Usang di Background (~${totalRamMb} MB)",
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 13.sp,
+                                color = Color.White
+                            )
+                            Text(
+                                text = "Sisa force close lama yang memakan RAM. Bersihkan agar HP tidak lag.",
+                                fontSize = 11.sp,
+                                color = Color(0xFFB0BEC5)
+                            )
+                        }
+                    }
+                    Button(
+                        onClick = {
+                            scope.launch {
+                                isCleaningOrphans = true
+                                val activeIds = TerminalSessionManager.sessions.map { it.id }
+                                val killed = ChrootManager.killOrphanChrootProcesses(activeIds)
+                                orphanProcesses = emptyList()
+                                isCleaningOrphans = false
+                                refreshState()
+                                Toast.makeText(context, "$killed sesi lama berhasil dibersihkan", Toast.LENGTH_SHORT).show()
+                            }
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFF9800)),
+                        shape = RoundedCornerShape(8.dp),
+                        enabled = !isCleaningOrphans
+                    ) {
+                        if (isCleaningOrphans) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(14.dp),
+                                color = Color.Black,
+                                strokeWidth = 2.dp
+                            )
+                        } else {
+                            Text("Bersihkan", color = Color.Black, fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                        }
+                    }
+                }
+            }
+        }
+
+        // Status Card dengan Proteksi Flash State Loading
+        StatusCard(state = state, isLoading = isInitialLoading || isRefreshing)
 
         // ROOTFS SETUP OPTIONS IF NOT INSTALLED
         if (!state.isRootfsExists && state.isRootGranted) {
@@ -551,6 +663,13 @@ fun DashboardScreen(
                 Spacer(modifier = Modifier.height(8.dp))
                 MetricRow(label = "Proses Container", value = "${state.activeProcesses} proses")
                 Spacer(modifier = Modifier.height(8.dp))
+                MetricRow(label = "Sesi Terminal Aktif", value = "${TerminalSessionManager.sessions.size} sesi")
+                Spacer(modifier = Modifier.height(8.dp))
+                MetricRow(
+                    label = "Sesi Background Usang",
+                    value = if (orphanProcesses.isEmpty()) "Bersih (0)" else "${orphanProcesses.size} proses (${orphanProcesses.sumOf { it.memoryKb } / 1024} MB)"
+                )
+                Spacer(modifier = Modifier.height(8.dp))
                 MetricRow(label = "Jalur Rootfs Aktif", value = ChrootManager.activeRootfs)
             }
         }
@@ -627,6 +746,73 @@ fun DashboardScreen(
             }
         )
     }
+
+    // Dialog Changelog Versi Terbaru / Saat Ini
+    if (showCurrentChangelogDialog) {
+        val info = UpdateManager.lastCheckedInfo
+        AlertDialog(
+            onDismissRequest = { showCurrentChangelogDialog = false },
+            title = {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(
+                        imageVector = Icons.Default.CheckCircle,
+                        contentDescription = null,
+                        tint = DevSuccess,
+                        modifier = Modifier.size(22.dp)
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = "Versi Terbaru (${info?.latestVersion ?: "v${com.arbdev.devbox.BuildConfig.VERSION_NAME}"})",
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 16.sp
+                    )
+                }
+            },
+            text = {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .verticalScroll(rememberScrollState())
+                ) {
+                    Text(
+                        text = "Aplikasi Anda sudah menggunakan rilis paling mutakhir.",
+                        fontSize = 12.sp,
+                        color = Color.LightGray
+                    )
+                    Spacer(modifier = Modifier.height(10.dp))
+                    Surface(
+                        color = Color(0xFF101010),
+                        shape = RoundedCornerShape(8.dp),
+                        border = BorderStroke(1.dp, Color.DarkGray),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Column(modifier = Modifier.padding(12.dp)) {
+                            Text(
+                                text = "Catatan Rilis (Changelog):",
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = DevPrimary
+                            )
+                            Spacer(modifier = Modifier.height(6.dp))
+                            Text(
+                                text = info?.releaseNotes?.ifBlank { "Pembaruan kestabilan dan optimalisasi container DevBox." }
+                                    ?: "Pembaruan kestabilan dan optimalisasi container DevBox.",
+                                fontSize = 11.sp,
+                                fontFamily = FontFamily.Monospace,
+                                color = Color(0xFFE0E0E0),
+                                lineHeight = 16.sp
+                            )
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { showCurrentChangelogDialog = false }) {
+                    Text("Tutup", color = DevPrimary, fontWeight = FontWeight.Bold)
+                }
+            }
+        )
+    }
 }
 
 @Composable
@@ -634,44 +820,131 @@ fun UpdateBannerCard(
     info: UpdateInfo,
     onUpdateClick: () -> Unit
 ) {
+    var showChangelog by remember { mutableStateOf(false) }
+
     Card(
         modifier = Modifier.fillMaxWidth(),
         colors = CardDefaults.cardColors(containerColor = Color(0xFF0F1E14)),
         shape = RoundedCornerShape(14.dp),
         border = BorderStroke(1.dp, DevSuccess.copy(alpha = 0.6f))
     ) {
-        Row(
-            modifier = Modifier.padding(14.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Column(modifier = Modifier.weight(1f)) {
+        Column(modifier = Modifier.padding(14.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Surface(
+                            color = DevSuccess.copy(alpha = 0.2f),
+                            shape = RoundedCornerShape(4.dp)
+                        ) {
+                            Text(
+                                text = "UPDATE TERSEDIA",
+                                fontSize = 9.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = DevSuccess,
+                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                            )
+                        }
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(
+                            text = info.latestVersion,
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Color.White
+                        )
+                    }
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(
+                        text = "Versi saat ini: ${info.currentVersion} • Ukuran: ${"%.1f".format(info.apkSizeMb)} MB",
+                        fontSize = 11.sp,
+                        color = Color.LightGray
+                    )
+                }
+                Button(
+                    onClick = onUpdateClick,
+                    colors = ButtonDefaults.buttonColors(containerColor = DevSuccess),
+                    shape = RoundedCornerShape(8.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.CloudDownload,
+                        contentDescription = null,
+                        tint = Color.Black,
+                        modifier = Modifier.size(16.dp)
+                    )
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text("Perbarui", color = Color.Black, fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                }
+            }
+
+            Spacer(modifier = Modifier.height(6.dp))
+
+            // Tombol Toggle Changelog
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(6.dp))
+                    .clickable { showChangelog = !showChangelog }
+                    .padding(vertical = 4.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Icon(
+                    imageVector = if (showChangelog) Icons.Default.ArrowDropUp else Icons.Default.ArrowDropDown,
+                    contentDescription = null,
+                    tint = DevSuccess,
+                    modifier = Modifier.size(20.dp)
+                )
+                Spacer(modifier = Modifier.width(4.dp))
                 Text(
-                    text = "Pembaruan Tersedia: ${info.latestVersion}",
-                    fontSize = 14.sp,
-                    fontWeight = FontWeight.Bold,
+                    text = if (showChangelog) "Sembunyikan Catatan Rilis (Changelog)" else "Lihat Catatan Rilis (Changelog)",
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.SemiBold,
                     color = DevSuccess
                 )
-                Text(
-                    text = "Versi saat ini: ${info.currentVersion} • Ukuran: ${"%.1f".format(info.apkSizeMb)} MB",
-                    fontSize = 11.sp,
-                    color = Color.LightGray
-                )
             }
-            Button(
-                onClick = onUpdateClick,
-                colors = ButtonDefaults.buttonColors(containerColor = DevSuccess),
-                shape = RoundedCornerShape(8.dp)
-            ) {
-                Text("Perbarui", color = Color.Black, fontWeight = FontWeight.Bold, fontSize = 12.sp)
+
+            // Konten Changelog
+            AnimatedVisibility(visible = showChangelog) {
+                Surface(
+                    color = Color(0xFF09140C),
+                    shape = RoundedCornerShape(8.dp),
+                    border = BorderStroke(1.dp, DevSuccess.copy(alpha = 0.25f)),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 6.dp)
+                ) {
+                    Column(modifier = Modifier.padding(10.dp)) {
+                        Text(
+                            text = "Apa yang Baru di ${info.latestVersion}:",
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = DevSuccess
+                        )
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text(
+                            text = info.releaseNotes.ifBlank { "Tidak ada catatan rilis rinci yang disertakan." },
+                            fontSize = 11.sp,
+                            fontFamily = FontFamily.Monospace,
+                            color = Color(0xFFD0E0D4),
+                            lineHeight = 16.sp
+                        )
+                    }
+                }
             }
         }
     }
 }
 
 @Composable
-fun StatusCard(state: ChrootState) {
+fun StatusCard(state: ChrootState, isLoading: Boolean = false) {
     val (statusColor, statusTitle, statusDesc) = when {
+        isLoading -> Triple(
+            DevPrimary,
+            "Memeriksa Status Container & Root...",
+            "Sedang memverifikasi izin Superuser (su) dan integritas container DevBox."
+        )
         !state.isRootGranted -> Triple(
             DevError,
             "Akses Root Tidak Terdeteksi",
@@ -703,12 +976,20 @@ fun StatusCard(state: ChrootState) {
             modifier = Modifier.padding(16.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Box(
-                modifier = Modifier
-                    .size(12.dp)
-                    .clip(CircleShape)
-                    .background(statusColor)
-            )
+            if (isLoading) {
+                CircularProgressIndicator(
+                    modifier = Modifier.size(14.dp),
+                    color = DevPrimary,
+                    strokeWidth = 2.dp
+                )
+            } else {
+                Box(
+                    modifier = Modifier
+                        .size(12.dp)
+                        .clip(CircleShape)
+                        .background(statusColor)
+                )
+            }
             Spacer(modifier = Modifier.width(12.dp))
             Column(modifier = Modifier.weight(1f)) {
                 Text(

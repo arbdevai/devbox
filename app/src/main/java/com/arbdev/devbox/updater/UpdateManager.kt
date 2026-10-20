@@ -77,6 +77,9 @@ object UpdateManager {
     private val _updateStatus = MutableStateFlow<UpdateStatus>(UpdateStatus.Idle)
     val updateStatus: StateFlow<UpdateStatus> = _updateStatus.asStateFlow()
 
+    var lastCheckedInfo: UpdateInfo? = null
+        private set
+
     private var activeDownloadId: Long = -1L
 
     fun cleanupOldApks(context: Context, keepVersion: String? = null) {
@@ -139,6 +142,7 @@ object UpdateManager {
                 downloadUrl = downloadUrl,
                 apkSizeMb = sizeMb
             )
+            lastCheckedInfo = info
 
             if (info.hasUpdate) {
                 _updateStatus.value = UpdateStatus.Available(info)

@@ -237,7 +237,7 @@ XDG_EOF
               if [ "$(readlink ${'$'}p/root 2>/dev/null)" = '$rootfs' ]; then
                 pid=${'$'}(basename ${'$'}p)
                 comm=${'$'}(cat ${'$'}p/comm 2>/dev/null)
-                sid=${'$'}(grep -z '^DEVBOX_SESSION_ID=' ${'$'}p/environ 2>/dev/null | tr -d '\0' | cut -d= -f2)
+                sid=${'$'}(tr '\0' '\n' < ${'$'}p/environ 2>/dev/null | grep -a '^DEVBOX_SESSION_ID=' | cut -d= -f2)
                 rss=${'$'}(awk '/VmRSS/{print ${'$'}2}' ${'$'}p/status 2>/dev/null || echo 0)
                 echo "${'$'}pid|${'$'}comm|${'$'}sid|${'$'}rss"
               fi
