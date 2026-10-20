@@ -431,9 +431,6 @@ fun TerminalScreen(
                             val sanitized = typed.replace("\r\n", "\r").replace("\n", "\r")
                             activeSession.sendText(sanitized)
                         }
-                        if (!activeSession.buffer.isAltBuffer && verticalScrollState.maxValue > 0) {
-                            verticalScrollState.scrollTo(verticalScrollState.maxValue)
-                        }
                         inputTfv = TextFieldValue(asciiPrefix, TextRange(asciiPrefix.length))
                     }
                 } else {
