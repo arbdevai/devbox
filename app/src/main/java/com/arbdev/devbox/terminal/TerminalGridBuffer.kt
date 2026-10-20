@@ -918,6 +918,25 @@ class TerminalGridBuffer(
         }
     }
 
+    /**
+     * Menampilkan karakter masked '***' secara realtime di layar terminal
+     * untuk memberikan feedback visual pada prompt no-echo (seperti token OAuth agy, password sudo).
+     */
+    fun displayMaskedInput(charCount: Int) {
+        synchronized(lock) {
+            val count = charCount.coerceIn(1, maxCols)
+            val row = activeGrid[cursorRow]
+            for (i in 0 until count) {
+                val c = cursorCol + i
+                if (c < maxCols) {
+                    row[c] = TerminalCell('*', fgColor = Color(0xFF61AFEF), isBold = true)
+                }
+            }
+            cursorCol = (cursorCol + count).coerceAtMost(maxCols - 1)
+            version.intValue++
+        }
+    }
+
     fun getScrollbackSnapshot(): List<Array<TerminalCell>> {
         synchronized(lock) {
             return scrollback.toList()

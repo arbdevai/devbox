@@ -126,6 +126,9 @@ fun TerminalScreen(
     var isAltActive by remember { mutableStateOf(false) }
     var isShiftActive by remember { mutableStateOf(false) }
 
+    // Dialog proteksi teks clipboard sangat panjang (anti-loop CLI)
+    var pendingLargePaste by remember { mutableStateOf<String?>(null) }
+
     // View input terminal berbasis BaseInputConnection (gaya Termux, tanpa Compose TextField delay)
     var terminalInputView by remember { mutableStateOf<TerminalInputView?>(null) }
 
@@ -363,9 +366,11 @@ fun TerminalScreen(
                     onClick = {
                         val clip = clipboardManager.getText()?.text
                         if (!clip.isNullOrEmpty()) {
-                            activeSession.pasteText(clip)
-                            val preview = if (clip.length > 20) clip.take(15) + "..." else clip
-                            Toast.makeText(context, "Ditempel: $preview (${clip.length} karakter)\nTekan Enter jika prompt tersembunyi", Toast.LENGTH_SHORT).show()
+                            if (clip.length > 2000 || clip.count { it == '\n' } > 50) {
+                                pendingLargePaste = clip
+                            } else {
+                                activeSession.pasteText(clip)
+                            }
                         } else {
                             Toast.makeText(context, "Clipboard kosong", Toast.LENGTH_SHORT).show()
                         }
@@ -503,7 +508,44 @@ fun TerminalScreen(
                 onTapUrl = { url ->
                     activeUrlPrompt = url
                 },
+                onPasteLarge = { largeText ->
+                    pendingLargePaste = largeText
+                },
                 modifier = Modifier.fillMaxSize()
+            )
+        }
+
+        // Dialog Konfirmasi Tempel Teks Sangat Panjang (Mencegah Shell/CLI Looping akibat accidental log paste)
+        pendingLargePaste?.let { largeText ->
+            AlertDialog(
+                onDismissRequest = { pendingLargePaste = null },
+                title = { Text("Teks Sangat Panjang", fontWeight = FontWeight.Bold) },
+                text = {
+                    Text(
+                        "Clipboard berisi ${largeText.length} karakter (${largeText.lines().size} baris).\n\n" +
+                        "Menempelkan teks log/kode raksasa ke prompt CLI dapat menyebabkan shell hang atau looping.\n\n" +
+                        "Tetap tempelkan teks ini?",
+                        fontSize = 13.sp
+                    )
+                },
+                confirmButton = {
+                    TextButton(
+                        onClick = {
+                            val text = pendingLargePaste
+                            pendingLargePaste = null
+                            if (text != null) {
+                                activeSession.pasteText(text)
+                            }
+                        }
+                    ) {
+                        Text("Tetap Tempel", color = DevPrimary, fontWeight = FontWeight.Bold)
+                    }
+                },
+                dismissButton = {
+                    TextButton(onClick = { pendingLargePaste = null }) {
+                        Text("Batal")
+                    }
+                }
             )
         }
 
@@ -572,6 +614,11 @@ fun TerminalScreen(
                 // Sticky CTRL
                 TerminalToggleKey(label = "CTRL", isActive = isCtrlActive) {
                     isCtrlActive = !isCtrlActive
+                }
+
+                // Quick Ctrl+C (Interrupt/Hentikan proses yang looping/hang)
+                TerminalModifierKey(label = "Ctrl+C", isSignal = true) {
+                    activeSession.cancelActiveProcess()
                 }
 
                 // Sticky ALT
@@ -793,6 +840,7 @@ fun TerminalCanvas(
     horizontalScrollState: ScrollState,
     onFocusRequest: () -> Unit,
     onTapUrl: (String) -> Unit,
+    onPasteLarge: (String) -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val view = LocalView.current
@@ -929,9 +977,11 @@ fun TerminalCanvas(
                     2 -> { // Tempel
                         val clip = clipboardManager.getText()?.text
                         if (!clip.isNullOrEmpty()) {
-                            session.pasteText(clip)
-                            val preview = if (clip.length > 20) clip.take(15) + "..." else clip
-                            Toast.makeText(context, "Ditempel: $preview (${clip.length} karakter)\nTekan Enter jika prompt tersembunyi", Toast.LENGTH_LONG).show()
+                            if (clip.length > 2000 || clip.count { it == '\n' } > 50) {
+                                onPasteLarge(clip)
+                            } else {
+                                session.pasteText(clip)
+                            }
                         } else {
                             Toast.makeText(context, "Clipboard kosong", Toast.LENGTH_SHORT).show()
                         }
