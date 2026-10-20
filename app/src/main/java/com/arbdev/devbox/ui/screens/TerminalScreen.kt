@@ -3,11 +3,13 @@ package com.arbdev.devbox.ui.screens
 import android.widget.Toast
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -56,6 +58,7 @@ import androidx.compose.ui.input.key.type
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.TextRange
@@ -303,12 +306,12 @@ fun TerminalScreen(
                     )
                 }
 
-                // Paste Clipboard directly into active PTY session
+                // Paste Clipboard directly into active PTY session (mendukung bracketed paste)
                 IconButton(
                     onClick = {
                         val clip = clipboardManager.getText()?.text
                         if (!clip.isNullOrEmpty()) {
-                            activeSession.sendText(clip)
+                            activeSession.pasteText(clip)
                             Toast.makeText(context, "Ditempel ke terminal", Toast.LENGTH_SHORT).show()
                         } else {
                             Toast.makeText(context, "Clipboard kosong", Toast.LENGTH_SHORT).show()
@@ -432,21 +435,27 @@ fun TerminalScreen(
             textStyle = TextStyle(color = Color.Transparent, fontSize = 1.sp)
         )
 
-        // Native 2D VT100 Matrix Canvas / Terminal Text Area with Pinch-to-Zoom
-        Box(
+        // Native 2D VT100 Matrix Canvas / Terminal Text Area with Pinch-to-Zoom & Dynamic Resize
+        BoxWithConstraints(
             modifier = Modifier
                 .weight(1f)
                 .fillMaxWidth()
                 .background(TerminalBackground)
-                .clickable(
-                    interactionSource = remember { MutableInteractionSource() },
-                    indication = null
-                ) {
-                    focusRequester.requestFocus()
-                    keyboardController?.show()
-                }
                 .then(zoomModifier)
         ) {
+            val density = LocalDensity.current
+            LaunchedEffect(maxWidth, maxHeight, terminalFontSize) {
+                with(density) {
+                    val charWidth = (terminalFontSize * 0.6f).sp.toPx()
+                    val charHeight = (terminalFontSize * 1.25f).sp.toPx()
+                    if (charWidth > 0 && charHeight > 0) {
+                        val cols = (maxWidth.toPx() / charWidth).toInt().coerceIn(40, 160)
+                        val rows = (maxHeight.toPx() / charHeight).toInt().coerceIn(15, 60)
+                        activeSession.updateWindowSize(cols, rows)
+                    }
+                }
+            }
+
             val renderedText = remember(activeSession.buffer.version.intValue) {
                 activeSession.buffer.renderToAnnotatedString()
             }
@@ -462,6 +471,22 @@ fun TerminalScreen(
                     .verticalScroll(verticalScrollState)
                     .horizontalScroll(horizontalScrollState)
                     .padding(horizontal = 6.dp, vertical = 4.dp)
+                    .pointerInput(activeSession.buffer.isMouseTrackingEnabled, terminalFontSize) {
+                        detectTapGestures { offset ->
+                            focusRequester.requestFocus()
+                            keyboardController?.show()
+                            if (activeSession.buffer.isMouseTrackingEnabled) {
+                                val charWidth = terminalFontSize * 0.6f * density.density
+                                val charHeight = terminalFontSize * 1.25f * density.density
+                                if (charWidth > 0 && charHeight > 0) {
+                                    val col = (offset.x / charWidth).toInt().coerceIn(0, activeSession.buffer.maxCols - 1)
+                                    val row = (offset.y / charHeight).toInt().coerceIn(0, activeSession.buffer.maxRows - 1)
+                                    activeSession.sendMouseEvent(0, col, row, true)
+                                    activeSession.sendMouseEvent(0, col, row, false)
+                                }
+                            }
+                        }
+                    }
             )
         }
 

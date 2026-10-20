@@ -139,6 +139,62 @@ class NativeTerminalSession(
         }
     }
 
+    fun pasteText(text: String) {
+        if (buffer.isBracketedPasteMode) {
+            sendText("\u001B[200~$text\u001B[201~")
+        } else {
+            sendText(text)
+        }
+    }
+
+    fun sendMouseEvent(button: Int, col: Int, row: Int, isPress: Boolean) {
+        if (!buffer.isMouseTrackingEnabled) return
+        val c = (col + 1).coerceAtLeast(1)
+        val r = (row + 1).coerceAtLeast(1)
+        if (buffer.isSgrMouseMode) {
+            val action = if (isPress) 'M' else 'm'
+            sendText("\u001B[<$button;$c;${r}$action")
+        } else {
+            if (isPress) {
+                val b = (button + 32).toChar()
+                val cx = (c + 32).coerceAtMost(255).toChar()
+                val cy = (r + 32).coerceAtMost(255).toChar()
+                sendText("\u001B[M$b$cx$cy")
+            }
+        }
+    }
+
+    fun updateWindowSize(cols: Int, rows: Int) {
+        buffer.resize(cols, rows)
+        val pid = getProcessPid() ?: return
+        sessionScope.launch(Dispatchers.IO) {
+            try {
+                val cmd = "for p in \$(pgrep -P $pid 2>/dev/null); do " +
+                        "for fd in /proc/\$p/fd/*; do " +
+                        "target=\$(readlink \$fd 2>/dev/null); " +
+                        "if [[ \$target == /dev/pts/* ]]; then " +
+                        "stty -F \"\$target\" rows $rows cols $cols 2>/dev/null; " +
+                        "fi; done; done"
+                val pb = ProcessBuilder("su", "-c", cmd)
+                pb.start().waitFor()
+            } catch (_: Exception) {}
+        }
+    }
+
+    private fun getProcessPid(): Long? {
+        val proc = process ?: return null
+        return try {
+            val method = proc.javaClass.getMethod("pid")
+            method.invoke(proc) as? Long
+        } catch (_: Exception) {
+            try {
+                val field = proc.javaClass.getDeclaredField("pid")
+                field.isAccessible = true
+                (field.getInt(proc)).toLong()
+            } catch (_: Exception) { null }
+        }
+    }
+
     fun cancelActiveProcess() {
         sendBytes(byteArrayOf(3)) // Send Ctrl+C (0x03)
     }

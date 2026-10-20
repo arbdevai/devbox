@@ -14,28 +14,37 @@ import java.nio.charset.StandardCharsets
  */
 data class TerminalCell(
     var char: Char = ' ',
+    var extraChar: Char? = null,
     var fgColor: Color = Color(0xFFDCDCDC),
     var bgColor: Color = Color.Transparent,
     var isBold: Boolean = false,
     var isUnderline: Boolean = false,
-    var isDim: Boolean = false
+    var isDim: Boolean = false,
+    var isWide: Boolean = false,
+    var isWideContinuation: Boolean = false
 ) {
     fun reset() {
         char = ' '
+        extraChar = null
         fgColor = Color(0xFFDCDCDC)
         bgColor = Color.Transparent
         isBold = false
         isUnderline = false
         isDim = false
+        isWide = false
+        isWideContinuation = false
     }
 
     fun copyFrom(other: TerminalCell) {
         char = other.char
+        extraChar = other.extraChar
         fgColor = other.fgColor
         bgColor = other.bgColor
         isBold = other.isBold
         isUnderline = other.isUnderline
         isDim = other.isDim
+        isWide = other.isWide
+        isWideContinuation = other.isWideContinuation
     }
 }
 
@@ -66,6 +75,20 @@ class TerminalGridBuffer(
 
     private var isAltBuffer = false
     private var isCursorVisible = true
+
+    // Scroll Margins (DECSTBM)
+    var scrollTop: Int = 0
+        private set
+    var scrollBottom: Int = maxRows - 1
+        private set
+
+    // TUI Extension Modes
+    var isBracketedPasteMode: Boolean = false
+        private set
+    var isMouseTrackingEnabled: Boolean = false
+        private set
+    var isSgrMouseMode: Boolean = false
+        private set
 
     // Current Drawing Style
     private val defaultFg = Color(0xFFDCDCDC)
@@ -123,6 +146,8 @@ class TerminalGridBuffer(
 
             cursorRow = cursorRow.coerceIn(0, maxRows - 1)
             cursorCol = cursorCol.coerceIn(0, maxCols - 1)
+            scrollTop = 0
+            scrollBottom = maxRows - 1
             notifyUpdate()
         }
     }
@@ -135,21 +160,27 @@ class TerminalGridBuffer(
                 val ch = text[i]
                 when (parserState) {
                     ParserState.NORMAL -> {
-                        when (ch) {
-                            '\u001B' -> parserState = ParserState.ESC
-                            '\r' -> cursorCol = 0
-                            '\n' -> newline()
-                            '\b', '\u007F' -> {
+                        when {
+                            ch == '\u001B' -> parserState = ParserState.ESC
+                            ch == '\r' -> cursorCol = 0
+                            ch == '\n' -> newline()
+                            ch == '\b' || ch == '\u007F' -> {
                                 if (cursorCol > 0) cursorCol--
                             }
-                            '\t' -> {
+                            ch == '\t' -> {
                                 val nextTabStop = ((cursorCol / 8) + 1) * 8
                                 cursorCol = nextTabStop.coerceAtMost(maxCols - 1)
                             }
-                            '\u0007' -> { /* Bell - diabaikan */ }
+                            ch == '\u0007' -> { /* Bell - diabaikan */ }
+                            ch.isHighSurrogate() && i + 1 < text.length && text[i + 1].isLowSurrogate() -> {
+                                val low = text[i + 1]
+                                putChar(ch, extra = low, isWide = true)
+                                i++
+                            }
                             else -> {
                                 if (!ch.isISOControl()) {
-                                    putChar(ch)
+                                    val wide = isWideCodePoint(ch.code)
+                                    putChar(ch, isWide = wide)
                                 }
                             }
                         }
@@ -182,15 +213,11 @@ class TerminalGridBuffer(
                                 parserState = ParserState.NORMAL
                             }
                             'M' -> {
-                                // Reverse Index (RI): pindah kursor ke atas 1 baris, scroll down jika di baris 0
-                                if (cursorRow > 0) {
+                                // Reverse Index (RI): pindah kursor ke atas 1 baris, scroll down jika di batas atas margin
+                                if (cursorRow > scrollTop) {
                                     cursorRow--
                                 } else {
-                                    val target = activeGrid
-                                    for (r in maxRows - 1 downTo 1) {
-                                        for (c in 0 until maxCols) target[r][c].copyFrom(target[r - 1][c])
-                                    }
-                                    for (c in 0 until maxCols) target[0][c].reset()
+                                    scrollDown()
                                 }
                                 parserState = ParserState.NORMAL
                             }
@@ -239,31 +266,58 @@ class TerminalGridBuffer(
         }
     }
 
-    private fun putChar(ch: Char) {
+    private fun isWideCodePoint(code: Int): Boolean {
+        if (code < 0x1100) return false
+        return (code in 0x1100..0x115F) || // Hangul Jamo
+               (code in 0x2E80..0xA4CF && code != 0x303F) || // CJK Radicals, Ideographs
+               (code in 0xAC00..0xD7A3) || // Hangul Syllables
+               (code in 0xF900..0xFAFF) || // CJK Compatibility Ideographs
+               (code in 0xFE10..0xFE19) || // Vertical forms
+               (code in 0xFE30..0xFE6F) || // CJK Compatibility Forms
+               (code in 0xFF00..0xFF60) || // Fullwidth Forms
+               (code in 0xFFE0..0xFFE6) ||
+               (code in 0x2600..0x27BF) || // Miscellaneous Symbols & Dingbats
+               (code in 0x1F300..0x1FAFF)   // Emojis & Symbols Extended
+    }
+
+    private fun putChar(ch: Char, extra: Char? = null, isWide: Boolean = false) {
         if (cursorCol >= maxCols) {
             cursorCol = 0
             newline()
         }
         val cell = activeGrid[cursorRow][cursorCol]
         cell.char = ch
+        cell.extraChar = extra
         cell.fgColor = currentFg
         cell.bgColor = currentBg
         cell.isBold = isBold
         cell.isUnderline = isUnderline
         cell.isDim = isDim
+        cell.isWide = isWide
+        cell.isWideContinuation = false
         cursorCol++
+
+        // Jika karakter lebar (2 sel di layar), tandai sel berikutnya sebagai continuation
+        if (isWide && cursorCol < maxCols) {
+            val contCell = activeGrid[cursorRow][cursorCol]
+            contCell.reset()
+            contCell.isWideContinuation = true
+            cursorCol++
+        }
     }
 
     private fun newline() {
         cursorRow++
-        if (cursorRow >= maxRows) {
-            cursorRow = maxRows - 1
+        if (cursorRow > scrollBottom) {
+            cursorRow = scrollBottom
             scrollUp()
         }
     }
 
     private fun scrollUp() {
-        if (!isAltBuffer) {
+        val top = scrollTop
+        val bottom = scrollBottom
+        if (!isAltBuffer && top == 0 && bottom == maxRows - 1) {
             val savedLine = Array(maxCols) { col ->
                 TerminalCell().apply { copyFrom(grid[0][col]) }
             }
@@ -273,13 +327,27 @@ class TerminalGridBuffer(
             }
         }
         val target = activeGrid
-        for (r in 0 until maxRows - 1) {
+        for (r in top until bottom) {
             for (c in 0 until maxCols) {
                 target[r][c].copyFrom(target[r + 1][c])
             }
         }
         for (c in 0 until maxCols) {
-            target[maxRows - 1][c].reset()
+            target[bottom][c].reset()
+        }
+    }
+
+    private fun scrollDown() {
+        val top = scrollTop
+        val bottom = scrollBottom
+        val target = activeGrid
+        for (r in bottom downTo top + 1) {
+            for (c in 0 until maxCols) {
+                target[r][c].copyFrom(target[r - 1][c])
+            }
+        }
+        for (c in 0 until maxCols) {
+            target[top][c].reset()
         }
     }
 
@@ -455,41 +523,59 @@ class TerminalGridBuffer(
             // Scroll Down: [T (geser layar ke bawah N baris)
             'T' -> {
                 val count = if (params.isNotEmpty() && params[0] > 0) params[0] else 1
-                val target = activeGrid
-                repeat(count) {
-                    for (r in maxRows - 1 downTo 1) {
-                        for (c in 0 until maxCols) target[r][c].copyFrom(target[r - 1][c])
-                    }
-                    for (c in 0 until maxCols) target[0][c].reset()
-                }
+                repeat(count) { scrollDown() }
             }
 
             // Mode Private (?h / ?l)
             'h' -> {
                 if (isCsiPrivate) {
-                    when (params.firstOrNull()) {
-                        1049 -> { // Masuk ke Alternate Screen Buffer (nano, agy, htop)
-                            isAltBuffer = true
-                            for (r in 0 until maxRows) {
-                                for (c in 0 until maxCols) altGrid[r][c].reset()
+                    for (p in params) {
+                        when (p) {
+                            1049 -> { // Masuk ke Alternate Screen Buffer (nano, agy, htop)
+                                isAltBuffer = true
+                                for (r in 0 until maxRows) {
+                                    for (c in 0 until maxCols) altGrid[r][c].reset()
+                                }
+                                cursorRow = 0
+                                cursorCol = 0
+                                scrollTop = 0
+                                scrollBottom = maxRows - 1
                             }
-                            cursorRow = 0
-                            cursorCol = 0
+                            25 -> isCursorVisible = true
+                            1000, 1002 -> isMouseTrackingEnabled = true
+                            1006 -> isSgrMouseMode = true
+                            2004 -> isBracketedPasteMode = true
                         }
-                        25 -> isCursorVisible = true
                     }
                 }
             }
 
             'l' -> {
                 if (isCsiPrivate) {
-                    when (params.firstOrNull()) {
-                        1049 -> { // Keluar dari Alternate Screen Buffer
-                            isAltBuffer = false
+                    for (p in params) {
+                        when (p) {
+                            1049 -> { // Keluar dari Alternate Screen Buffer
+                                isAltBuffer = false
+                                scrollTop = 0
+                                scrollBottom = maxRows - 1
+                            }
+                            25 -> isCursorVisible = false
+                            1000, 1002 -> isMouseTrackingEnabled = false
+                            1006 -> isSgrMouseMode = false
+                            2004 -> isBracketedPasteMode = false
                         }
-                        25 -> isCursorVisible = false
                     }
                 }
+            }
+
+            // Scroll Region Margins: [top;bottom r (DECSTBM untuk tmux, vim split, htop)
+            'r' -> {
+                val top = if (params.isNotEmpty() && params[0] > 0) params[0] - 1 else 0
+                val bottom = if (params.size > 1 && params[1] > 0) params[1] - 1 else maxRows - 1
+                scrollTop = top.coerceIn(0, maxRows - 1)
+                scrollBottom = bottom.coerceIn(scrollTop, maxRows - 1)
+                cursorRow = 0
+                cursorCol = 0
             }
 
             's' -> {
@@ -567,6 +653,8 @@ class TerminalGridBuffer(
         }
         cursorRow = 0
         cursorCol = 0
+        scrollTop = 0
+        scrollBottom = maxRows - 1
         resetSgr()
     }
 
@@ -667,15 +755,20 @@ class TerminalGridBuffer(
         cursorColIdx: Int
     ) {
         var lastNonSpace = maxCols - 1
-        while (lastNonSpace >= 0 && line[lastNonSpace].char == ' ' && line[lastNonSpace].bgColor == Color.Transparent) {
+        while (lastNonSpace >= 0 && line[lastNonSpace].char == ' ' && line[lastNonSpace].bgColor == Color.Transparent && !line[lastNonSpace].isWideContinuation) {
             lastNonSpace--
         }
         val endCol = (lastNonSpace + 1).coerceAtMost(maxCols)
 
         var col = 0
         while (col < endCol) {
-            val isCursorHere = (isCursorVisible && rowIdx == cursorRow && col == cursorColIdx)
             val cell = line[col]
+            if (cell.isWideContinuation) {
+                col++
+                continue
+            }
+
+            val isCursorHere = (isCursorVisible && rowIdx == cursorRow && col == cursorColIdx)
             val fg = if (isCursorHere) Color.Black else cell.fgColor
             val bg = if (isCursorHere) Color(0xFF61AFEF) else cell.bgColor
             val bold = cell.isBold
@@ -683,14 +776,21 @@ class TerminalGridBuffer(
 
             val sb = StringBuilder()
             while (col < endCol) {
-                val curCursor = (isCursorVisible && rowIdx == cursorRow && col == cursorColIdx)
                 val curCell = line[col]
+                if (curCell.isWideContinuation) {
+                    col++
+                    continue
+                }
+                val curCursor = (isCursorVisible && rowIdx == cursorRow && col == cursorColIdx)
                 val curFg = if (curCursor) Color.Black else curCell.fgColor
                 val curBg = if (curCursor) Color(0xFF61AFEF) else curCell.bgColor
                 if (curFg != fg || curBg != bg || curCell.isBold != bold || curCell.isUnderline != underline) {
                     break
                 }
                 sb.append(curCell.char)
+                if (curCell.extraChar != null) {
+                    sb.append(curCell.extraChar)
+                }
                 col++
             }
 
@@ -725,18 +825,23 @@ class TerminalGridBuffer(
     fun getTranscriptText(): String {
         synchronized(lock) {
             val sb = StringBuilder()
-            for (line in scrollback) {
+            fun appendLineText(line: Array<TerminalCell>) {
                 var last = maxCols - 1
                 while (last >= 0 && line[last].char == ' ') last--
-                for (c in 0..last) sb.append(line[c].char)
+                for (c in 0..last) {
+                    val cell = line[c]
+                    if (cell.isWideContinuation) continue
+                    sb.append(cell.char)
+                    if (cell.extraChar != null) sb.append(cell.extraChar)
+                }
+            }
+            for (line in scrollback) {
+                appendLineText(line)
                 sb.append('\n')
             }
             val target = activeGrid
             for (r in 0 until maxRows) {
-                val line = target[r]
-                var last = maxCols - 1
-                while (last >= 0 && line[last].char == ' ') last--
-                for (c in 0..last) sb.append(line[c].char)
+                appendLineText(target[r])
                 if (r < maxRows - 1) sb.append('\n')
             }
             return sb.toString().trimEnd()
