@@ -28,11 +28,17 @@ object ChrootManager {
     const val DEFAULT_ROOTFS = "/data/local/devbox-chroot"
     var activeRootfs: String = DEFAULT_ROOTFS
 
+    // State cache agar Dashboard dapat langsung ditampilkan instan tanpa buffering saat switch tab
+    @Volatile
+    var lastKnownState: ChrootState? = null
+
     suspend fun getChrootState(rootfs: String = activeRootfs): ChrootState {
         val rootOk = RootExecutor.isRootAvailable()
         if (!rootOk) {
             AppLogger.w("ChrootManager", "Superuser (su) tidak terdeteksi.")
-            return ChrootState(isRootGranted = false, rootfsPath = rootfs)
+            val state = ChrootState(isRootGranted = false, rootfsPath = rootfs)
+            lastKnownState = state
+            return state
         }
 
         // Optimasi atomic: Jalankan seluruh verifikasi status dalam 1 script bash tunggal via su (70ms vs 3500ms)
@@ -109,7 +115,7 @@ object ChrootManager {
                 AppLogger.w("ChrootManager", "Status rootfs di $rootfs: $statusText")
             }
 
-            return ChrootState(
+            val resultState = ChrootState(
                 isRootGranted = true,
                 isRootfsExists = isRootfsExists,
                 isMounted = isMounted,
@@ -121,14 +127,18 @@ object ChrootManager {
                 rootfsPath = rootfs,
                 isSourceChrootAvailable = isSourceOk
             )
+            lastKnownState = resultState
+            return resultState
         }
 
         // Fallback jika parsing gagal
-        return ChrootState(
+        val fallbackState = ChrootState(
             isRootGranted = true,
             isRootfsExists = false,
             rootfsPath = rootfs
         )
+        lastKnownState = fallbackState
+        return fallbackState
     }
 
     suspend fun mountAll(rootfs: String = activeRootfs): Result<String> {

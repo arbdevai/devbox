@@ -115,11 +115,11 @@ class NativeTerminalSession(
             isRunning = true
             AppLogger.i("NativeTerminal", "Sesi [$name] aktif (PID terhubung, PTY siap, SID: $id)")
 
-            // Pantau proses aktif / agent CLI (agy, python, node, dll) di sesi ini
+            // Pantau proses aktif / agent CLI (agy, python, node, dll) di sesi ini (dithrottle 5s, silent mode agar tidak spamming log)
             val sessionId = id
             processMonitorJob = sessionScope.launch {
                 while (isActive && isRunning) {
-                    kotlinx.coroutines.delay(2000)
+                    kotlinx.coroutines.delay(5000)
                     try {
                         val checkCmd = "for p in /proc/[0-9]*; do " +
                                 "if [ \"\$(readlink \$p/root 2>/dev/null)\" = '$targetRootfs' ]; then " +
@@ -128,7 +128,7 @@ class NativeTerminalSession(
                                 "if [ \"\$comm\" != 'script' ] && [ \"\$comm\" != 'bash' ] && [ \"\$comm\" != 'stty' ] && [ \"\$comm\" != 'setpriv' ]; then " +
                                 "echo \"\$comm\"; break; " +
                                 "fi; fi; fi; done"
-                        val res = com.arbdev.devbox.data.RootExecutor.executeSync(checkCmd)
+                        val res = com.arbdev.devbox.data.RootExecutor.executeSync(checkCmd, silent = true)
                         val detected = res.getOrNull()?.stdout?.trim().orEmpty()
                         mainHandler.post {
                             if (detected.isNotBlank()) {

@@ -2,10 +2,9 @@ package com.arbdev.devbox.ui
 
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
-import androidx.compose.animation.slideInHorizontally
-import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.WindowInsets
@@ -98,14 +97,7 @@ fun DevBoxApp() {
         AnimatedContent(
             targetState = selectedTab,
             transitionSpec = {
-                val forward = targetState.ordinal > previousTabIndex
-                if (forward) {
-                    (slideInHorizontally { width -> width } + fadeIn()) togetherWith
-                            (slideOutHorizontally { width -> -width } + fadeOut())
-                } else {
-                    (slideInHorizontally { width -> -width } + fadeIn()) togetherWith
-                            (slideOutHorizontally { width -> width } + fadeOut())
-                }
+                (fadeIn(animationSpec = tween(100))) togetherWith (fadeOut(animationSpec = tween(100)))
             },
             modifier = Modifier
                 .fillMaxSize()

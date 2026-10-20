@@ -80,6 +80,7 @@ object UpdateManager {
     var lastCheckedInfo: UpdateInfo? = null
         private set
 
+    private var lastUpdateCheckTime = 0L
     private var activeDownloadId: Long = -1L
 
     fun cleanupOldApks(context: Context, keepVersion: String? = null) {
@@ -100,7 +101,13 @@ object UpdateManager {
         }
     }
 
-    suspend fun checkForUpdates(context: Context? = null): Result<UpdateInfo> = withContext(Dispatchers.IO) {
+    suspend fun checkForUpdates(context: Context? = null, force: Boolean = false): Result<UpdateInfo> = withContext(Dispatchers.IO) {
+        val now = System.currentTimeMillis()
+        val cached = lastCheckedInfo
+        if (!force && cached != null && (now - lastUpdateCheckTime < 15 * 60 * 1000L)) {
+            return@withContext Result.success(cached)
+        }
+        lastUpdateCheckTime = now
         _updateStatus.value = UpdateStatus.Checking
         AppLogger.i("UpdateManager", "Memeriksa pembaruan dari $API_URL...")
 

@@ -41,21 +41,25 @@ object RootExecutor {
         }
     }
 
-    suspend fun execute(command: String): Result<CommandResult> = withContext(Dispatchers.IO) {
-        executeSync(command)
+    suspend fun execute(command: String, silent: Boolean = false): Result<CommandResult> = withContext(Dispatchers.IO) {
+        executeSync(command, silent)
     }
 
-    fun executeSync(command: String): Result<CommandResult> {
+    fun executeSync(command: String, silent: Boolean = false): Result<CommandResult> {
         return try {
             val process = ProcessBuilder("su", "-c", command).start()
             val stdout = process.inputStream.bufferedReader().use(BufferedReader::readText)
             val stderr = process.errorStream.bufferedReader().use(BufferedReader::readText)
             val exitCode = process.waitFor()
             val res = CommandResult(exitCode, stdout.trim(), stderr.trim())
-            AppLogger.cmd(command, exitCode, res.stdout, res.stderr)
+            if (!silent) {
+                AppLogger.cmd(command, exitCode, res.stdout, res.stderr)
+            }
             Result.success(res)
         } catch (e: Exception) {
-            AppLogger.e("RootExecutor", "Gagal mengeksekusi perintah: $command", e)
+            if (!silent) {
+                AppLogger.e("RootExecutor", "Gagal mengeksekusi perintah: $command", e)
+            }
             Result.failure(e)
         }
     }

@@ -107,8 +107,9 @@ fun DashboardScreen(
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
-    var state by remember { mutableStateOf(ChrootState()) }
-    var isInitialLoading by remember { mutableStateOf(true) }
+    // Muat langsung dari cache singleton agar bebas buffering / zero delay saat berpindah tab
+    var state by remember { mutableStateOf(ChrootManager.lastKnownState ?: ChrootState(isRootGranted = true)) }
+    var isInitialLoading by remember { mutableStateOf(ChrootManager.lastKnownState == null) }
     var isRefreshing by remember { mutableStateOf(false) }
     var wakeLockActive by remember { mutableStateOf(KeepAliveService.isRunning) }
     var actionMessage by remember { mutableStateOf<String?>(null) }
@@ -186,7 +187,7 @@ fun DashboardScreen(
                     onClick = {
                         scope.launch {
                             Toast.makeText(context, "Memeriksa pembaruan...", Toast.LENGTH_SHORT).show()
-                            val res = UpdateManager.checkForUpdates(context)
+                            val res = UpdateManager.checkForUpdates(context, force = true)
                             if (res.isSuccess) {
                                 val info = res.getOrNull()
                                 if (info != null && !info.hasUpdate) {

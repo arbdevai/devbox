@@ -1384,7 +1384,7 @@ fun TerminalCanvas(
     val isAltBuffer = session.buffer.isAltBuffer
     val lineCount = remember(version, isAltBuffer) {
         if (isAltBuffer) session.buffer.maxRows
-        else session.buffer.getLineCount().coerceAtLeast(session.buffer.maxRows)
+        else session.buffer.getLineCount().coerceAtLeast(1)
     }
     val totalWidthPx = (session.buffer.maxCols * charWidth).toInt().coerceAtLeast(1)
     val totalHeightPx = (lineCount * charHeight).toInt().coerceAtLeast(1)
