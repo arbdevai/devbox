@@ -41,8 +41,25 @@ class NativeTerminalSession(
     private val mainHandler = Handler(Looper.getMainLooper())
 
     var onClipboardCopy: ((String) -> Unit)? = null
+    var onBell: (() -> Unit)? = null
 
     init {
+        buffer.onTitleChanged = { title ->
+            mainHandler.post {
+                currentTitle = title
+                name = title.take(15)
+            }
+        }
+        buffer.onClipboardCopy = { text ->
+            mainHandler.post {
+                onClipboardCopy?.invoke(text)
+            }
+        }
+        buffer.onBell = {
+            mainHandler.post {
+                onBell?.invoke()
+            }
+        }
         initializeProcess()
     }
 

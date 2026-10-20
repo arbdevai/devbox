@@ -21,7 +21,8 @@ data class TerminalCell(
     var isUnderline: Boolean = false,
     var isDim: Boolean = false,
     var isWide: Boolean = false,
-    var isWideContinuation: Boolean = false
+    var isWideContinuation: Boolean = false,
+    var hyperlinkUrl: String? = null
 ) {
     fun reset() {
         char = ' '
@@ -33,6 +34,7 @@ data class TerminalCell(
         isDim = false
         isWide = false
         isWideContinuation = false
+        hyperlinkUrl = null
     }
 
     fun copyFrom(other: TerminalCell) {
@@ -45,6 +47,7 @@ data class TerminalCell(
         isDim = other.isDim
         isWide = other.isWide
         isWideContinuation = other.isWideContinuation
+        hyperlinkUrl = other.hyperlinkUrl
     }
 }
 
@@ -73,8 +76,10 @@ class TerminalGridBuffer(
     private var savedCursorRow = 0
     private var savedCursorCol = 0
 
-    private var isAltBuffer = false
-    private var isCursorVisible = true
+    var isAltBuffer = false
+        private set
+    var isCursorVisible = true
+        private set
 
     // Scroll Margins (DECSTBM)
     var scrollTop: Int = 0
@@ -89,6 +94,15 @@ class TerminalGridBuffer(
         private set
     var isSgrMouseMode: Boolean = false
         private set
+
+    // Modern Protocols (OSC 0/1/2, OSC 52, OSC 8)
+    var windowTitle: String = "coder@devbox:~"
+        private set
+    var currentHyperlinkUrl: String? = null
+        private set
+    var onTitleChanged: ((String) -> Unit)? = null
+    var onClipboardCopy: ((String) -> Unit)? = null
+    var onBell: (() -> Unit)? = null
 
     // Current Drawing Style
     private val defaultFg = Color(0xFFDCDCDC)
@@ -171,7 +185,9 @@ class TerminalGridBuffer(
                                 val nextTabStop = ((cursorCol / 8) + 1) * 8
                                 cursorCol = nextTabStop.coerceAtMost(maxCols - 1)
                             }
-                            ch == '\u0007' -> { /* Bell - diabaikan */ }
+                            ch == '\u0007' -> {
+                                onBell?.invoke()
+                            }
                             ch.isHighSurrogate() && i + 1 < text.length && text[i + 1].isLowSurrogate() -> {
                                 val low = text[i + 1]
                                 putChar(ch, extra = low, isWide = true)
@@ -242,6 +258,12 @@ class TerminalGridBuffer(
 
                     ParserState.OSC -> {
                         if (ch == '\u0007' || (ch == '\\' && oscBuffer.endsWith("\u001B"))) {
+                            val rawOsc = if (ch == '\\' && oscBuffer.endsWith("\u001B")) {
+                                oscBuffer.dropLast(1).toString()
+                            } else {
+                                oscBuffer.toString()
+                            }
+                            handleOscCommand(rawOsc)
                             parserState = ParserState.NORMAL
                         } else {
                             oscBuffer.append(ch)
@@ -295,6 +317,7 @@ class TerminalGridBuffer(
         cell.isDim = isDim
         cell.isWide = isWide
         cell.isWideContinuation = false
+        cell.hyperlinkUrl = currentHyperlinkUrl
         cursorCol++
 
         // Jika karakter lebar (2 sel di layar), tandai sel berikutnya sebagai continuation
@@ -655,7 +678,46 @@ class TerminalGridBuffer(
         cursorCol = 0
         scrollTop = 0
         scrollBottom = maxRows - 1
+        currentHyperlinkUrl = null
         resetSgr()
+    }
+
+    private fun handleOscCommand(osc: String) {
+        if (osc.isEmpty()) return
+        val semicolonIdx = osc.indexOf(';')
+        if (semicolonIdx == -1) return
+        val code = osc.substring(0, semicolonIdx).toIntOrNull() ?: return
+        val payload = osc.substring(semicolonIdx + 1)
+
+        when (code) {
+            0, 1, 2 -> {
+                // Window Title / Tab Title (OSC 0, 1, 2)
+                windowTitle = payload
+                onTitleChanged?.invoke(payload)
+            }
+            52 -> {
+                // Clipboard Protocol (OSC 52)
+                val dataIdx = payload.indexOf(';')
+                val base64Data = if (dataIdx != -1) payload.substring(dataIdx + 1) else payload
+                if (base64Data.isNotEmpty() && base64Data != "?") {
+                    try {
+                        val bytes = android.util.Base64.decode(base64Data, android.util.Base64.DEFAULT)
+                        val decoded = String(bytes, StandardCharsets.UTF_8)
+                        onClipboardCopy?.invoke(decoded)
+                    } catch (_: Exception) {}
+                }
+            }
+            8 -> {
+                // Hyperlinks Protocol (OSC 8)
+                val urlIdx = payload.indexOf(';')
+                if (urlIdx != -1) {
+                    val url = payload.substring(urlIdx + 1)
+                    currentHyperlinkUrl = if (url.isNotEmpty()) url else null
+                } else {
+                    currentHyperlinkUrl = null
+                }
+            }
+        }
     }
 
     private fun parseCsiParams(str: String): List<Int> {
@@ -845,6 +907,71 @@ class TerminalGridBuffer(
                 if (r < maxRows - 1) sb.append('\n')
             }
             return sb.toString().trimEnd()
+        }
+    }
+
+    fun getScrollbackSnapshot(): List<Array<TerminalCell>> {
+        synchronized(lock) {
+            return scrollback.toList()
+        }
+    }
+
+    fun getLineCount(): Int {
+        synchronized(lock) {
+            val historyCount = if (isAltBuffer) 0 else scrollback.size
+            val activeCount = getLastActiveRow() + 1
+            return historyCount + activeCount
+        }
+    }
+
+    fun getLineAt(absoluteIndex: Int): Array<TerminalCell>? {
+        synchronized(lock) {
+            val historyCount = if (isAltBuffer) 0 else scrollback.size
+            if (absoluteIndex < historyCount) {
+                return scrollback.getOrNull(absoluteIndex)
+            }
+            val activeRow = absoluteIndex - historyCount
+            if (activeRow in 0 until maxRows) {
+                return activeGrid[activeRow]
+            }
+            return null
+        }
+    }
+
+    fun getLastActiveRow(): Int {
+        synchronized(lock) {
+            if (isAltBuffer) return maxRows - 1
+            var last = cursorRow
+            for (r in maxRows - 1 downTo cursorRow + 1) {
+                if (activeGrid[r].any { it.char != ' ' || it.bgColor != Color.Transparent || it.isWideContinuation }) {
+                    last = r
+                    break
+                }
+            }
+            return last
+        }
+    }
+
+    fun getUrlAt(absoluteRow: Int, col: Int): String? {
+        synchronized(lock) {
+            val line = getLineAt(absoluteRow) ?: return null
+            if (col !in 0 until maxCols) return null
+            val cell = line[col]
+            if (cell.hyperlinkUrl != null) return cell.hyperlinkUrl
+
+            // Deteksi otomatis URL teks standar (https:// atau http://)
+            val sb = StringBuilder()
+            for (c in 0 until maxCols) {
+                if (!line[c].isWideContinuation) {
+                    sb.append(line[c].char)
+                }
+            }
+            val lineStr = sb.toString()
+            val urlRegex = Regex("https?://[^\\s<>\"]+")
+            val match = urlRegex.findAll(lineStr).find { m ->
+                col in m.range
+            }
+            return match?.value
         }
     }
 }

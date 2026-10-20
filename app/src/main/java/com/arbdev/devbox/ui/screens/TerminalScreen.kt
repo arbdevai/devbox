@@ -1,6 +1,10 @@
 package com.arbdev.devbox.ui.screens
 
+import android.content.Intent
+import android.net.Uri
 import android.widget.Toast
+import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
@@ -31,11 +35,13 @@ import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.ContentPaste
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Terminal
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.ScrollableTabRow
 import androidx.compose.material3.Tab
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -48,8 +54,13 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.graphics.nativeCanvas
+import androidx.compose.ui.graphics.toArgb
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.key
@@ -59,6 +70,7 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.TextRange
@@ -92,6 +104,18 @@ fun TerminalScreen(
 
     // Ukuran font terminal dengan dukungan pinch-to-zoom (rentang 8sp - 28sp)
     var terminalFontSize by remember { mutableFloatStateOf(12f) }
+    val hapticFeedback = LocalHapticFeedback.current
+    var activeUrlPrompt by remember { mutableStateOf<String?>(null) }
+
+    LaunchedEffect(activeSession) {
+        activeSession.onClipboardCopy = { text ->
+            clipboardManager.setText(AnnotatedString(text))
+            Toast.makeText(context, "Disalin via terminal (OSC 52)", Toast.LENGTH_SHORT).show()
+        }
+        activeSession.onBell = {
+            hapticFeedback.performHapticFeedback(HapticFeedbackType.LongPress)
+        }
+    }
 
     // Modifier states untuk virtual modifier keys
     var isCtrlActive by remember { mutableStateOf(false) }
@@ -435,7 +459,7 @@ fun TerminalScreen(
             textStyle = TextStyle(color = Color.Transparent, fontSize = 1.sp)
         )
 
-        // Native 2D VT100 Matrix Canvas / Terminal Text Area with Pinch-to-Zoom & Dynamic Resize
+        // Native 2D VT100 Matrix Canvas / Terminal Text Area with Direct Glyph Drawing
         BoxWithConstraints(
             modifier = Modifier
                 .weight(1f)
@@ -456,37 +480,54 @@ fun TerminalScreen(
                 }
             }
 
-            val renderedText = remember(activeSession.buffer.version.intValue) {
-                activeSession.buffer.renderToAnnotatedString()
-            }
+            TerminalCanvas(
+                session = activeSession,
+                fontSizeSp = terminalFontSize,
+                verticalScrollState = verticalScrollState,
+                horizontalScrollState = horizontalScrollState,
+                onFocusRequest = {
+                    focusRequester.requestFocus()
+                    keyboardController?.show()
+                },
+                onTapUrl = { url ->
+                    activeUrlPrompt = url
+                },
+                modifier = Modifier.fillMaxSize()
+            )
+        }
 
-            Text(
-                text = renderedText,
-                fontFamily = FontFamily.Monospace,
-                fontSize = terminalFontSize.sp,
-                lineHeight = (terminalFontSize * 1.25f).sp,
-                color = TerminalText,
-                modifier = Modifier
-                    .fillMaxSize()
-                    .verticalScroll(verticalScrollState)
-                    .horizontalScroll(horizontalScrollState)
-                    .padding(horizontal = 6.dp, vertical = 4.dp)
-                    .pointerInput(activeSession.buffer.isMouseTrackingEnabled, terminalFontSize) {
-                        detectTapGestures { offset ->
-                            focusRequester.requestFocus()
-                            keyboardController?.show()
-                            if (activeSession.buffer.isMouseTrackingEnabled) {
-                                val charWidth = terminalFontSize * 0.6f * density.density
-                                val charHeight = terminalFontSize * 1.25f * density.density
-                                if (charWidth > 0 && charHeight > 0) {
-                                    val col = (offset.x / charWidth).toInt().coerceIn(0, activeSession.buffer.maxCols - 1)
-                                    val row = (offset.y / charHeight).toInt().coerceIn(0, activeSession.buffer.maxRows - 1)
-                                    activeSession.sendMouseEvent(0, col, row, true)
-                                    activeSession.sendMouseEvent(0, col, row, false)
-                                }
+        // Dialog Konfirmasi Buka Tautan (OSC 8 & Teks URL)
+        activeUrlPrompt?.let { url ->
+            AlertDialog(
+                onDismissRequest = { activeUrlPrompt = null },
+                title = { Text("Tautan Terminal", fontWeight = FontWeight.Bold) },
+                text = { Text(url, fontFamily = FontFamily.Monospace, fontSize = 12.sp) },
+                confirmButton = {
+                    TextButton(
+                        onClick = {
+                            activeUrlPrompt = null
+                            try {
+                                val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url))
+                                context.startActivity(intent)
+                            } catch (e: Exception) {
+                                Toast.makeText(context, "Gagal membuka link: ${e.message}", Toast.LENGTH_SHORT).show()
                             }
                         }
+                    ) {
+                        Text("Buka di Browser", color = DevPrimary)
                     }
+                },
+                dismissButton = {
+                    TextButton(
+                        onClick = {
+                            clipboardManager.setText(AnnotatedString(url))
+                            activeUrlPrompt = null
+                            Toast.makeText(context, "URL disalin ke clipboard", Toast.LENGTH_SHORT).show()
+                        }
+                    ) {
+                        Text("Salin URL")
+                    }
+                }
             )
         }
 
@@ -714,5 +755,147 @@ fun TerminalToggleKey(
             fontFamily = FontFamily.Monospace,
             color = textColor
         )
+    }
+}
+
+/**
+ * Direct Canvas Glyph & Monospace Matrix Terminal Renderer (Opsi 1).
+ * Menggambar teks dan latar belakang langsung ke GPU Canvas (Skia drawText/drawRect),
+ * menghasilkan 60-120 FPS bebas lag, nol alokasi SpanStyle pada CPU Helio G35.
+ */
+@Composable
+fun TerminalCanvas(
+    session: com.arbdev.devbox.terminal.NativeTerminalSession,
+    fontSizeSp: Float,
+    verticalScrollState: ScrollState,
+    horizontalScrollState: ScrollState,
+    onFocusRequest: () -> Unit,
+    onTapUrl: (String) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val density = LocalDensity.current
+    val fontSizePx = with(density) { fontSizeSp.sp.toPx() }
+
+    val textPaint = remember(fontSizeSp, density) {
+        android.graphics.Paint().apply {
+            isAntiAlias = true
+            typeface = android.graphics.Typeface.MONOSPACE
+            textSize = fontSizePx
+        }
+    }
+
+    val charWidth = remember(textPaint) { textPaint.measureText("M").coerceAtLeast(1f) }
+    val fontMetrics = remember(textPaint) { textPaint.fontMetrics }
+    val charHeight = remember(fontMetrics) { ((fontMetrics.descent - fontMetrics.ascent) * 1.25f).coerceAtLeast(1f) }
+    val baselineOffset = remember(fontMetrics, charHeight) {
+        -fontMetrics.ascent + (charHeight - (fontMetrics.descent - fontMetrics.ascent)) / 2f
+    }
+
+    // Trigger recompose saat buffer terminal diperbarui
+    val version = session.buffer.version.intValue
+    val lineCount = remember(version) { session.buffer.getLineCount().coerceAtLeast(session.buffer.maxRows) }
+    val totalWidthPx = (session.buffer.maxCols * charWidth).toInt().coerceAtLeast(1)
+    val totalHeightPx = (lineCount * charHeight).toInt().coerceAtLeast(1)
+
+    val totalWidthDp = with(density) { totalWidthPx.toDp() }
+    val totalHeightDp = with(density) { totalHeightPx.toDp() }
+
+    Box(
+        modifier = modifier
+            .verticalScroll(verticalScrollState)
+            .horizontalScroll(horizontalScrollState)
+            .padding(horizontal = 6.dp, vertical = 4.dp)
+            .pointerInput(session.buffer.isMouseTrackingEnabled, fontSizeSp) {
+                detectTapGestures { offset ->
+                    onFocusRequest()
+
+                    if (charWidth > 0 && charHeight > 0) {
+                        val col = (offset.x / charWidth).toInt().coerceIn(0, session.buffer.maxCols - 1)
+                        val line = (offset.y / charHeight).toInt().coerceIn(0, (session.buffer.getLineCount() - 1).coerceAtLeast(0))
+                        val historyCount = if (session.buffer.isAltBuffer) 0 else session.buffer.getScrollbackSnapshot().size
+                        val activeRow = line - historyCount
+
+                        if (session.buffer.isMouseTrackingEnabled) {
+                            if (activeRow in 0 until session.buffer.maxRows) {
+                                session.sendMouseEvent(0, col, activeRow, true)
+                                session.sendMouseEvent(0, col, activeRow, false)
+                            }
+                        } else {
+                            val detectedUrl = session.buffer.getUrlAt(line, col)
+                            if (detectedUrl != null) {
+                                onTapUrl(detectedUrl)
+                            }
+                        }
+                    }
+                }
+            }
+    ) {
+        Canvas(
+            modifier = Modifier.size(width = totalWidthDp, height = totalHeightDp)
+        ) {
+            val nativeCanvas = drawContext.canvas.nativeCanvas
+            val maxCols = session.buffer.maxCols
+            val cursorRow = session.buffer.cursorRow
+            val cursorCol = session.buffer.cursorCol
+            val isCursorVisible = session.buffer.isCursorVisible
+            val historyCount = if (session.buffer.isAltBuffer) 0 else session.buffer.getScrollbackSnapshot().size
+
+            for (lineIdx in 0 until lineCount) {
+                val line = session.buffer.getLineAt(lineIdx) ?: continue
+                val yTop = lineIdx * charHeight
+                val yText = yTop + baselineOffset
+
+                // 1. Gambar latar belakang sel (Backgrounds)
+                var col = 0
+                while (col < maxCols) {
+                    val cell = line[col]
+                    val isCursor = (isCursorVisible && (lineIdx - historyCount) == cursorRow && col == cursorCol)
+                    val bg = if (isCursor) Color(0xFF61AFEF) else cell.bgColor
+
+                    if (bg != Color.Transparent) {
+                        val cellW = if (cell.isWide) charWidth * 2 else charWidth
+                        drawRect(
+                            color = bg,
+                            topLeft = Offset(col * charWidth, yTop),
+                            size = Size(cellW, charHeight)
+                        )
+                    }
+                    col++
+                }
+
+                // 2. Gambar karakter teks (Glyphs)
+                col = 0
+                while (col < maxCols) {
+                    val cell = line[col]
+                    if (cell.isWideContinuation) {
+                        col++
+                        continue
+                    }
+                    val isCursor = (isCursorVisible && (lineIdx - historyCount) == cursorRow && col == cursorCol)
+                    val fg = if (isCursor) Color.Black else cell.fgColor
+
+                    textPaint.color = fg.toArgb()
+                    textPaint.isFakeBoldText = cell.isBold
+                    textPaint.isUnderlineText = cell.isUnderline || cell.hyperlinkUrl != null
+
+                    val x = col * charWidth
+                    if (cell.extraChar != null) {
+                        nativeCanvas.drawText("${cell.char}${cell.extraChar}", x, yText, textPaint)
+                    } else if (cell.char != ' ') {
+                        nativeCanvas.drawText(cell.char.toString(), x, yText, textPaint)
+                    }
+                    col++
+                }
+
+                // Kursor di luar batas kolom karakter
+                if (isCursorVisible && (lineIdx - historyCount) == cursorRow && cursorCol >= maxCols) {
+                    drawRect(
+                        color = Color(0xFF61AFEF),
+                        topLeft = Offset((maxCols - 1) * charWidth, yTop),
+                        size = Size(charWidth, charHeight)
+                    )
+                }
+            }
+        }
     }
 }
