@@ -56,6 +56,7 @@ import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.ContentPaste
 import androidx.compose.material.icons.filled.DeleteSweep
 import androidx.compose.material.icons.filled.Layers
+import androidx.compose.material.icons.filled.Link
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.Terminal
@@ -155,6 +156,7 @@ fun TerminalScreen(
 
     val hapticFeedback = LocalHapticFeedback.current
     var activeUrlPrompt by remember { mutableStateOf<String?>(null) }
+    var urlListPrompt by remember { mutableStateOf<List<String>?>(null) }
 
     LaunchedEffect(activeSession) {
         activeSession.onClipboardCopy = { text ->
@@ -521,6 +523,32 @@ fun TerminalScreen(
                     Icon(
                         imageVector = Icons.Default.ContentCopy,
                         contentDescription = "Salin Layar",
+                        tint = DevPrimary,
+                        modifier = Modifier.size(16.dp)
+                    )
+                }
+
+                // Ekstrak dan Buka Tautan Terminal (URL Scanner)
+                IconButton(
+                    onClick = {
+                        val urls = activeSession.buffer.extractAllUrls()
+                        when {
+                            urls.isEmpty() -> {
+                                Toast.makeText(context, "Tidak ada tautan (URL) di layar", Toast.LENGTH_SHORT).show()
+                            }
+                            urls.size == 1 -> {
+                                activeUrlPrompt = urls.first()
+                            }
+                            else -> {
+                                urlListPrompt = urls
+                            }
+                        }
+                    },
+                    modifier = Modifier.size(30.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Link,
+                        contentDescription = "Pilih Tautan",
                         tint = DevPrimary,
                         modifier = Modifier.size(16.dp)
                     )
@@ -916,6 +944,86 @@ fun TerminalScreen(
             )
         }
 
+        // Dialog Daftar Pilihan Tautan Terminal (Saat ditemukan lebih dari 1 URL di layar)
+        urlListPrompt?.let { urls ->
+            AlertDialog(
+                onDismissRequest = { urlListPrompt = null },
+                title = { Text("Pilih Tautan Terminal (${urls.size})", fontWeight = FontWeight.Bold) },
+                text = {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .verticalScroll(rememberScrollState()),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        urls.forEach { url ->
+                            Surface(
+                                color = Color(0xFF1E1E1E),
+                                shape = RoundedCornerShape(8.dp),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(8.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.SpaceBetween
+                                ) {
+                                    Text(
+                                        text = url,
+                                        fontSize = 11.sp,
+                                        fontFamily = FontFamily.Monospace,
+                                        color = DevPrimary,
+                                        modifier = Modifier
+                                            .weight(1f)
+                                            .padding(end = 8.dp),
+                                        maxLines = 2
+                                    )
+                                    Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                                        IconButton(
+                                            onClick = {
+                                                clipboardManager.setText(AnnotatedString(url))
+                                                Toast.makeText(context, "URL disalin", Toast.LENGTH_SHORT).show()
+                                            },
+                                            modifier = Modifier.size(28.dp)
+                                        ) {
+                                            Icon(
+                                                imageVector = Icons.Default.ContentCopy,
+                                                contentDescription = "Salin",
+                                                tint = Color.LightGray,
+                                                modifier = Modifier.size(16.dp)
+                                            )
+                                        }
+                                        Button(
+                                            onClick = {
+                                                urlListPrompt = null
+                                                try {
+                                                    val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url))
+                                                    context.startActivity(intent)
+                                                } catch (e: Exception) {
+                                                    Toast.makeText(context, "Gagal membuka link: ${e.message}", Toast.LENGTH_SHORT).show()
+                                                }
+                                            },
+                                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
+                                            shape = RoundedCornerShape(4.dp),
+                                            colors = ButtonDefaults.buttonColors(containerColor = DevPrimary)
+                                        ) {
+                                            Text("Buka", fontSize = 11.sp, color = Color.Black)
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                },
+                confirmButton = {
+                    TextButton(onClick = { urlListPrompt = null }) {
+                        Text("Tutup")
+                    }
+                }
+            )
+        }
+
         // Dialog Kelola Sesi DevBox & Pembersih Latar Belakang (Orphan Processes)
         if (showSessionManagerDialog) {
             AlertDialog(
@@ -1252,27 +1360,20 @@ fun TerminalModifierKey(
 ) {
     val containerBg = when {
         isSignal -> Color(0xFF3E1214)
-        highlight -> Color(0x3300FF66)
-        else -> Color(0xFF0E1A11)
+        highlight -> DevPrimary.copy(alpha = 0.25f)
+        else -> Color(0xFF1E1E1E)
     }
 
     val textColor = when {
         isSignal -> Color(0xFFFF7B72)
-        highlight -> Color(0xFF00FF66)
-        else -> Color(0xFF88FFB0)
-    }
-
-    val borderStroke = when {
-        isSignal -> BorderStroke(1.dp, Color(0x44FF4444))
-        highlight -> BorderStroke(1.dp, Color(0xFF00FF66))
-        else -> BorderStroke(0.5.dp, Color(0x2200FF66))
+        highlight -> DevPrimary
+        else -> Color.White
     }
 
     Box(
         modifier = Modifier
             .clip(RoundedCornerShape(6.dp))
             .background(containerBg)
-            .border(borderStroke, RoundedCornerShape(6.dp))
             .clickable {
                 onClick()
             }
@@ -1295,15 +1396,13 @@ fun TerminalToggleKey(
     isActive: Boolean,
     onClick: () -> Unit
 ) {
-    val containerBg = if (isActive) Color(0xFF00FF66) else Color(0xFF0E1A11)
-    val textColor = if (isActive) Color(0xFF030804) else Color(0xFF88FFB0)
-    val borderStroke = if (isActive) BorderStroke(1.dp, Color(0xFF00FF66)) else BorderStroke(0.5.dp, Color(0x2200FF66))
+    val containerBg = if (isActive) DevPrimary else Color(0xFF1E1E1E)
+    val textColor = if (isActive) Color.Black else Color.White
 
     Box(
         modifier = Modifier
             .clip(RoundedCornerShape(6.dp))
             .background(containerBg)
-            .border(borderStroke, RoundedCornerShape(6.dp))
             .clickable {
                 onClick()
             }
@@ -1610,17 +1709,10 @@ fun TerminalCanvas(
                                 }
                             }
                         }
-                    }
-                )
-            }
-            .pointerInput(fontSizeSp, isAltBuffer) {
-                detectDragGesturesAfterLongPress(
-                    onDragStart = { offset ->
+                    },
+                    onLongPress = { offset ->
                         haptic.performHapticFeedback(HapticFeedbackType.LongPress)
                         onFocusRequest()
-
-                        currentActionMode?.finish()
-                        currentActionMode = null
 
                         if (charWidth > 0 && charHeight > 0) {
                             val actualX = offset.x + horizontalScrollState.value
@@ -1629,30 +1721,18 @@ fun TerminalCanvas(
                             val col = (actualX / charWidth).toInt().coerceIn(0, session.buffer.maxCols - 1)
                             val line = (actualY / charHeight).toInt().coerceIn(0, maxLine.coerceAtLeast(0))
 
+                            // Jika menekan pada atau dekat URL, langsung buka prompt tautan!
+                            val detectedUrl = session.buffer.getUrlAt(line, col)
+                            if (detectedUrl != null) {
+                                onTapUrl(detectedUrl)
+                                return@detectTapGestures
+                            }
+
+                            // Jika bukan URL, lakukan seleksi kata/token
                             val (wStart, wEnd) = findWordBounds(line, col)
                             selectionStart = GridPoint(line, wStart)
                             selectionEnd = GridPoint(line, wEnd)
-                        }
-                    },
-                    onDrag = { change, _ ->
-                        change.consume()
-                        if (charWidth > 0 && charHeight > 0) {
-                            val actualX = change.position.x + horizontalScrollState.value
-                            val actualY = if (!isAltBuffer) change.position.y + verticalScrollState.value else change.position.y
-                            val maxLine = (if (isAltBuffer) session.buffer.maxRows else session.buffer.getLineCount()) - 1
-                            val col = (actualX / charWidth).toInt().coerceIn(0, session.buffer.maxCols - 1)
-                            val line = (actualY / charHeight).toInt().coerceIn(0, maxLine.coerceAtLeast(0))
-                            selectionEnd = GridPoint(line, col)
-                        }
-                    },
-                    onDragEnd = {
-                        if (selectionStart != null && selectionEnd != null) {
-                            currentActionMode?.finish()
-                            currentActionMode = view.startActionMode(actionModeCallback, ActionMode.TYPE_FLOATING)
-                        }
-                    },
-                    onDragCancel = {
-                        if (selectionStart != null && selectionEnd != null) {
+
                             currentActionMode?.finish()
                             currentActionMode = view.startActionMode(actionModeCallback, ActionMode.TYPE_FLOATING)
                         }
@@ -1708,8 +1788,8 @@ fun TerminalCanvas(
                     val pt = GridPoint(lineIdx, bgCol)
                     val isSelected = hasSelection && selMin != null && selMax != null && pt >= selMin && pt <= selMax
                     val runBg = when {
-                        isSelected -> Color(0x5500FF66)
-                        isCursor -> Color(0xFF00FF66)
+                        isSelected -> Color(0x6638BDF8)
+                        isCursor -> Color(0xFF61AFEF)
                         else -> cell.bgColor
                     }
 
@@ -1723,8 +1803,8 @@ fun TerminalCanvas(
                         val nextPt = GridPoint(lineIdx, bgCol)
                         val nextIsSelected = hasSelection && selMin != null && selMax != null && nextPt >= selMin && nextPt <= selMax
                         val nextBg = when {
-                            nextIsSelected -> Color(0x5500FF66)
-                            nextIsCursor -> Color(0xFF00FF66)
+                            nextIsSelected -> Color(0x6638BDF8)
+                            nextIsCursor -> Color(0xFF61AFEF)
                             else -> nextCell.bgColor
                         }
                         if (nextBg == runBg) {
@@ -1759,7 +1839,7 @@ fun TerminalCanvas(
                     val isCursor = (isCursorVisible && (lineIdx - historyCount) == cursorRow && col == cursorCol)
                     val fg = when {
                         isSelected -> Color.White
-                        isCursor -> Color(0xFF030804)
+                        isCursor -> Color.Black
                         else -> cell.fgColor
                     }
                     val isBold = cell.isBold || isSelected
@@ -1799,7 +1879,7 @@ fun TerminalCanvas(
                         val curIsCursor = (isCursorVisible && (lineIdx - historyCount) == cursorRow && col == cursorCol)
                         val curFg = when {
                             curIsSelected -> Color.White
-                            curIsCursor -> Color(0xFF030804)
+                            curIsCursor -> Color.Black
                             else -> curCell.fgColor
                         }
                         val curBold = curCell.isBold || curIsSelected
@@ -1827,7 +1907,7 @@ fun TerminalCanvas(
                 // Kursor di luar batas kolom karakter
                 if (isCursorVisible && (lineIdx - historyCount) == cursorRow && cursorCol >= maxCols) {
                     drawRect(
-                        color = Color(0xFF00FF66),
+                        color = Color(0xFF61AFEF),
                         topLeft = Offset((maxCols - 1) * charWidth, yTop),
                         size = Size(charWidth, charHeight)
                     )

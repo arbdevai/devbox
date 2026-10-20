@@ -16,7 +16,7 @@ import java.nio.charset.StandardCharsets
 data class TerminalCell(
     var char: Char = ' ',
     var extraChar: Char? = null,
-    var fgColor: Color = Color(0xFF00FF66),
+    var fgColor: Color = Color(0xFFC9D1D9),
     var bgColor: Color = Color.Transparent,
     var isBold: Boolean = false,
     var isUnderline: Boolean = false,
@@ -28,7 +28,7 @@ data class TerminalCell(
     fun reset() {
         char = ' '
         extraChar = null
-        fgColor = Color(0xFF00FF66)
+        fgColor = Color(0xFFC9D1D9)
         bgColor = Color.Transparent
         isBold = false
         isUnderline = false
@@ -107,8 +107,8 @@ class TerminalGridBuffer(
     var onClipboardCopy: ((String) -> Unit)? = null
     var onBell: (() -> Unit)? = null
 
-    // Current Drawing Style (Hacker Phosphor Green)
-    private val defaultFg = Color(0xFF00FF66)
+    // Current Drawing Style (Clean High-Contrast Terminal)
+    private val defaultFg = Color(0xFFC9D1D9)
     private val defaultBg = Color.Transparent
     private var currentFg = defaultFg
     private var currentBg = defaultBg
@@ -734,16 +734,16 @@ class TerminalGridBuffer(
         return when (index.coerceIn(0, 15)) {
             0 -> Color(0xFF1E1E1E) // Black
             1 -> Color(0xFFE06C75) // Red
-            2 -> Color(0xFF00FF66) // Green (Hacker Phosphor)
-            3 -> Color(0xFFFFD700) // Yellow
-            4 -> Color(0xFF38BDF8) // Blue
+            2 -> Color(0xFF98C379) // Green
+            3 -> Color(0xFFE5C07B) // Yellow
+            4 -> Color(0xFF61AFEF) // Blue
             5 -> Color(0xFFC678DD) // Magenta
-            6 -> Color(0xFF00FFFF) // Cyan
-            7 -> Color(0xFF00FF66) // Normal text / light gray mapped to Hacker Green
+            6 -> Color(0xFF56B6C2) // Cyan
+            7 -> Color(0xFFABB2BF) // Light Gray (Default)
             8 -> Color(0xFF5C6370) // Dark Gray
-            9 -> Color(0xFFFF4444) // Bright Red
-            10 -> Color(0xFF00FF66) // Bright Green
-            11 -> Color(0xFFFFF07A) // Bright Yellow
+            9 -> Color(0xFFBE5046) // Bright Red
+            10 -> Color(0xFFA3D487) // Bright Green
+            11 -> Color(0xFFF0D18C) // Bright Yellow
             12 -> Color(0xFF7EC0EE) // Bright Blue
             13 -> Color(0xFFD896FF) // Bright Magenta
             14 -> Color(0xFF6FE2EF) // Bright Cyan
@@ -839,8 +839,8 @@ class TerminalGridBuffer(
             }
 
             val isCursorHere = (isCursorVisible && rowIdx == cursorRow && col == cursorColIdx)
-            val fg = if (isCursorHere) Color(0xFF030804) else cell.fgColor
-            val bg = if (isCursorHere) Color(0xFF00FF66) else cell.bgColor
+            val fg = if (isCursorHere) Color.Black else cell.fgColor
+            val bg = if (isCursorHere) Color(0xFF61AFEF) else cell.bgColor
             val bold = cell.isBold
             val underline = cell.isUnderline
 
@@ -852,8 +852,8 @@ class TerminalGridBuffer(
                     continue
                 }
                 val curCursor = (isCursorVisible && rowIdx == cursorRow && col == cursorColIdx)
-                val curFg = if (curCursor) Color(0xFF030804) else curCell.fgColor
-                val curBg = if (curCursor) Color(0xFF00FF66) else curCell.bgColor
+                val curFg = if (curCursor) Color.Black else curCell.fgColor
+                val curBg = if (curCursor) Color(0xFF61AFEF) else curCell.bgColor
                 if (curFg != fg || curBg != bg || curCell.isBold != bold || curCell.isUnderline != underline) {
                     break
                 }
@@ -883,7 +883,7 @@ class TerminalGridBuffer(
 
         // Tampilkan kursor jika kursor berada setelah karakter terakhir baris
         if (isCursorVisible && rowIdx == cursorRow && cursorColIdx >= endCol && cursorColIdx < maxCols) {
-            builder.pushStyle(SpanStyle(background = Color(0xFF00FF66), color = Color(0xFF030804)))
+            builder.pushStyle(SpanStyle(background = Color(0xFF61AFEF), color = Color.Black))
             builder.append(' ')
             builder.pop()
         }
@@ -929,7 +929,7 @@ class TerminalGridBuffer(
             for (i in 0 until count) {
                 val c = cursorCol + i
                 if (c < maxCols) {
-                    row[c] = TerminalCell('*', fgColor = Color(0xFF00FF66), isBold = true)
+                    row[c] = TerminalCell('*', fgColor = Color(0xFF61AFEF), isBold = true)
                 }
             }
             cursorCol = (cursorCol + count).coerceAtMost(maxCols - 1)
@@ -1001,7 +1001,7 @@ class TerminalGridBuffer(
             val prevLine = if (absoluteRow > 0) extractLine(absoluteRow - 1) else ""
             val nextLine = extractLine(absoluteRow + 1)
 
-            val urlRegex = Regex("https?://[^\\s<>\"]+")
+            val urlRegex = Regex("(?:https?|file)://[^\\s<>\"]+|localhost:\\d+[^\\s<>\"]*")
 
             // 1. Coba cari match di baris aktif dengan toleransi hitbox sentuhan jari (±6 karakter)
             val matchesOnCurrent = urlRegex.findAll(currentLine).toList()
@@ -1023,7 +1023,17 @@ class TerminalGridBuffer(
                 if (closest != null) return cleanUrl(closest.value)
             }
 
-            // 3. Coba cari di teks gabungan (URL panjang yang terpotong/wrapped antar baris)
+            // 3. Toleransi baris tetangga (atas/bawah ±1 baris jika jari sedikit meleset)
+            val prevMatches = urlRegex.findAll(prevLine).toList()
+            for (m in prevMatches) {
+                if (col in (m.range.first - 3)..(m.range.last + 3)) return cleanUrl(m.value)
+            }
+            val nextMatches = urlRegex.findAll(nextLine).toList()
+            for (m in nextMatches) {
+                if (col in (m.range.first - 3)..(m.range.last + 3)) return cleanUrl(m.value)
+            }
+
+            // 4. Coba cari di teks gabungan (URL panjang yang terpotong/wrapped antar baris)
             val candidateStrings = listOf(
                 currentLine.trimEnd() + nextLine.trimStart(),
                 prevLine.trimEnd() + currentLine.trimStart()
@@ -1036,6 +1046,32 @@ class TerminalGridBuffer(
             }
 
             return null
+        }
+    }
+
+    /**
+     * Mengekstrak seluruh URL yang ada di layar aktif dan scrollback.
+     */
+    fun extractAllUrls(): List<String> {
+        synchronized(lock) {
+            val urls = linkedSetOf<String>()
+            val urlRegex = Regex("(?:https?|file)://[^\\s<>\"]+|localhost:\\d+[^\\s<>\"]*")
+            val totalLines = getLineCount()
+            for (r in 0 until totalLines) {
+                val line = getLineAt(r) ?: continue
+                for (c in 0 until maxCols) {
+                    val h = line[c].hyperlinkUrl
+                    if (h != null) urls.add(cleanUrl(h))
+                }
+                val sb = StringBuilder()
+                for (c in 0 until maxCols) {
+                    if (!line[c].isWideContinuation) sb.append(line[c].char)
+                }
+                urlRegex.findAll(sb.toString()).forEach { m ->
+                    urls.add(cleanUrl(m.value))
+                }
+            }
+            return urls.toList()
         }
     }
 
