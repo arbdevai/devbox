@@ -2,6 +2,10 @@ package com.arbdev.devbox.ui.screens
 
 import android.content.Intent
 import android.net.Uri
+import android.view.ActionMode
+import android.view.Menu
+import android.view.MenuItem
+import android.view.View
 import android.widget.Toast
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.ScrollState
@@ -35,8 +39,6 @@ import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.Terminal
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.ScrollableTabRow
@@ -74,6 +76,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
@@ -355,13 +358,14 @@ fun TerminalScreen(
                     )
                 }
 
-                // Paste Clipboard directly into active PTY session (mendukung bracketed paste)
+                // Paste Clipboard directly into active PTY session
                 IconButton(
                     onClick = {
                         val clip = clipboardManager.getText()?.text
                         if (!clip.isNullOrEmpty()) {
                             activeSession.pasteText(clip)
-                            Toast.makeText(context, "Ditempel ke terminal", Toast.LENGTH_SHORT).show()
+                            val preview = if (clip.length > 20) clip.take(15) + "..." else clip
+                            Toast.makeText(context, "Ditempel: $preview (${clip.length} karakter)\nTekan Enter jika prompt tersembunyi", Toast.LENGTH_SHORT).show()
                         } else {
                             Toast.makeText(context, "Clipboard kosong", Toast.LENGTH_SHORT).show()
                         }
@@ -766,9 +770,20 @@ fun TerminalToggleKey(
 }
 
 /**
+ * Titik koordinat matriks terminal untuk text selection native.
+ */
+data class GridPoint(val line: Int, val col: Int) : Comparable<GridPoint> {
+    override fun compareTo(other: GridPoint): Int {
+        if (line != other.line) return line.compareTo(other.line)
+        return col.compareTo(other.col)
+    }
+}
+
+/**
  * Direct Canvas Glyph & Monospace Matrix Terminal Renderer (Opsi 1).
  * Menggambar teks dan latar belakang langsung ke GPU Canvas (Skia drawText/drawRect),
  * menghasilkan 60-120 FPS bebas lag, nol alokasi SpanStyle pada CPU Helio G35.
+ * Mendukung Native Android Floating ActionMode Text Selection (Copy, Paste, Select All, Share).
  */
 @Composable
 fun TerminalCanvas(
@@ -780,13 +795,15 @@ fun TerminalCanvas(
     onTapUrl: (String) -> Unit,
     modifier: Modifier = Modifier
 ) {
+    val view = LocalView.current
     val density = LocalDensity.current
     val haptic = LocalHapticFeedback.current
     val clipboardManager = LocalClipboardManager.current
     val context = LocalContext.current
 
-    var showContextMenu by remember { mutableStateOf(false) }
-    var menuOffset by remember { mutableStateOf(Offset.Zero) }
+    var currentActionMode by remember { mutableStateOf<ActionMode?>(null) }
+    var selectionStart by remember { mutableStateOf<GridPoint?>(null) }
+    var selectionEnd by remember { mutableStateOf<GridPoint?>(null) }
 
     val fontSizePx = with(density) { fontSizeSp.sp.toPx() }
 
@@ -818,6 +835,159 @@ fun TerminalCanvas(
     val totalWidthDp = with(density) { totalWidthPx.toDp() }
     val totalHeightDp = with(density) { totalHeightPx.toDp() }
 
+    fun findWordBounds(lineIdx: Int, col: Int): Pair<Int, Int> {
+        val line = session.buffer.getLineAt(lineIdx) ?: return col to col
+        val maxC = session.buffer.maxCols
+        if (col !in 0 until maxC) return col to col
+
+        val targetCell = line[col]
+        if (targetCell.char == ' ') {
+            return col to col
+        }
+
+        var start = col
+        while (start > 0 && line[start - 1].char != ' ') {
+            start--
+        }
+        var end = col
+        while (end < maxC - 1 && line[end + 1].char != ' ') {
+            end++
+        }
+        return start to end
+    }
+
+    fun getSelectedText(p1: GridPoint, p2: GridPoint): String {
+        val start = minOf(p1, p2)
+        val end = maxOf(p1, p2)
+        val sb = StringBuilder()
+        for (l in start.line..end.line) {
+            val line = session.buffer.getLineAt(l) ?: continue
+            val colStart = if (l == start.line) start.col else 0
+            val colEnd = if (l == end.line) end.col else session.buffer.maxCols - 1
+            val lineText = StringBuilder()
+            for (c in colStart..colEnd) {
+                val cell = line[c]
+                if (cell.isWideContinuation) continue
+                lineText.append(cell.char)
+                if (cell.extraChar != null) lineText.append(cell.extraChar)
+            }
+            sb.append(lineText.toString().trimEnd())
+            if (l < end.line) sb.append('\n')
+        }
+        return sb.toString()
+    }
+
+    fun getSelectionBoundingRect(p1: GridPoint, p2: GridPoint): android.graphics.Rect {
+        val start = minOf(p1, p2)
+        val end = maxOf(p1, p2)
+        val scrollX = horizontalScrollState.value
+        val scrollY = if (!isAltBuffer) verticalScrollState.value else 0
+
+        val left = ((start.col * charWidth - scrollX).toInt()).coerceAtLeast(0)
+        val top = ((start.line * charHeight - scrollY).toInt()).coerceAtLeast(0)
+        val right = (((end.col + 1) * charWidth - scrollX).toInt()).coerceAtLeast(left + 1)
+        val bottom = (((end.line + 1) * charHeight - scrollY).toInt()).coerceAtLeast(top + 1)
+
+        return android.graphics.Rect(left, top, right, bottom)
+    }
+
+    val actionModeCallback = remember(session, clipboardManager, context) {
+        object : ActionMode.Callback2() {
+            override fun onCreateActionMode(mode: ActionMode, menu: Menu): Boolean {
+                menu.add(Menu.NONE, 1, 1, android.R.string.copy).apply {
+                    setShowAsAction(MenuItem.SHOW_AS_ACTION_ALWAYS)
+                }
+                menu.add(Menu.NONE, 2, 2, android.R.string.paste).apply {
+                    setShowAsAction(MenuItem.SHOW_AS_ACTION_ALWAYS)
+                }
+                menu.add(Menu.NONE, 3, 3, android.R.string.selectAll).apply {
+                    setShowAsAction(MenuItem.SHOW_AS_ACTION_IF_ROOM)
+                }
+                menu.add(Menu.NONE, 4, 4, "Bagikan").apply {
+                    setShowAsAction(MenuItem.SHOW_AS_ACTION_IF_ROOM)
+                }
+                return true
+            }
+
+            override fun onPrepareActionMode(mode: ActionMode, menu: Menu): Boolean = false
+
+            override fun onActionItemClicked(mode: ActionMode, item: MenuItem): Boolean {
+                when (item.itemId) {
+                    1 -> { // Salin Teks Terpilih
+                        val start = selectionStart
+                        val end = selectionEnd
+                        if (start != null && end != null) {
+                            val text = getSelectedText(start, end)
+                            if (text.isNotEmpty()) {
+                                clipboardManager.setText(AnnotatedString(text))
+                                Toast.makeText(context, "Teks disalin (${text.length} karakter)", Toast.LENGTH_SHORT).show()
+                            }
+                        }
+                        mode.finish()
+                        return true
+                    }
+                    2 -> { // Tempel
+                        val clip = clipboardManager.getText()?.text
+                        if (!clip.isNullOrEmpty()) {
+                            session.pasteText(clip)
+                            val preview = if (clip.length > 20) clip.take(15) + "..." else clip
+                            Toast.makeText(context, "Ditempel: $preview (${clip.length} karakter)\nTekan Enter jika prompt tersembunyi", Toast.LENGTH_LONG).show()
+                        } else {
+                            Toast.makeText(context, "Clipboard kosong", Toast.LENGTH_SHORT).show()
+                        }
+                        mode.finish()
+                        return true
+                    }
+                    3 -> { // Pilih Semua
+                        val totalLines = if (isAltBuffer) session.buffer.maxRows else session.buffer.getLineCount()
+                        selectionStart = GridPoint(0, 0)
+                        selectionEnd = GridPoint((totalLines - 1).coerceAtLeast(0), session.buffer.maxCols - 1)
+                        mode.invalidateContentRect()
+                        return true
+                    }
+                    4 -> { // Bagikan
+                        val start = selectionStart
+                        val end = selectionEnd
+                        if (start != null && end != null) {
+                            val text = getSelectedText(start, end)
+                            if (text.isNotEmpty()) {
+                                try {
+                                    val sendIntent = Intent().apply {
+                                        action = Intent.ACTION_SEND
+                                        putExtra(Intent.EXTRA_TEXT, text)
+                                        type = "text/plain"
+                                    }
+                                    context.startActivity(Intent.createChooser(sendIntent, "Bagikan Teks Terminal"))
+                                } catch (e: Exception) {
+                                    Toast.makeText(context, "Gagal membagikan: ${e.message}", Toast.LENGTH_SHORT).show()
+                                }
+                            }
+                        }
+                        mode.finish()
+                        return true
+                    }
+                }
+                return false
+            }
+
+            override fun onDestroyActionMode(mode: ActionMode) {
+                selectionStart = null
+                selectionEnd = null
+                currentActionMode = null
+            }
+
+            override fun onGetContentRect(mode: ActionMode, view: View, outRect: android.graphics.Rect) {
+                val start = selectionStart
+                val end = selectionEnd
+                if (start != null && end != null) {
+                    outRect.set(getSelectionBoundingRect(start, end))
+                } else {
+                    super.onGetContentRect(mode, view, outRect)
+                }
+            }
+        }
+    }
+
     Box(
         modifier = modifier
             .then(
@@ -829,25 +999,32 @@ fun TerminalCanvas(
             .pointerInput(session.buffer.isMouseTrackingEnabled, fontSizeSp, isAltBuffer) {
                 detectTapGestures(
                     onTap = { offset ->
-                        onFocusRequest()
+                        if (currentActionMode != null) {
+                            currentActionMode?.finish()
+                            currentActionMode = null
+                            selectionStart = null
+                            selectionEnd = null
+                        } else {
+                            onFocusRequest()
 
-                        if (charWidth > 0 && charHeight > 0) {
-                            val actualX = offset.x + horizontalScrollState.value
-                            val actualY = if (!isAltBuffer) offset.y + verticalScrollState.value else offset.y
-                            val col = (actualX / charWidth).toInt().coerceIn(0, session.buffer.maxCols - 1)
-                            val line = (actualY / charHeight).toInt().coerceIn(0, (session.buffer.getLineCount() - 1).coerceAtLeast(0))
-                            val historyCount = if (session.buffer.isAltBuffer) 0 else session.buffer.getScrollbackSnapshot().size
-                            val activeRow = line - historyCount
+                            if (charWidth > 0 && charHeight > 0) {
+                                val actualX = offset.x + horizontalScrollState.value
+                                val actualY = if (!isAltBuffer) offset.y + verticalScrollState.value else offset.y
+                                val col = (actualX / charWidth).toInt().coerceIn(0, session.buffer.maxCols - 1)
+                                val line = (actualY / charHeight).toInt().coerceIn(0, (session.buffer.getLineCount() - 1).coerceAtLeast(0))
+                                val historyCount = if (session.buffer.isAltBuffer) 0 else session.buffer.getScrollbackSnapshot().size
+                                val activeRow = line - historyCount
 
-                            if (session.buffer.isMouseTrackingEnabled) {
-                                if (activeRow in 0 until session.buffer.maxRows) {
-                                    session.sendMouseEvent(0, col, activeRow, true)
-                                    session.sendMouseEvent(0, col, activeRow, false)
-                                }
-                            } else {
-                                val detectedUrl = session.buffer.getUrlAt(line, col)
-                                if (detectedUrl != null) {
-                                    onTapUrl(detectedUrl)
+                                if (session.buffer.isMouseTrackingEnabled) {
+                                    if (activeRow in 0 until session.buffer.maxRows) {
+                                        session.sendMouseEvent(0, col, activeRow, true)
+                                        session.sendMouseEvent(0, col, activeRow, false)
+                                    }
+                                } else {
+                                    val detectedUrl = session.buffer.getUrlAt(line, col)
+                                    if (detectedUrl != null) {
+                                        onTapUrl(detectedUrl)
+                                    }
                                 }
                             }
                         }
@@ -855,8 +1032,20 @@ fun TerminalCanvas(
                     onLongPress = { offset ->
                         haptic.performHapticFeedback(HapticFeedbackType.LongPress)
                         onFocusRequest()
-                        menuOffset = offset
-                        showContextMenu = true
+
+                        if (charWidth > 0 && charHeight > 0) {
+                            val actualX = offset.x + horizontalScrollState.value
+                            val actualY = if (!isAltBuffer) offset.y + verticalScrollState.value else offset.y
+                            val col = (actualX / charWidth).toInt().coerceIn(0, session.buffer.maxCols - 1)
+                            val line = (actualY / charHeight).toInt().coerceIn(0, (session.buffer.getLineCount() - 1).coerceAtLeast(0))
+
+                            val (wStart, wEnd) = findWordBounds(line, col)
+                            selectionStart = GridPoint(line, wStart)
+                            selectionEnd = GridPoint(line, wEnd)
+
+                            currentActionMode?.finish()
+                            currentActionMode = view.startActionMode(actionModeCallback, ActionMode.TYPE_FLOATING)
+                        }
                     }
                 )
             }
@@ -871,6 +1060,12 @@ fun TerminalCanvas(
             val cursorCol = session.buffer.cursorCol
             val isCursorVisible = session.buffer.isCursorVisible
             val historyCount = if (session.buffer.isAltBuffer) 0 else session.buffer.getScrollbackSnapshot().size
+
+            val selStart = selectionStart
+            val selEnd = selectionEnd
+            val hasSelection = selStart != null && selEnd != null
+            val selMin = if (hasSelection) minOf(selStart!!, selEnd!!) else null
+            val selMax = if (hasSelection) maxOf(selStart!!, selEnd!!) else null
 
             // Viewport culling: Hanya render baris yang masuk dalam viewport layar
             val scrollY = if (isAltBuffer) 0f else verticalScrollState.value.toFloat()
@@ -900,7 +1095,13 @@ fun TerminalCanvas(
                     val startCol = bgCol
                     val cell = line[bgCol]
                     val isCursor = (isCursorVisible && (lineIdx - historyCount) == cursorRow && bgCol == cursorCol)
-                    val runBg = if (isCursor) Color(0xFF61AFEF) else cell.bgColor
+                    val pt = GridPoint(lineIdx, bgCol)
+                    val isSelected = hasSelection && selMin != null && selMax != null && pt >= selMin && pt <= selMax
+                    val runBg = when {
+                        isSelected -> Color(0x7738BDF8)
+                        isCursor -> Color(0xFF61AFEF)
+                        else -> cell.bgColor
+                    }
 
                     val step = if (cell.isWide) 2 else 1
                     var runLen = step
@@ -909,7 +1110,13 @@ fun TerminalCanvas(
                     while (bgCol < maxCols) {
                         val nextCell = line[bgCol]
                         val nextIsCursor = (isCursorVisible && (lineIdx - historyCount) == cursorRow && bgCol == cursorCol)
-                        val nextBg = if (nextIsCursor) Color(0xFF61AFEF) else nextCell.bgColor
+                        val nextPt = GridPoint(lineIdx, bgCol)
+                        val nextIsSelected = hasSelection && selMin != null && selMax != null && nextPt >= selMin && nextPt <= selMax
+                        val nextBg = when {
+                            nextIsSelected -> Color(0x7738BDF8)
+                            nextIsCursor -> Color(0xFF61AFEF)
+                            else -> nextCell.bgColor
+                        }
                         if (nextBg == runBg) {
                             val nextStep = if (nextCell.isWide) 2 else 1
                             runLen += nextStep
@@ -937,9 +1144,15 @@ fun TerminalCanvas(
                         continue
                     }
 
+                    val pt = GridPoint(lineIdx, col)
+                    val isSelected = hasSelection && selMin != null && selMax != null && pt >= selMin && pt <= selMax
                     val isCursor = (isCursorVisible && (lineIdx - historyCount) == cursorRow && col == cursorCol)
-                    val fg = if (isCursor) Color.Black else cell.fgColor
-                    val isBold = cell.isBold
+                    val fg = when {
+                        isSelected -> Color.White
+                        isCursor -> Color.Black
+                        else -> cell.fgColor
+                    }
+                    val isBold = cell.isBold || isSelected
                     val isUnderline = cell.isUnderline || cell.hyperlinkUrl != null
 
                     // Karakter dengan extra combining mark
@@ -971,9 +1184,15 @@ fun TerminalCanvas(
                         if (curCell.isWideContinuation || curCell.isWide || curCell.extraChar != null) {
                             break
                         }
+                        val curPt = GridPoint(lineIdx, col)
+                        val curIsSelected = hasSelection && selMin != null && selMax != null && curPt >= selMin && curPt <= selMax
                         val curIsCursor = (isCursorVisible && (lineIdx - historyCount) == cursorRow && col == cursorCol)
-                        val curFg = if (curIsCursor) Color.Black else curCell.fgColor
-                        val curBold = curCell.isBold
+                        val curFg = when {
+                            curIsSelected -> Color.White
+                            curIsCursor -> Color.Black
+                            else -> curCell.fgColor
+                        }
+                        val curBold = curCell.isBold || curIsSelected
                         val curUnderline = curCell.isUnderline || curCell.hyperlinkUrl != null
 
                         if (curFg == fg && curBold == isBold && curUnderline == isUnderline) {
@@ -1004,107 +1223,6 @@ fun TerminalCanvas(
                     )
                 }
             }
-        }
-
-        // Android-style Floating Context Menu pada Tekan Lama (Long-Press) seperti Termux
-        DropdownMenu(
-            expanded = showContextMenu,
-            onDismissRequest = { showContextMenu = false },
-            offset = DpOffset(
-                x = with(density) { menuOffset.x.toDp() },
-                y = with(density) { menuOffset.y.toDp() }
-            ),
-            modifier = Modifier.background(DevSurface)
-        ) {
-            DropdownMenuItem(
-                text = { Text("Tempel", color = DevOnSurface, fontWeight = FontWeight.Medium) },
-                leadingIcon = {
-                    Icon(
-                        imageVector = Icons.Default.ContentPaste,
-                        contentDescription = "Tempel",
-                        tint = DevPrimary,
-                        modifier = Modifier.size(18.dp)
-                    )
-                },
-                onClick = {
-                    showContextMenu = false
-                    val clip = clipboardManager.getText()?.text
-                    if (!clip.isNullOrEmpty()) {
-                        session.pasteText(clip)
-                        Toast.makeText(context, "Ditempel ke terminal", Toast.LENGTH_SHORT).show()
-                    } else {
-                        Toast.makeText(context, "Clipboard kosong", Toast.LENGTH_SHORT).show()
-                    }
-                }
-            )
-
-            DropdownMenuItem(
-                text = { Text("Salin Layar", color = DevOnSurface, fontWeight = FontWeight.Medium) },
-                leadingIcon = {
-                    Icon(
-                        imageVector = Icons.Default.ContentCopy,
-                        contentDescription = "Salin",
-                        tint = TerminalText,
-                        modifier = Modifier.size(18.dp)
-                    )
-                },
-                onClick = {
-                    showContextMenu = false
-                    val text = session.buffer.getTranscriptText()
-                    if (text.isNotEmpty()) {
-                        clipboardManager.setText(AnnotatedString(text))
-                        Toast.makeText(context, "Layar terminal disalin ke clipboard", Toast.LENGTH_SHORT).show()
-                    } else {
-                        Toast.makeText(context, "Tidak ada teks untuk disalin", Toast.LENGTH_SHORT).show()
-                    }
-                }
-            )
-
-            DropdownMenuItem(
-                text = { Text("Bagikan", color = DevOnSurface, fontWeight = FontWeight.Medium) },
-                leadingIcon = {
-                    Icon(
-                        imageVector = Icons.Default.Share,
-                        contentDescription = "Bagikan",
-                        tint = TerminalText,
-                        modifier = Modifier.size(18.dp)
-                    )
-                },
-                onClick = {
-                    showContextMenu = false
-                    val text = session.buffer.getTranscriptText()
-                    if (text.isNotEmpty()) {
-                        try {
-                            val sendIntent = Intent().apply {
-                                action = Intent.ACTION_SEND
-                                putExtra(Intent.EXTRA_TEXT, text)
-                                type = "text/plain"
-                            }
-                            context.startActivity(Intent.createChooser(sendIntent, "Bagikan Output Terminal"))
-                        } catch (e: Exception) {
-                            Toast.makeText(context, "Gagal membagikan: ${e.message}", Toast.LENGTH_SHORT).show()
-                        }
-                    } else {
-                        Toast.makeText(context, "Tidak ada teks untuk dibagikan", Toast.LENGTH_SHORT).show()
-                    }
-                }
-            )
-
-            DropdownMenuItem(
-                text = { Text("Reset Layar (Ctrl+L)", color = DevOnSurface, fontWeight = FontWeight.Medium) },
-                leadingIcon = {
-                    Icon(
-                        imageVector = Icons.Default.Refresh,
-                        contentDescription = "Reset Layar",
-                        tint = TerminalText,
-                        modifier = Modifier.size(18.dp)
-                    )
-                },
-                onClick = {
-                    showContextMenu = false
-                    session.sendBytes(byteArrayOf(12))
-                }
-            )
         }
     }
 }
