@@ -77,6 +77,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -146,6 +147,15 @@ fun DashboardScreen(
     var uninstallLogs by remember { mutableStateOf(listOf<String>()) }
     var uninstallFinished by remember { mutableStateOf(false) }
     var uninstallSuccess by remember { mutableStateOf(false) }
+
+    // Dialog Instalasi Ubuntu Base Resmi (Download & Ekstraksi)
+    var showInstallDialog by remember { mutableStateOf(false) }
+    var isInstalling by remember { mutableStateOf(false) }
+    var installProgress by remember { mutableFloatStateOf(0f) }
+    var installStatusText by remember { mutableStateOf("") }
+    var installLogs by remember { mutableStateOf(listOf<String>()) }
+    var installFinished by remember { mutableStateOf(false) }
+    var installSuccess by remember { mutableStateOf(false) }
 
     // In-App Updater State
     val updateStatus by UpdateManager.updateStatus.collectAsState()
@@ -489,16 +499,38 @@ fun DashboardScreen(
                     // Option 2: Download Official Ubuntu 24.04 ARM64
                     OutlinedButton(
                         onClick = {
+                            showInstallDialog = true
+                            isInstalling = true
+                            installProgress = 0f
+                            installStatusText = "Mempersiapkan pengunduhan..."
+                            installLogs = listOf("[INIT] Mempersiapkan instalasi Ubuntu Base 24.04 ARM64...")
+                            installFinished = false
+                            installSuccess = false
+
                             scope.launch {
-                                isOperating = true
-                                actionMessage = "Menyiapkan Ubuntu 24.04 ARM64 resmi (29 MB)..."
-                                val res = ChrootManager.downloadUbuntuOfficialRootfs(ChrootManager.activeRootfs)
-                                actionMessage = res.getOrNull() ?: res.exceptionOrNull()?.message
+                                val res = ChrootManager.downloadUbuntuOfficialRootfs(
+                                    targetRootfs = ChrootManager.activeRootfs,
+                                    onProgress = { prog, status ->
+                                        installProgress = prog
+                                        installStatusText = status
+                                    },
+                                    onLogLine = { line ->
+                                        installLogs = (installLogs + line).takeLast(200)
+                                    }
+                                )
+                                isInstalling = false
+                                installFinished = true
+                                installSuccess = res.isSuccess
+                                if (res.isSuccess) {
+                                    installStatusText = "Instalasi selesai!"
+                                    installProgress = 1f
+                                } else {
+                                    installStatusText = "Gagal: ${res.exceptionOrNull()?.message ?: "Terjadi kesalahan"}"
+                                }
                                 refreshState()
-                                isOperating = false
                             }
                         },
-                        enabled = !isOperating,
+                        enabled = !isOperating && !isInstalling,
                         modifier = Modifier.fillMaxWidth(),
                         shape = RoundedCornerShape(10.dp)
                     ) {
@@ -998,6 +1030,184 @@ fun DashboardScreen(
                     else -> {
                         TextButton(onClick = { showUninstallDialog = false }) {
                             Text("Batal", color = Color.Gray)
+                        }
+                    }
+                }
+            }
+        )
+    }
+
+    // Dialog Instalasi Ubuntu Base Resmi (Download & Ekstraksi)
+    if (showInstallDialog) {
+        AlertDialog(
+            onDismissRequest = {
+                if (!isInstalling) {
+                    showInstallDialog = false
+                    installFinished = false
+                    installLogs = emptyList()
+                    installProgress = 0f
+                }
+            },
+            title = {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    when {
+                        isInstalling -> {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(20.dp),
+                                color = DevSecondary,
+                                strokeWidth = 2.5.dp
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                if (installProgress < 1f && !installStatusText.startsWith("Mengekstrak")) "Mengunduh Ubuntu Base..." else "Mengekstrak Rootfs...",
+                                color = DevSecondary,
+                                fontSize = 16.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                        installFinished -> {
+                            if (installSuccess) {
+                                Icon(Icons.Default.CheckCircle, contentDescription = null, tint = DevSuccess)
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text("Instalasi Berhasil", color = DevSuccess, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                            } else {
+                                Icon(Icons.Default.Error, contentDescription = null, tint = Color(0xFFFF5252))
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text("Instalasi Gagal", color = Color(0xFFFF5252), fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                            }
+                        }
+                        else -> {
+                            Icon(Icons.Default.CloudDownload, contentDescription = null, tint = DevSecondary)
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text("Unduh Ubuntu Base 24.04", color = DevSecondary, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                        }
+                    }
+                }
+            },
+            text = {
+                val logListState = rememberLazyListState()
+                LaunchedEffect(installLogs.size) {
+                    if (installLogs.isNotEmpty()) {
+                        logListState.animateScrollToItem(installLogs.size - 1)
+                    }
+                }
+
+                Column(modifier = Modifier.fillMaxWidth()) {
+                    Text(
+                        text = if (installStatusText.isNotBlank()) installStatusText else "Menyiapkan Ubuntu 24.04 ARM64 resmi dari Canonical...",
+                        fontSize = 12.sp,
+                        color = Color.White
+                    )
+                    Spacer(modifier = Modifier.height(10.dp))
+
+                    if (isInstalling) {
+                        if (installProgress > 0f && installProgress < 1f) {
+                            LinearProgressIndicator(
+                                progress = { installProgress },
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(6.dp)
+                                    .clip(RoundedCornerShape(3.dp)),
+                                color = DevSecondary,
+                                trackColor = DevSurfaceVariant
+                            )
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Text(
+                                text = "${(installProgress * 100).toInt()}%",
+                                fontSize = 11.sp,
+                                color = DevSecondary,
+                                fontWeight = FontWeight.Bold,
+                                modifier = Modifier.align(Alignment.End)
+                            )
+                        } else {
+                            LinearProgressIndicator(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(6.dp)
+                                    .clip(RoundedCornerShape(3.dp)),
+                                color = DevSecondary,
+                                trackColor = DevSurfaceVariant
+                            )
+                        }
+                        Spacer(modifier = Modifier.height(8.dp))
+                    }
+
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(min = 140.dp, max = 220.dp)
+                            .background(Color(0xFF0D1117), RoundedCornerShape(8.dp))
+                            .border(
+                                1.dp,
+                                when {
+                                    isInstalling -> DevSecondary.copy(alpha = 0.5f)
+                                    installSuccess -> DevSuccess.copy(alpha = 0.6f)
+                                    else -> Color(0xFFFF5252).copy(alpha = 0.6f)
+                                },
+                                RoundedCornerShape(8.dp)
+                            )
+                            .padding(8.dp)
+                    ) {
+                        LazyColumn(state = logListState) {
+                            items(installLogs) { line ->
+                                Text(
+                                    text = line,
+                                    fontFamily = FontFamily.Monospace,
+                                    fontSize = 11.sp,
+                                    lineHeight = 15.sp,
+                                    color = when {
+                                        line.contains("BERHASIL", ignoreCase = true) || line.contains("SUCCESS", ignoreCase = true) -> Color(0xFF81C784)
+                                        line.contains("GAGAL", ignoreCase = true) || line.contains("FAILED", ignoreCase = true) || line.contains("ERROR", ignoreCase = true) -> Color(0xFFFF8A80)
+                                        line.startsWith("[") -> Color(0xFF80D8FF)
+                                        else -> Color(0xFFECEFF1)
+                                    }
+                                )
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                when {
+                    isInstalling -> {
+                        // Tidak ada tombol confirm saat proses instalasi berjalan
+                    }
+                    installFinished -> {
+                        Button(
+                            onClick = {
+                                showInstallDialog = false
+                                installFinished = false
+                                installLogs = emptyList()
+                                installProgress = 0f
+                            },
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = if (installSuccess) DevSuccess else DevSurfaceVariant
+                            )
+                        ) {
+                            Text("Tutup", color = if (installSuccess) Color.Black else Color.White, fontWeight = FontWeight.Bold)
+                        }
+                    }
+                }
+            },
+            dismissButton = {
+                when {
+                    isInstalling -> {
+                        // Dismiss dinonaktifkan demi integritas file
+                    }
+                    installFinished -> {
+                        if (!installSuccess && installLogs.isNotEmpty()) {
+                            OutlinedButton(
+                                onClick = {
+                                    val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
+                                    val clip = ClipData.newPlainText("DevBox Install Log", installLogs.joinToString("\n"))
+                                    clipboard?.setPrimaryClip(clip)
+                                    Toast.makeText(context, "Log error disalin ke clipboard", Toast.LENGTH_SHORT).show()
+                                }
+                            ) {
+                                Icon(Icons.Default.ContentCopy, contentDescription = null, modifier = Modifier.size(16.dp))
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text("Salin Log")
+                            }
                         }
                     }
                 }

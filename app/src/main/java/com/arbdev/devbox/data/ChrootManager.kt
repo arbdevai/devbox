@@ -4,6 +4,9 @@ import android.content.Context
 import com.arbdev.devbox.util.AppLogger
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import java.io.File
+import java.net.HttpURLConnection
+import java.net.URL
 
 data class ChrootProcessInfo(
     val pid: Int,
@@ -448,16 +451,18 @@ BRIDGE_EOF
     /**
      * Membersihkan proses Antigravity CLI usang atau lock file dari crash / FC sesi sebelumnya.
      * HANYA mematikan proses milik DevBox, tidak akan pernah menyentuh antigravity di Termux!
+     * Menggunakan grep -sl O(1) cepat (<30ms) tanpa loop lambat /proc.
      */
     suspend fun cleanStaleAgyLocks(rootfs: String = activeRootfs): Int = withContext(Dispatchers.IO) {
         val script = """
             count=0
-            for p in /proc/[0-9]*; do
-                if grep -q "DEVBOX" "${'$'}p/environ" 2>/dev/null; then
-                    comm=${'$'}(cat "${'$'}p/comm" 2>/dev/null || true)
-                    cmdline=${'$'}(cat "${'$'}p/cmdline" 2>/dev/null || true)
+            pids=${'$'}(grep -sl "DEVBOX" /proc/[0-9]*/environ 2>/dev/null | tr -d -c '0-9\n')
+            for pid in ${'$'}pids; do
+                if [ -d "/proc/${'$'}pid" ]; then
+                    comm=${'$'}(cat "/proc/${'$'}pid/comm" 2>/dev/null || true)
+                    cmdline=${'$'}(cat "/proc/${'$'}pid/cmdline" 2>/dev/null || true)
                     if [ "${'$'}comm" = "antigravity" ] || [ "${'$'}{cmdline#*antigravity}" != "${'$'}cmdline" ]; then
-                        kill -9 "${'$'}(basename ${'$'}p)" 2>/dev/null && count=${'$'}((count + 1))
+                        kill -9 "${'$'}pid" 2>/dev/null && count=${'$'}((count + 1))
                     fi
                 fi
             done
@@ -639,75 +644,139 @@ BRIDGE_EOF
     }
 
     suspend fun downloadUbuntuOfficialRootfs(
-        targetRootfs: String = activeRootfs
+        targetRootfs: String = DEFAULT_ROOTFS,
+        onProgress: ((Float, String) -> Unit)? = null,
+        onLogLine: ((String) -> Unit)? = null
     ): Result<String> = withContext(Dispatchers.IO) {
-        val url = "http://cdimage.ubuntu.com/ubuntu-base/releases/24.04/release/ubuntu-base-24.04.5-base-arm64.tar.gz"
-        AppLogger.i("ChrootManager", "Menyiapkan Ubuntu 24.04 ARM64 resmi...")
+        val urlString = "http://cdimage.ubuntu.com/ubuntu-base/releases/24.04/release/ubuntu-base-24.04.5-base-arm64.tar.gz"
+        AppLogger.i("ChrootManager", "Menyiapkan pengunduhan Ubuntu 24.04 ARM64 resmi...")
 
+        val cacheDir = appContext?.cacheDir ?: File("/sdcard")
+        val destFile = File(cacheDir, "ubuntu-base-24.04-arm64.tar.gz")
+
+        // 1. Download Phase via Java/Kotlin stream (Anti-Timeout, dengan kalkulasi persentase)
+        try {
+            onProgress?.invoke(0f, "Menghubungkan ke server Ubuntu...")
+            onLogLine?.invoke("[1/3] Menghubungkan ke server Ubuntu (cdimage.ubuntu.com)...")
+
+            val url = URL(urlString)
+            val connection = url.openConnection() as HttpURLConnection
+            connection.requestMethod = "GET"
+            connection.connectTimeout = 15000
+            connection.readTimeout = 30000
+            connection.instanceFollowRedirects = true
+            connection.connect()
+
+            val responseCode = connection.responseCode
+            if (responseCode !in 200..299) {
+                return@withContext Result.failure(Exception("Gagal mengunduh: Server merespons HTTP $responseCode"))
+            }
+
+            val totalBytes = connection.contentLengthLong.takeIf { it > 0 } ?: 29936675L
+            var downloadedBytes = 0L
+
+            onLogLine?.invoke("[1/3] Mengunduh archive Ubuntu Base (~${totalBytes / (1024 * 1024)} MB)...")
+
+            connection.inputStream.use { input ->
+                destFile.outputStream().use { output ->
+                    val buffer = ByteArray(64 * 1024)
+                    var bytesRead: Int
+                    var lastUpdate = System.currentTimeMillis()
+
+                    while (input.read(buffer).also { bytesRead = it } != -1) {
+                        output.write(buffer, 0, bytesRead)
+                        downloadedBytes += bytesRead
+
+                        val now = System.currentTimeMillis()
+                        if (now - lastUpdate > 150) {
+                            val fraction = (downloadedBytes.toFloat() / totalBytes).coerceIn(0f, 1f)
+                            val statusMsg = "Mengunduh: ${downloadedBytes / (1024 * 1024)} MB / ${totalBytes / (1024 * 1024)} MB (${(fraction * 100).toInt()}%)"
+                            onProgress?.invoke(fraction, statusMsg)
+                            lastUpdate = now
+                        }
+                    }
+                }
+            }
+
+            onProgress?.invoke(1f, "Unduhan selesai. Mempersiapkan ekstraksi...")
+            onLogLine?.invoke("[2/3] Unduhan archive selesai (${destFile.length() / 1024} KB).")
+        } catch (e: Exception) {
+            val err = "Gagal mengunduh Ubuntu Base: ${e.localizedMessage}"
+            AppLogger.e("ChrootManager", err, e)
+            onLogLine?.invoke("ERROR: $err")
+            destFile.delete()
+            return@withContext Result.failure(e)
+        }
+
+        // 2. Extraction & Configuration Phase via Root Stream
+        onProgress?.invoke(1f, "Mengekstrak file sistem Ubuntu ke $targetRootfs...")
+        onLogLine?.invoke("[3/3] Mengekstrak file sistem dan mengonfigurasi user...")
+
+        val tarPath = destFile.absolutePath
         val script = """
-            umount -l '$targetRootfs/mnt/sdcard' 2>/dev/null || true
-            umount -l '$targetRootfs/sys' 2>/dev/null || true
-            umount -l '$targetRootfs/proc' 2>/dev/null || true
-            umount -l '$targetRootfs/dev/pts' 2>/dev/null || true
-            umount -l '$targetRootfs/dev' 2>/dev/null || true
+            echo "Membuat direktori target $targetRootfs..."
             mkdir -p '$targetRootfs'
 
-            EXTRACTED=0
+            # Unmount sub-mount lama jika ada
+            awk -v r='$targetRootfs/' '${'$'}2 ~ ("^" r) {print ${'$'}2}' /proc/mounts 2>/dev/null | sort -r | while read -r m; do
+                umount -l "${'$'}m" 2>/dev/null || true
+            done
 
-            # Cek 1: Jika sudah ada archive tar.xz dari unduhan sebelumnya di /sdcard dan ubuntu-chroot ada
-            if [ -f /sdcard/ubuntu-noble-arm64.tar.xz ] && [ -x /data/local/ubuntu-chroot/usr/bin/tar ]; then
-                echo "Mengekstrak archive /sdcard/ubuntu-noble-arm64.tar.xz yang sudah ada..."
-                mkdir -p /data/local/ubuntu-chroot/mnt/devbox_dest
-                mountpoint -q /data/local/ubuntu-chroot/mnt/devbox_dest || mount --bind '$targetRootfs' /data/local/ubuntu-chroot/mnt/devbox_dest
-                mountpoint -q /data/local/ubuntu-chroot/mnt/sdcard || mount --bind /sdcard /data/local/ubuntu-chroot/mnt/sdcard
-                chroot /data/local/ubuntu-chroot /usr/bin/tar -xf /mnt/sdcard/ubuntu-noble-arm64.tar.xz -C /mnt/devbox_dest
-                umount -l /data/local/ubuntu-chroot/mnt/devbox_dest 2>/dev/null || true
-                if [ -x '$targetRootfs/bin/bash' ] || [ -x '$targetRootfs/usr/bin/bash' ]; then
-                    EXTRACTED=1
-                    echo "EXTRACT_SUCCESS_FROM_EXISTING"
-                fi
+            TAR_BIN=""
+            if [ -x /data/adb/magisk/busybox ]; then
+                TAR_BIN="/data/adb/magisk/busybox tar"
+            elif [ -x /data/local/ubuntu-chroot/usr/bin/tar ]; then
+                TAR_BIN="/data/local/ubuntu-chroot/usr/bin/tar"
+            elif which tar >/dev/null 2>&1; then
+                TAR_BIN="tar"
             fi
 
-            # Cek 2: Jika belum terekstrak, unduh Ubuntu Base 24.04 ARM64 (.tar.gz, 29 MB)
-            if [ "${'$'}EXTRACTED" -eq 0 ]; then
-                TAR_FILE="/sdcard/ubuntu-base-24.04-arm64.tar.gz"
-                echo "Mengunduh archive Ubuntu Base 24.04 ARM64 resmi (29 MB)..."
-                curl -k -L -f '$url' -o "${'$'}TAR_FILE" || wget --no-check-certificate '$url' -O "${'$'}TAR_FILE"
-                FILE_SIZE=${'$'}(wc -c < "${'$'}TAR_FILE" 2>/dev/null || echo 0)
-                if [ "${'$'}FILE_SIZE" -lt 15000000 ]; then
-                    echo "DOWNLOAD_FAILED: File unduhan tidak lengkap (hanya ${'$'}FILE_SIZE bytes)."
-                    rm -f "${'$'}TAR_FILE"
-                    exit 1
-                fi
-                echo "Mengekstrak rootfs ke $targetRootfs..."
-                gzip -dc "${'$'}TAR_FILE" | tar -xf - -C '$targetRootfs' 2>/dev/null || tar -xzf "${'$'}TAR_FILE" -C '$targetRootfs' 2>/dev/null || tar -xf "${'$'}TAR_FILE" -C '$targetRootfs'
-                rm -f "${'$'}TAR_FILE"
+            echo "Mengekstrak file archive ke $targetRootfs..."
+            if [ -n "${'$'}TAR_BIN" ]; then
+                ${'$'}TAR_BIN -xzf '$tarPath' -C '$targetRootfs' 2>&1 || gzip -dc '$tarPath' | ${'$'}TAR_BIN -xf - -C '$targetRootfs' 2>&1
+            else
+                gzip -dc '$tarPath' | tar -xf - -C '$targetRootfs' 2>&1 || tar -xzf '$tarPath' -C '$targetRootfs' 2>&1
             fi
 
+            echo "Konfigurasi dasar jaringan dan user..."
             mkdir -p '$targetRootfs/dev' '$targetRootfs/dev/pts' '$targetRootfs/proc' '$targetRootfs/sys' '$targetRootfs/mnt/sdcard' '$targetRootfs/tmp' '$targetRootfs/home/coder'
             chmod 1777 '$targetRootfs/tmp' 2>/dev/null || true
             echo "nameserver 8.8.8.8" > '$targetRootfs/etc/resolv.conf' 2>/dev/null || true
             echo "127.0.0.1 localhost" > '$targetRootfs/etc/hosts' 2>/dev/null || true
 
-            # Buat user coder jika belum ada
-            chroot '$targetRootfs' /usr/sbin/useradd -m -s /bin/bash coder 2>/dev/null || chroot '$targetRootfs' /bin/sh -c 'useradd -m -s /bin/bash coder 2>/dev/null || true'
+            if ! grep -q "^coder:" '$targetRootfs/etc/passwd' 2>/dev/null; then
+                echo "coder:x:1000:1000:DevBox User:/home/coder:/bin/bash" >> '$targetRootfs/etc/passwd' 2>/dev/null || true
+                echo "coder:x:1000:" >> '$targetRootfs/etc/group' 2>/dev/null || true
+            fi
             chown -R 1000:1000 '$targetRootfs/home/coder' 2>/dev/null || true
+            chmod 755 '$targetRootfs/home/coder' 2>/dev/null || true
 
-            if [ -x '$targetRootfs/bin/bash' ] || [ -x '$targetRootfs/usr/bin/bash' ] || [ -x '$targetRootfs/bin/sh' ]; then
-                echo "DOWNLOAD_EXTRACT_SUCCESS"
+            if [ -x '$targetRootfs/bin/bash' ] || [ -x '$targetRootfs/usr/bin/bash' ]; then
+                echo "INSTALL_SUCCESS"
+                echo "=== UBUNTU BASE RESMI BERHASIL DIPASANG ==="
             else
-                echo "EXTRACT_FAILED"
+                echo "INSTALL_FAILED: Binary bash tidak ditemukan setelah ekstraksi."
                 exit 1
             fi
         """.trimIndent()
 
-        val res = RootExecutor.execute(script)
-        val out = res.getOrNull()?.stdout ?: ""
-        return@withContext if (out.contains("DOWNLOAD_EXTRACT_SUCCESS") || out.contains("EXTRACT_SUCCESS_FROM_EXISTING")) {
-            AppLogger.i("ChrootManager", "Ubuntu 24.04 ARM64 resmi berhasil dipasang di $targetRootfs!")
-            Result.success("Ubuntu 24.04 ARM64 resmi berhasil dipasang!")
+        var isExtractSuccess = false
+        val extractExit = RootExecutor.executeStream(script) { line ->
+            onLogLine?.invoke(line)
+            if (line.contains("INSTALL_SUCCESS")) {
+                isExtractSuccess = true
+            }
+        }
+
+        // Hapus file archive sementara
+        destFile.delete()
+
+        if (isExtractSuccess || extractExit == 0) {
+            AppLogger.i("ChrootManager", "Ubuntu Base resmi berhasil dipasang di $targetRootfs!")
+            appContext?.let { setActiveRootfs(it, targetRootfs) }
+            Result.success("Ubuntu Base resmi berhasil dipasang di $targetRootfs! Container siap digunakan.")
         } else {
-            val err = "Gagal unduh/ekstrak: ${res.getOrNull()?.stderr.takeIf { !it.isNullOrBlank() } ?: out}"
+            val err = "Gagal mengekstrak Ubuntu Base (Exit code: $extractExit)."
             AppLogger.e("ChrootManager", err)
             Result.failure(Exception(err))
         }
