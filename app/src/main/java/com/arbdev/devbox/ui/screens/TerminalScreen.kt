@@ -729,7 +729,7 @@ fun TerminalScreen(
                                 true
                             }
                             android.view.KeyEvent.KEYCODE_TAB -> {
-                                if (it.isShiftPressed || isShiftActive) {
+                                if (isShiftActive) {
                                     activeSession.sendText("\u001B[Z")
                                     isShiftActive = false
                                 } else {
