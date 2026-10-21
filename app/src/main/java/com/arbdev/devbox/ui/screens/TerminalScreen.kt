@@ -28,6 +28,7 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.waitForUpOrCancellation
@@ -45,6 +46,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -61,6 +63,7 @@ import androidx.compose.material.icons.filled.ContentPaste
 import androidx.compose.material.icons.filled.DeleteSweep
 import androidx.compose.material.icons.filled.Layers
 import androidx.compose.material.icons.filled.Link
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.SelectAll
 import androidx.compose.material.icons.filled.Send
@@ -68,10 +71,14 @@ import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.SmartToy
 import androidx.compose.material.icons.filled.Terminal
 import androidx.compose.material.icons.filled.Warning
+import androidx.compose.material.icons.filled.ZoomIn
+import androidx.compose.material.icons.filled.ZoomOut
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -105,6 +112,7 @@ import kotlinx.coroutines.withTimeout
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.graphics.toArgb
@@ -127,6 +135,7 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.DpOffset
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.arbdev.devbox.service.KeepAliveService
@@ -209,6 +218,9 @@ fun TerminalScreen(
 
     // Mode Seleksi Teks (Termux-style Freeze Copy)
     var isSelectModeActive by remember { mutableStateOf(false) }
+
+    // Menu Overflow Titik Tiga (Action Toolbar Ringkas)
+    var showOverflowMenu by remember { mutableStateOf(false) }
 
     // Dialog Antigravity CLI Agent Hub
     var showAgentHubDialog by remember { mutableStateOf(false) }
@@ -432,7 +444,7 @@ fun TerminalScreen(
             }
         }
 
-        // Action Toolbar (Prompt status, Keyboard toggle, Zoom A-/A+, Copy Screen, Paste, Clear)
+        // Action Toolbar (Prompt status + Compact Action Controls with Overflow Dropdown)
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -441,26 +453,35 @@ fun TerminalScreen(
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
+            // Sisi Kiri: Status Prompt & Active Agent (Bisa scroll horizontal jika sempit)
+            Row(
+                modifier = Modifier
+                    .weight(1f, fill = false)
+                    .horizontalScroll(rememberScrollState()),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
                 Text(
                     text = "coder@devbox",
                     fontFamily = FontFamily.Monospace,
                     fontSize = 11.sp,
                     color = TerminalGreen,
-                    fontWeight = FontWeight.Bold
+                    fontWeight = FontWeight.Bold,
+                    maxLines = 1
                 )
                 Text(
                     text = ":${activeSession.getDisplayDir()}$",
                     fontFamily = FontFamily.Monospace,
                     fontSize = 11.sp,
-                    color = TerminalCyan
+                    color = TerminalCyan,
+                    maxLines = 1
                 )
                 Spacer(modifier = Modifier.width(4.dp))
                 Text(
                     text = if (activeSession.isRunning) "• PTY" else "• SELESAI",
                     fontFamily = FontFamily.Monospace,
                     fontSize = 9.sp,
-                    color = if (activeSession.isRunning) DevPrimary else Color.Gray
+                    color = if (activeSession.isRunning) DevPrimary else Color.Gray,
+                    maxLines = 1
                 )
                 if (activeSession.isAgentRunning && activeSession.activeAgentName != null) {
                     Spacer(modifier = Modifier.width(6.dp))
@@ -501,21 +522,31 @@ fun TerminalScreen(
                 }
             }
 
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                // Manajer Sesi & Pembersih Background Orphan Sessions
+            Spacer(modifier = Modifier.width(6.dp))
+
+            // Sisi Kanan: 4 Kontrol Rapi & Bersih (SEL, Keyboard, Agent Hub, 3-Dots Menu)
+            Row(
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                // 1. Toggle Mode Seleksi Teks (Termux-style pin selection)
                 IconButton(
-                    onClick = { showSessionManagerDialog = true },
+                    onClick = {
+                        isSelectModeActive = !isSelectModeActive
+                        if (isSelectModeActive) {
+                            Toast.makeText(context, "Mode Seleksi aktif: seret pin untuk memilih teks", Toast.LENGTH_SHORT).show()
+                        }
+                    },
                     modifier = Modifier.size(30.dp)
                 ) {
                     Icon(
-                        imageVector = Icons.Default.Layers,
-                        contentDescription = "Kelola Sesi",
-                        tint = if (orphanProcesses.isNotEmpty()) Color(0xFFFF9800) else DevPrimary,
-                        modifier = Modifier.size(16.dp)
+                        imageVector = Icons.Default.SelectAll,
+                        contentDescription = "Mode Seleksi Teks",
+                        tint = if (isSelectModeActive) DevSecondary else DevPrimary,
+                        modifier = Modifier.size(17.dp)
                     )
                 }
 
-                // Toggle Soft Keyboard
+                // 2. Toggle Soft Keyboard
                 IconButton(
                     onClick = {
                         autoScrollEnabled = true
@@ -528,108 +559,11 @@ fun TerminalScreen(
                         imageVector = Icons.Default.Terminal,
                         contentDescription = "Buka Keyboard",
                         tint = DevPrimary,
-                        modifier = Modifier.size(16.dp)
+                        modifier = Modifier.size(17.dp)
                     )
                 }
 
-                // Font Zoom Out (-) dengan step smooth 0.5f dan auto-save SharedPreferences
-                IconButton(
-                    onClick = {
-                        updateFontSize(terminalFontSize - 0.5f)
-                    },
-                    modifier = Modifier.size(28.dp)
-                ) {
-                    Text(
-                        text = "A-",
-                        fontFamily = FontFamily.Monospace,
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = TerminalText
-                    )
-                }
-
-                // Font Zoom In (+) dengan step smooth 0.5f dan auto-save SharedPreferences
-                IconButton(
-                    onClick = {
-                        updateFontSize(terminalFontSize + 0.5f)
-                    },
-                    modifier = Modifier.size(28.dp)
-                ) {
-                    Text(
-                        text = "A+",
-                        fontFamily = FontFamily.Monospace,
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = TerminalText
-                    )
-                }
-
-                // Copy terminal screen transcript
-                IconButton(
-                    onClick = {
-                        val text = activeSession.buffer.getTranscriptText()
-                        if (text.isNotEmpty()) {
-                            clipboardManager.setText(AnnotatedString(text))
-                            Toast.makeText(context, "Layar terminal disalin ke clipboard", Toast.LENGTH_SHORT).show()
-                        } else {
-                            Toast.makeText(context, "Tidak ada teks untuk disalin", Toast.LENGTH_SHORT).show()
-                        }
-                    },
-                    modifier = Modifier.size(30.dp)
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.ContentCopy,
-                        contentDescription = "Salin Layar",
-                        tint = DevPrimary,
-                        modifier = Modifier.size(16.dp)
-                    )
-                }
-
-                // Ekstrak dan Buka Tautan Terminal (URL Scanner)
-                IconButton(
-                    onClick = {
-                        val urls = activeSession.buffer.extractAllUrls()
-                        when {
-                            urls.isEmpty() -> {
-                                Toast.makeText(context, "Tidak ada tautan (URL) di layar", Toast.LENGTH_SHORT).show()
-                            }
-                            urls.size == 1 -> {
-                                activeUrlPrompt = urls.first()
-                            }
-                            else -> {
-                                urlListPrompt = urls
-                            }
-                        }
-                    },
-                    modifier = Modifier.size(30.dp)
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.Link,
-                        contentDescription = "Pilih Tautan",
-                        tint = DevPrimary,
-                        modifier = Modifier.size(16.dp)
-                    )
-                }
-
-                // Mode Seleksi Teks (Termux-style Freeze Copy)
-                IconButton(
-                    onClick = {
-                        isSelectModeActive = !isSelectModeActive
-                        if (isSelectModeActive) {
-                            Toast.makeText(context, "Mode Seleksi aktif: geser teks bebas", Toast.LENGTH_SHORT).show()
-                        }
-                    },
-                    modifier = Modifier.size(30.dp)
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.SelectAll,
-                        contentDescription = "Mode Seleksi Teks",
-                        tint = if (isSelectModeActive) DevSecondary else DevPrimary,
-                        modifier = Modifier.size(16.dp)
-                    )
-                }
-
-                // Antigravity CLI Agent Hub Dialog
+                // 3. Antigravity CLI Agent Hub Dialog
                 IconButton(
                     onClick = {
                         loadAgentInfo()
@@ -641,48 +575,189 @@ fun TerminalScreen(
                         imageVector = Icons.Default.SmartToy,
                         contentDescription = "Antigravity Agent Hub",
                         tint = if (activeSession.isAgentRunning) Color(0xFF00E676) else DevPrimary,
-                        modifier = Modifier.size(16.dp)
+                        modifier = Modifier.size(17.dp)
                     )
                 }
 
-                // Paste Clipboard directly into active PTY session
-                IconButton(
-                    onClick = {
-                        val clip = clipboardManager.getText()?.text
-                        val curSess = TerminalSessionManager.getActiveSession()
-                        if (!clip.isNullOrEmpty()) {
-                            if (clip.length > 2000 || clip.count { it == '\n' } > 50) {
-                                pendingLargePaste = clip
-                            } else {
-                                curSess.pasteText(clip)
+                // 4. Menu Overflow 3-Titik (Menampung fitur sekunder tanpa menumpuk baris)
+                Box {
+                    IconButton(
+                        onClick = { showOverflowMenu = true },
+                        modifier = Modifier.size(30.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.MoreVert,
+                            contentDescription = "Menu Lainnya",
+                            tint = if (orphanProcesses.isNotEmpty()) Color(0xFFFF9800) else Color.White,
+                            modifier = Modifier.size(18.dp)
+                        )
+                    }
+
+                    DropdownMenu(
+                        expanded = showOverflowMenu,
+                        onDismissRequest = { showOverflowMenu = false },
+                        modifier = Modifier
+                            .background(Color(0xFF1E222D))
+                            .border(1.dp, Color(0xFF333842), RoundedCornerShape(8.dp))
+                    ) {
+                        DropdownMenuItem(
+                            text = {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Icon(
+                                        imageVector = Icons.Default.Layers,
+                                        contentDescription = null,
+                                        tint = if (orphanProcesses.isNotEmpty()) Color(0xFFFF9800) else DevPrimary,
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(10.dp))
+                                    Text(
+                                        text = if (orphanProcesses.isNotEmpty()) "Kelola Sesi (${orphanProcesses.size} Orphan)" else "Kelola Sesi",
+                                        color = if (orphanProcesses.isNotEmpty()) Color(0xFFFF9800) else Color.White,
+                                        fontSize = 13.sp
+                                    )
+                                }
+                            },
+                            onClick = {
+                                showOverflowMenu = false
+                                showSessionManagerDialog = true
                             }
-                        } else {
-                            Toast.makeText(context, "Clipboard kosong", Toast.LENGTH_SHORT).show()
-                        }
-                    },
-                    modifier = Modifier.size(30.dp)
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.ContentPaste,
-                        contentDescription = "Tempel",
-                        tint = DevPrimary,
-                        modifier = Modifier.size(16.dp)
-                    )
-                }
+                        )
 
-                // Reset / Clear Screen (Ctrl+L)
-                IconButton(
-                    onClick = {
-                        TerminalSessionManager.getActiveSession().sendBytes(byteArrayOf(12)) // Send Ctrl+L
-                    },
-                    modifier = Modifier.size(30.dp)
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.Refresh,
-                        contentDescription = "Refresh Layar",
-                        tint = TerminalText,
-                        modifier = Modifier.size(16.dp)
-                    )
+                        DropdownMenuItem(
+                            text = {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Icon(
+                                        imageVector = Icons.Default.Link,
+                                        contentDescription = null,
+                                        tint = DevPrimary,
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(10.dp))
+                                    Text("Pindai Tautan (URL)", color = Color.White, fontSize = 13.sp)
+                                }
+                            },
+                            onClick = {
+                                showOverflowMenu = false
+                                val urls = activeSession.buffer.extractAllUrls()
+                                when {
+                                    urls.isEmpty() -> Toast.makeText(context, "Tidak ada tautan (URL) di layar", Toast.LENGTH_SHORT).show()
+                                    urls.size == 1 -> activeUrlPrompt = urls.first()
+                                    else -> urlListPrompt = urls
+                                }
+                            }
+                        )
+
+                        DropdownMenuItem(
+                            text = {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Icon(
+                                        imageVector = Icons.Default.ContentCopy,
+                                        contentDescription = null,
+                                        tint = DevPrimary,
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(10.dp))
+                                    Text("Salin Layar Penuh", color = Color.White, fontSize = 13.sp)
+                                }
+                            },
+                            onClick = {
+                                showOverflowMenu = false
+                                val text = activeSession.buffer.getTranscriptText()
+                                if (text.isNotEmpty()) {
+                                    clipboardManager.setText(AnnotatedString(text))
+                                    Toast.makeText(context, "Layar terminal disalin ke clipboard", Toast.LENGTH_SHORT).show()
+                                } else {
+                                    Toast.makeText(context, "Tidak ada teks untuk disalin", Toast.LENGTH_SHORT).show()
+                                }
+                            }
+                        )
+
+                        DropdownMenuItem(
+                            text = {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Icon(
+                                        imageVector = Icons.Default.ContentPaste,
+                                        contentDescription = null,
+                                        tint = DevPrimary,
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(10.dp))
+                                    Text("Tempel (Paste)", color = Color.White, fontSize = 13.sp)
+                                }
+                            },
+                            onClick = {
+                                showOverflowMenu = false
+                                val clip = clipboardManager.getText()?.text
+                                val curSess = TerminalSessionManager.getActiveSession()
+                                if (!clip.isNullOrEmpty()) {
+                                    if (clip.length > 2000 || clip.count { it == '\n' } > 50) {
+                                        pendingLargePaste = clip
+                                    } else {
+                                        curSess.pasteText(clip)
+                                    }
+                                } else {
+                                    Toast.makeText(context, "Clipboard kosong", Toast.LENGTH_SHORT).show()
+                                }
+                            }
+                        )
+
+                        DropdownMenuItem(
+                            text = {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Icon(
+                                        imageVector = Icons.Default.ZoomIn,
+                                        contentDescription = null,
+                                        tint = DevPrimary,
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(10.dp))
+                                    Text("Perbesar Font (A+)", color = Color.White, fontSize = 13.sp)
+                                }
+                            },
+                            onClick = {
+                                showOverflowMenu = false
+                                updateFontSize(terminalFontSize + 0.5f)
+                            }
+                        )
+
+                        DropdownMenuItem(
+                            text = {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Icon(
+                                        imageVector = Icons.Default.ZoomOut,
+                                        contentDescription = null,
+                                        tint = DevPrimary,
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(10.dp))
+                                    Text("Perkecil Font (A-)", color = Color.White, fontSize = 13.sp)
+                                }
+                            },
+                            onClick = {
+                                showOverflowMenu = false
+                                updateFontSize(terminalFontSize - 0.5f)
+                            }
+                        )
+
+                        DropdownMenuItem(
+                            text = {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Icon(
+                                        imageVector = Icons.Default.Refresh,
+                                        contentDescription = null,
+                                        tint = TerminalText,
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(10.dp))
+                                    Text("Bersihkan Layar (Ctrl+L)", color = Color.White, fontSize = 13.sp)
+                                }
+                            },
+                            onClick = {
+                                showOverflowMenu = false
+                                TerminalSessionManager.getActiveSession().sendBytes(byteArrayOf(12))
+                            }
+                        )
+                    }
                 }
             }
         }
@@ -1988,323 +2063,569 @@ fun TerminalCanvas(
         }
     }
 
-    Box(
-        modifier = modifier
-            .then(
-                if (!isAltBuffer) Modifier.verticalScroll(verticalScrollState, enabled = !isSelectingText)
-                else Modifier
-            )
-            .horizontalScroll(horizontalScrollState, enabled = !isSelectingText)
-            .padding(horizontal = 6.dp, vertical = 4.dp)
-            .pointerInput(session.buffer.isMouseTrackingEnabled, fontSizeSp, isAltBuffer, isShiftActive, isSelectModeActive) {
-                awaitEachGesture {
-                    val down = awaitFirstDown(requireUnconsumed = false)
-                    val longPressTimeout = if (isShiftActive || isSelectModeActive) 0L else viewConfiguration.longPressTimeoutMillis
-                    var isLongPress = false
+    Box(modifier = modifier.fillMaxSize()) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .then(
+                    if (!isAltBuffer) Modifier.verticalScroll(verticalScrollState, enabled = !isSelectingText && selectionStart == null)
+                    else Modifier
+                )
+                .horizontalScroll(horizontalScrollState, enabled = !isSelectingText && selectionStart == null)
+                .padding(horizontal = 6.dp, vertical = 4.dp)
+                .pointerInput(session.buffer.isMouseTrackingEnabled, fontSizeSp, isAltBuffer, isShiftActive, isSelectModeActive) {
+                    awaitEachGesture {
+                        val down = awaitFirstDown(requireUnconsumed = false)
+                        val longPressTimeout = if (isShiftActive || isSelectModeActive) 0L else viewConfiguration.longPressTimeoutMillis
+                        var isLongPress = false
 
-                    if (isSelectModeActive || isShiftActive) {
-                        isLongPress = true
-                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                        currentActionMode?.finish()
-                        currentActionMode = null
-                        if (charWidth > 0 && charHeight > 0) {
-                            val actualX = down.position.x + horizontalScrollState.value
-                            val actualY = if (!isAltBuffer) down.position.y + verticalScrollState.value else down.position.y
-                            val maxLine = (if (isAltBuffer) session.buffer.maxRows else session.buffer.getLineCount()) - 1
-                            val col = (actualX / charWidth).toInt().coerceIn(0, session.buffer.maxCols - 1)
-                            val line = (actualY / charHeight).toInt().coerceIn(0, maxLine.coerceAtLeast(0))
-                            isSelectingText = true
-                            val (wStart, wEnd) = findWordBounds(line, col)
-                            selectionStart = GridPoint(line, wStart)
-                            selectionEnd = GridPoint(line, wEnd)
-                        }
-                    } else {
-                        try {
-                            withTimeout(longPressTimeout) {
-                                val up = waitForUpOrCancellation()
-                                if (up != null) {
-                                    // Event TAP terdeteksi
-                                    if (currentActionMode != null || selectionStart != null) {
-                                        currentActionMode?.finish()
-                                        currentActionMode = null
-                                        selectionStart = null
-                                        selectionEnd = null
-                                        isSelectingText = false
-                                    } else {
-                                        onFocusRequest()
-                                        if (charWidth > 0 && charHeight > 0) {
-                                            val actualX = up.position.x + horizontalScrollState.value
-                                            val actualY = if (!isAltBuffer) up.position.y + verticalScrollState.value else up.position.y
-                                            val maxLine = (if (isAltBuffer) session.buffer.maxRows else session.buffer.getLineCount()) - 1
-                                            val col = (actualX / charWidth).toInt().coerceIn(0, session.buffer.maxCols - 1)
-                                            val line = (actualY / charHeight).toInt().coerceIn(0, maxLine.coerceAtLeast(0))
-                                            val historyCount = if (session.buffer.isAltBuffer) 0 else session.buffer.getScrollbackSnapshot().size
-                                            val activeRow = line - historyCount
-
-                                            val detectedUrl = session.buffer.getUrlAt(line, col)
-                                            if (detectedUrl != null) {
-                                                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                                                onTapUrl(detectedUrl)
-                                            } else if (session.buffer.isMouseTrackingEnabled) {
-                                                if (activeRow in 0 until session.buffer.maxRows) {
-                                                    session.sendMouseEvent(0, col, activeRow, true)
-                                                    session.sendMouseEvent(0, col, activeRow, false)
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        } catch (_: TimeoutCancellationException) {
-                            // Timeout terlampaui -> Pengguna menahan jari (LONG PRESS / SELECTION)
+                        if (isSelectModeActive || isShiftActive) {
                             isLongPress = true
                             haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                            onFocusRequest()
                             currentActionMode?.finish()
                             currentActionMode = null
-
                             if (charWidth > 0 && charHeight > 0) {
                                 val actualX = down.position.x + horizontalScrollState.value
                                 val actualY = if (!isAltBuffer) down.position.y + verticalScrollState.value else down.position.y
                                 val maxLine = (if (isAltBuffer) session.buffer.maxRows else session.buffer.getLineCount()) - 1
                                 val col = (actualX / charWidth).toInt().coerceIn(0, session.buffer.maxCols - 1)
                                 val line = (actualY / charHeight).toInt().coerceIn(0, maxLine.coerceAtLeast(0))
-
-                                // Jika menekan pada atau dekat URL, langsung buka prompt tautan
-                                val detectedUrl = session.buffer.getUrlAt(line, col)
-                                if (detectedUrl != null) {
-                                    onTapUrl(detectedUrl)
-                                    isLongPress = false
-                                } else {
-                                    isSelectingText = true
-                                    val (wStart, wEnd) = findWordBounds(line, col)
-                                    selectionStart = GridPoint(line, wStart)
-                                    selectionEnd = GridPoint(line, wEnd)
-                                }
+                                isSelectingText = true
+                                val (wStart, wEnd) = findWordBounds(line, col)
+                                selectionStart = GridPoint(line, wStart)
+                                selectionEnd = GridPoint(line, wEnd)
                             }
-                        }
-                    }
+                        } else {
+                            try {
+                                withTimeout(longPressTimeout) {
+                                    val up = waitForUpOrCancellation()
+                                    if (up != null) {
+                                        // Event TAP terdeteksi
+                                        if (currentActionMode != null || selectionStart != null) {
+                                            currentActionMode?.finish()
+                                            currentActionMode = null
+                                            selectionStart = null
+                                            selectionEnd = null
+                                            isSelectingText = false
+                                        } else {
+                                            onFocusRequest()
+                                            if (charWidth > 0 && charHeight > 0) {
+                                                val actualX = up.position.x + horizontalScrollState.value
+                                                val actualY = if (!isAltBuffer) up.position.y + verticalScrollState.value else up.position.y
+                                                val maxLine = (if (isAltBuffer) session.buffer.maxRows else session.buffer.getLineCount()) - 1
+                                                val col = (actualX / charWidth).toInt().coerceIn(0, session.buffer.maxCols - 1)
+                                                val line = (actualY / charHeight).toInt().coerceIn(0, maxLine.coerceAtLeast(0))
+                                                val historyCount = if (session.buffer.isAltBuffer) 0 else session.buffer.getScrollbackSnapshot().size
+                                                val activeRow = line - historyCount
 
-                    if (isLongPress && isSelectingText) {
-                        // Loop drag untuk memperluas area seleksi secara bebas ke atas, bawah, kiri, kanan
-                        do {
-                            val event = awaitPointerEvent()
-                            val change = event.changes.firstOrNull() ?: break
-                            if (change.pressed) {
-                                change.consume()
+                                                val detectedUrl = session.buffer.getUrlAt(line, col)
+                                                if (detectedUrl != null) {
+                                                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                                    onTapUrl(detectedUrl)
+                                                } else if (!isSelectModeActive && selectionStart == null && session.buffer.isMouseTrackingEnabled) {
+                                                    if (activeRow in 0 until session.buffer.maxRows) {
+                                                        session.sendMouseEvent(0, col, activeRow, true)
+                                                        session.sendMouseEvent(0, col, activeRow, false)
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            } catch (_: TimeoutCancellationException) {
+                                // Timeout terlampaui -> Pengguna menahan jari (LONG PRESS / SELECTION)
+                                isLongPress = true
+                                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                onFocusRequest()
+                                currentActionMode?.finish()
+                                currentActionMode = null
+
                                 if (charWidth > 0 && charHeight > 0) {
-                                    val actualX = change.position.x + horizontalScrollState.value
-                                    val actualY = if (!isAltBuffer) change.position.y + verticalScrollState.value else change.position.y
+                                    val actualX = down.position.x + horizontalScrollState.value
+                                    val actualY = if (!isAltBuffer) down.position.y + verticalScrollState.value else down.position.y
                                     val maxLine = (if (isAltBuffer) session.buffer.maxRows else session.buffer.getLineCount()) - 1
                                     val col = (actualX / charWidth).toInt().coerceIn(0, session.buffer.maxCols - 1)
                                     val line = (actualY / charHeight).toInt().coerceIn(0, maxLine.coerceAtLeast(0))
-                                    selectionEnd = GridPoint(line, col)
-                                }
-                            } else {
-                                break
-                            }
-                        } while (event.changes.any { it.pressed })
 
-                        isSelectingText = false
-                        if (selectionStart != null && selectionEnd != null) {
-                            currentActionMode = view.startActionMode(actionModeCallback, ActionMode.TYPE_FLOATING)
+                                    // Jika menekan pada atau dekat URL, langsung buka prompt tautan
+                                    val detectedUrl = session.buffer.getUrlAt(line, col)
+                                    if (detectedUrl != null) {
+                                        onTapUrl(detectedUrl)
+                                        isLongPress = false
+                                    } else {
+                                        isSelectingText = true
+                                        val (wStart, wEnd) = findWordBounds(line, col)
+                                        selectionStart = GridPoint(line, wStart)
+                                        selectionEnd = GridPoint(line, wEnd)
+                                    }
+                                }
+                            }
+                        }
+
+                        if (isLongPress && isSelectingText) {
+                            // Loop drag untuk memperluas area seleksi secara bebas ke atas, bawah, kiri, kanan
+                            do {
+                                val event = awaitPointerEvent()
+                                val change = event.changes.firstOrNull() ?: break
+                                if (change.pressed) {
+                                    change.consume()
+                                    if (charWidth > 0 && charHeight > 0) {
+                                        val actualX = change.position.x + horizontalScrollState.value
+                                        val actualY = if (!isAltBuffer) change.position.y + verticalScrollState.value else change.position.y
+                                        val maxLine = (if (isAltBuffer) session.buffer.maxRows else session.buffer.getLineCount()) - 1
+                                        val col = (actualX / charWidth).toInt().coerceIn(0, session.buffer.maxCols - 1)
+                                        val line = (actualY / charHeight).toInt().coerceIn(0, maxLine.coerceAtLeast(0))
+                                        selectionEnd = GridPoint(line, col)
+                                    }
+                                } else {
+                                    break
+                                }
+                            } while (event.changes.any { it.pressed })
+
+                            isSelectingText = false
+                            if (selectionStart != null && selectionEnd != null) {
+                                currentActionMode = view.startActionMode(actionModeCallback, ActionMode.TYPE_FLOATING)
+                            }
                         }
                     }
                 }
-            }
-    ) {
-        Canvas(
-            modifier = Modifier.size(width = totalWidthDp, height = totalHeightDp)
         ) {
-            val v = session.buffer.version.intValue // Daftarkan state di draw phase agar realtime redraw
-            val nativeCanvas = drawContext.canvas.nativeCanvas
-            val maxCols = session.buffer.maxCols
-            val cursorRow = session.buffer.cursorRow
-            val cursorCol = session.buffer.cursorCol
-            val isCursorVisible = session.buffer.isCursorVisible
-            val historyCount = if (session.buffer.isAltBuffer) 0 else session.buffer.getScrollbackSnapshot().size
+            Canvas(
+                modifier = Modifier.size(width = totalWidthDp, height = totalHeightDp)
+            ) {
+                val v = session.buffer.version.intValue // Daftarkan state di draw phase agar realtime redraw
+                val nativeCanvas = drawContext.canvas.nativeCanvas
+                val maxCols = session.buffer.maxCols
+                val cursorRow = session.buffer.cursorRow
+                val cursorCol = session.buffer.cursorCol
+                val isCursorVisible = session.buffer.isCursorVisible
+                val historyCount = if (session.buffer.isAltBuffer) 0 else session.buffer.getScrollbackSnapshot().size
 
+                val selStart = selectionStart
+                val selEnd = selectionEnd
+                val hasSelection = selStart != null && selEnd != null
+                val selMin = if (hasSelection) minOf(selStart!!, selEnd!!) else null
+                val selMax = if (hasSelection) maxOf(selStart!!, selEnd!!) else null
+
+                // Viewport culling: Hanya render baris yang masuk dalam viewport layar
+                val scrollY = if (isAltBuffer) 0f else verticalScrollState.value.toFloat()
+                val viewportHeight = if (isAltBuffer || verticalScrollState.viewportSize == 0) {
+                    totalHeightPx.toFloat()
+                } else {
+                    verticalScrollState.viewportSize.toFloat()
+                }
+
+                val firstVisibleLine = if (charHeight > 0) {
+                    ((scrollY - charHeight) / charHeight).toInt().coerceIn(0, lineCount - 1)
+                } else 0
+                val lastVisibleLine = if (charHeight > 0) {
+                    ((scrollY + viewportHeight + charHeight) / charHeight).toInt().coerceIn(0, lineCount - 1)
+                } else lineCount - 1
+
+                val textBatch = StringBuilder()
+
+                for (lineIdx in firstVisibleLine..lastVisibleLine) {
+                    val line = session.buffer.getLineAt(lineIdx) ?: continue
+                    val yTop = lineIdx * charHeight
+                    val yText = yTop + baselineOffset
+
+                    // 1. Gambar latar belakang sel (Batched runs dengan warna sama)
+                    var bgCol = 0
+                    while (bgCol < maxCols) {
+                        val startCol = bgCol
+                        val cell = line[bgCol]
+                        val isCursor = (isCursorVisible && (lineIdx - historyCount) == cursorRow && bgCol == cursorCol)
+                        val pt = GridPoint(lineIdx, bgCol)
+                        val isSelected = hasSelection && selMin != null && selMax != null && pt >= selMin && pt <= selMax
+                        val runBg = when {
+                            isSelected -> Color(0x6638BDF8)
+                            isCursor -> Color(0xFF61AFEF)
+                            else -> cell.bgColor
+                        }
+
+                        val step = if (cell.isWide) 2 else 1
+                        var runLen = step
+                        bgCol += step
+
+                        while (bgCol < maxCols) {
+                            val nextCell = line[bgCol]
+                            val nextIsCursor = (isCursorVisible && (lineIdx - historyCount) == cursorRow && bgCol == cursorCol)
+                            val nextPt = GridPoint(lineIdx, bgCol)
+                            val nextIsSelected = hasSelection && selMin != null && selMax != null && nextPt >= selMin && nextPt <= selMax
+                            val nextBg = when {
+                                nextIsSelected -> Color(0x6638BDF8)
+                                nextIsCursor -> Color(0xFF61AFEF)
+                                else -> nextCell.bgColor
+                            }
+                            if (nextBg == runBg) {
+                                val nextStep = if (nextCell.isWide) 2 else 1
+                                runLen += nextStep
+                                bgCol += nextStep
+                            } else {
+                                break
+                            }
+                        }
+
+                        if (runBg != Color.Transparent) {
+                            drawRect(
+                                color = runBg,
+                                topLeft = Offset(startCol * charWidth, yTop),
+                                size = Size(runLen * charWidth, charHeight)
+                            )
+                        }
+                    }
+
+                    // 2. Gambar karakter teks (Batched text runs per style untuk 60 FPS di CPU low-end)
+                    var col = 0
+                    while (col < maxCols) {
+                        val cell = line[col]
+                        if (cell.isWideContinuation) {
+                            col++
+                            continue
+                        }
+
+                        val pt = GridPoint(lineIdx, col)
+                        val isSelected = hasSelection && selMin != null && selMax != null && pt >= selMin && pt <= selMax
+                        val isCursor = (isCursorVisible && (lineIdx - historyCount) == cursorRow && col == cursorCol)
+                        val fg = when {
+                            isSelected -> Color.White
+                            isCursor -> Color.Black
+                            else -> cell.fgColor
+                        }
+                        val isBold = cell.isBold || isSelected
+                        val isUnderline = cell.isUnderline || cell.hyperlinkUrl != null
+
+                        // Karakter dengan extra combining mark
+                        if (cell.extraChar != null) {
+                            textPaint.color = fg.toArgb()
+                            textPaint.isFakeBoldText = isBold
+                            textPaint.isUnderlineText = isUnderline
+                            nativeCanvas.drawText("${cell.char}${cell.extraChar}", col * charWidth, yText, textPaint)
+                            col++
+                            continue
+                        }
+
+                        // Karakter wide (CJK / wide symbol)
+                        if (cell.isWide) {
+                            textPaint.color = fg.toArgb()
+                            textPaint.isFakeBoldText = isBold
+                            textPaint.isUnderlineText = isUnderline
+                            nativeCanvas.drawText(cell.char.toString(), col * charWidth, yText, textPaint)
+                            col++
+                            continue
+                        }
+
+                        // Kumpulkan rentetan karakter normal dengan style dan warna yang persis sama
+                        val startCol = col
+                        textBatch.setLength(0)
+
+                        while (col < maxCols) {
+                            val curCell = line[col]
+                            if (curCell.isWideContinuation || curCell.isWide || curCell.extraChar != null) {
+                                break
+                            }
+                            val curPt = GridPoint(lineIdx, col)
+                            val curIsSelected = hasSelection && selMin != null && selMax != null && curPt >= selMin && curPt <= selMax
+                            val curIsCursor = (isCursorVisible && (lineIdx - historyCount) == cursorRow && col == cursorCol)
+                            val curFg = when {
+                                curIsSelected -> Color.White
+                                curIsCursor -> Color.Black
+                                else -> curCell.fgColor
+                            }
+                            val curBold = curCell.isBold || curIsSelected
+                            val curUnderline = curCell.isUnderline || curCell.hyperlinkUrl != null
+
+                            if (curFg == fg && curBold == isBold && curUnderline == isUnderline) {
+                                textBatch.append(curCell.char)
+                                col++
+                            } else {
+                                break
+                            }
+                        }
+
+                        if (textBatch.isNotEmpty()) {
+                            val runStr = textBatch.toString()
+                            if (runStr.isNotBlank()) {
+                                textPaint.color = fg.toArgb()
+                                textPaint.isFakeBoldText = isBold
+                                textPaint.isUnderlineText = isUnderline
+                                nativeCanvas.drawText(runStr, startCol * charWidth, yText, textPaint)
+                            }
+                        }
+                    }
+
+                    // Kursor di luar batas kolom karakter
+                    if (isCursorVisible && (lineIdx - historyCount) == cursorRow && cursorCol >= maxCols) {
+                        drawRect(
+                            color = Color(0xFF61AFEF),
+                            topLeft = Offset((maxCols - 1) * charWidth, yTop),
+                            size = Size(charWidth, charHeight)
+                        )
+                    }
+                }
+            }
+
+            // Draggable Interactive Selection Handles (Overlay Handle Composable Pattern)
             val selStart = selectionStart
             val selEnd = selectionEnd
             val hasSelection = selStart != null && selEnd != null
             val selMin = if (hasSelection) minOf(selStart!!, selEnd!!) else null
             val selMax = if (hasSelection) maxOf(selStart!!, selEnd!!) else null
 
-            // Viewport culling: Hanya render baris yang masuk dalam viewport layar
-            val scrollY = if (isAltBuffer) 0f else verticalScrollState.value.toFloat()
-            val viewportHeight = if (isAltBuffer || verticalScrollState.viewportSize == 0) {
-                totalHeightPx.toFloat()
-            } else {
-                verticalScrollState.viewportSize.toFloat()
-            }
-
-            val firstVisibleLine = if (charHeight > 0) {
-                ((scrollY - charHeight) / charHeight).toInt().coerceIn(0, lineCount - 1)
-            } else 0
-            val lastVisibleLine = if (charHeight > 0) {
-                ((scrollY + viewportHeight + charHeight) / charHeight).toInt().coerceIn(0, lineCount - 1)
-            } else lineCount - 1
-
-            val textBatch = StringBuilder()
-
-            for (lineIdx in firstVisibleLine..lastVisibleLine) {
-                val line = session.buffer.getLineAt(lineIdx) ?: continue
-                val yTop = lineIdx * charHeight
-                val yText = yTop + baselineOffset
-
-                // 1. Gambar latar belakang sel (Batched runs dengan warna sama)
-                var bgCol = 0
-                while (bgCol < maxCols) {
-                    val startCol = bgCol
-                    val cell = line[bgCol]
-                    val isCursor = (isCursorVisible && (lineIdx - historyCount) == cursorRow && bgCol == cursorCol)
-                    val pt = GridPoint(lineIdx, bgCol)
-                    val isSelected = hasSelection && selMin != null && selMax != null && pt >= selMin && pt <= selMax
-                    val runBg = when {
-                        isSelected -> Color(0x6638BDF8)
-                        isCursor -> Color(0xFF61AFEF)
-                        else -> cell.bgColor
-                    }
-
-                    val step = if (cell.isWide) 2 else 1
-                    var runLen = step
-                    bgCol += step
-
-                    while (bgCol < maxCols) {
-                        val nextCell = line[bgCol]
-                        val nextIsCursor = (isCursorVisible && (lineIdx - historyCount) == cursorRow && bgCol == cursorCol)
-                        val nextPt = GridPoint(lineIdx, bgCol)
-                        val nextIsSelected = hasSelection && selMin != null && selMax != null && nextPt >= selMin && nextPt <= selMax
-                        val nextBg = when {
-                            nextIsSelected -> Color(0x6638BDF8)
-                            nextIsCursor -> Color(0xFF61AFEF)
-                            else -> nextCell.bgColor
-                        }
-                        if (nextBg == runBg) {
-                            val nextStep = if (nextCell.isWide) 2 else 1
-                            runLen += nextStep
-                            bgCol += nextStep
-                        } else {
-                            break
-                        }
-                    }
-
-                    if (runBg != Color.Transparent) {
-                        drawRect(
-                            color = runBg,
-                            topLeft = Offset(startCol * charWidth, yTop),
-                            size = Size(runLen * charWidth, charHeight)
-                        )
-                    }
-                }
-
-                // 2. Gambar karakter teks (Batched text runs per style untuk 60 FPS di CPU low-end)
-                var col = 0
-                while (col < maxCols) {
-                    val cell = line[col]
-                    if (cell.isWideContinuation) {
-                        col++
-                        continue
-                    }
-
-                    val pt = GridPoint(lineIdx, col)
-                    val isSelected = hasSelection && selMin != null && selMax != null && pt >= selMin && pt <= selMax
-                    val isCursor = (isCursorVisible && (lineIdx - historyCount) == cursorRow && col == cursorCol)
-                    val fg = when {
-                        isSelected -> Color.White
-                        isCursor -> Color.Black
-                        else -> cell.fgColor
-                    }
-                    val isBold = cell.isBold || isSelected
-                    val isUnderline = cell.isUnderline || cell.hyperlinkUrl != null
-
-                    // Karakter dengan extra combining mark
-                    if (cell.extraChar != null) {
-                        textPaint.color = fg.toArgb()
-                        textPaint.isFakeBoldText = isBold
-                        textPaint.isUnderlineText = isUnderline
-                        nativeCanvas.drawText("${cell.char}${cell.extraChar}", col * charWidth, yText, textPaint)
-                        col++
-                        continue
-                    }
-
-                    // Karakter wide (CJK / wide symbol)
-                    if (cell.isWide) {
-                        textPaint.color = fg.toArgb()
-                        textPaint.isFakeBoldText = isBold
-                        textPaint.isUnderlineText = isUnderline
-                        nativeCanvas.drawText(cell.char.toString(), col * charWidth, yText, textPaint)
-                        col++
-                        continue
-                    }
-
-                    // Kumpulkan rentetan karakter normal dengan style dan warna yang persis sama
-                    val startCol = col
-                    textBatch.setLength(0)
-
-                    while (col < maxCols) {
-                        val curCell = line[col]
-                        if (curCell.isWideContinuation || curCell.isWide || curCell.extraChar != null) {
-                            break
-                        }
-                        val curPt = GridPoint(lineIdx, col)
-                        val curIsSelected = hasSelection && selMin != null && selMax != null && curPt >= selMin && curPt <= selMax
-                        val curIsCursor = (isCursorVisible && (lineIdx - historyCount) == cursorRow && col == cursorCol)
-                        val curFg = when {
-                            curIsSelected -> Color.White
-                            curIsCursor -> Color.Black
-                            else -> curCell.fgColor
-                        }
-                        val curBold = curCell.isBold || curIsSelected
-                        val curUnderline = curCell.isUnderline || curCell.hyperlinkUrl != null
-
-                        if (curFg == fg && curBold == isBold && curUnderline == isUnderline) {
-                            textBatch.append(curCell.char)
-                            col++
-                        } else {
-                            break
-                        }
-                    }
-
-                    if (textBatch.isNotEmpty()) {
-                        val runStr = textBatch.toString()
-                        if (runStr.isNotBlank()) {
-                            textPaint.color = fg.toArgb()
-                            textPaint.isFakeBoldText = isBold
-                            textPaint.isUnderlineText = isUnderline
-                            nativeCanvas.drawText(runStr, startCol * charWidth, yText, textPaint)
-                        }
-                    }
-                }
-
-                // Kursor di luar batas kolom karakter
-                if (isCursorVisible && (lineIdx - historyCount) == cursorRow && cursorCol >= maxCols) {
-                    drawRect(
-                        color = Color(0xFF61AFEF),
-                        topLeft = Offset((maxCols - 1) * charWidth, yTop),
-                        size = Size(charWidth, charHeight)
-                    )
-                }
-            }
-
-            // Visual Draggable Handles untuk Penanda Seleksi Teks (Termux Selection Pins)
             if (hasSelection && selMin != null && selMax != null) {
-                val startX = selMin.col * charWidth
-                val startY = selMin.line * charHeight + charHeight
-                drawCircle(
-                    color = Color(0xFF61AFEF),
-                    radius = 4.dp.toPx(),
-                    center = Offset(startX, startY)
+                // Pin Mulai (Start Handle)
+                SelectionHandle(
+                    isStart = true,
+                    xPx = selMin.col * charWidth,
+                    yPx = (selMin.line + 1) * charHeight,
+                    charWidth = charWidth,
+                    charHeight = charHeight,
+                    maxCols = session.buffer.maxCols,
+                    maxRows = lineCount,
+                    onPositionChange = { newPoint ->
+                        if (selectionStart != null && selectionEnd != null) {
+                            if (selectionStart!! <= selectionEnd!!) {
+                                selectionStart = newPoint
+                            } else {
+                                selectionEnd = newPoint
+                            }
+                        } else {
+                            selectionStart = newPoint
+                        }
+                    }
                 )
 
-                val endX = (selMax.col + 1) * charWidth
-                val endY = selMax.line * charHeight + charHeight
-                drawCircle(
-                    color = Color(0xFF61AFEF),
-                    radius = 4.dp.toPx(),
-                    center = Offset(endX, endY)
+                // Pin Selesai (End Handle)
+                SelectionHandle(
+                    isStart = false,
+                    xPx = (selMax.col + 1) * charWidth,
+                    yPx = (selMax.line + 1) * charHeight,
+                    charWidth = charWidth,
+                    charHeight = charHeight,
+                    maxCols = session.buffer.maxCols,
+                    maxRows = lineCount,
+                    onPositionChange = { newPoint ->
+                        if (selectionStart != null && selectionEnd != null) {
+                            if (selectionStart!! <= selectionEnd!!) {
+                                selectionEnd = newPoint
+                            } else {
+                                selectionStart = newPoint
+                            }
+                        } else {
+                            selectionEnd = newPoint
+                        }
+                    }
                 )
             }
+        }
+
+        // Floating Action Bar overlay yang selalu terlihat di atas viewport terminal
+        AnimatedVisibility(
+            visible = selectionStart != null && selectionEnd != null,
+            enter = fadeIn() + expandVertically(),
+            exit = fadeOut() + shrinkVertically(),
+            modifier = Modifier
+                .align(Alignment.TopCenter)
+                .padding(top = 8.dp)
+        ) {
+            Surface(
+                color = Color(0xFF1E222D).copy(alpha = 0.95f),
+                border = BorderStroke(1.dp, DevPrimary),
+                shape = RoundedCornerShape(20.dp),
+                shadowElevation = 8.dp
+            ) {
+                Row(
+                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    TextButton(
+                        onClick = {
+                            val start = selectionStart
+                            val end = selectionEnd
+                            if (start != null && end != null) {
+                                val text = getSelectedText(start, end)
+                                if (text.isNotEmpty()) {
+                                    clipboardManager.setText(AnnotatedString(text))
+                                    Toast.makeText(context, "Teks disalin (${text.length} karakter)", Toast.LENGTH_SHORT).show()
+                                }
+                            }
+                            selectionStart = null
+                            selectionEnd = null
+                            currentActionMode?.finish()
+                            currentActionMode = null
+                        },
+                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp)
+                    ) {
+                        Icon(Icons.Default.ContentCopy, contentDescription = null, tint = DevPrimary, modifier = Modifier.size(16.dp))
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text("Salin", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                    }
+
+                    TextButton(
+                        onClick = {
+                            val lineIdx = selectionStart?.line ?: 0
+                            val line = session.buffer.getLineAt(lineIdx)
+                            val lineText = line?.filter { !it.isWideContinuation }?.map { it.char }?.joinToString("")?.trimEnd() ?: ""
+                            if (lineText.isNotEmpty()) {
+                                clipboardManager.setText(AnnotatedString(lineText))
+                                Toast.makeText(context, "Baris disalin", Toast.LENGTH_SHORT).show()
+                            }
+                            selectionStart = null
+                            selectionEnd = null
+                            currentActionMode?.finish()
+                            currentActionMode = null
+                        },
+                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp)
+                    ) {
+                        Text("Baris", color = Color.White, fontSize = 12.sp)
+                    }
+
+                    TextButton(
+                        onClick = {
+                            val totalLines = if (isAltBuffer) session.buffer.maxRows else session.buffer.getLineCount()
+                            val s = GridPoint(0, 0)
+                            val e = GridPoint((totalLines - 1).coerceAtLeast(0), session.buffer.maxCols - 1)
+                            selectionStart = s
+                            selectionEnd = e
+                            val text = getSelectedText(s, e)
+                            if (text.isNotEmpty()) {
+                                clipboardManager.setText(AnnotatedString(text))
+                                Toast.makeText(context, "Semua teks disalin (${text.length} karakter)", Toast.LENGTH_SHORT).show()
+                            }
+                        },
+                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp)
+                    ) {
+                        Text("Semua", color = Color.White, fontSize = 12.sp)
+                    }
+
+                    IconButton(
+                        onClick = {
+                            val start = selectionStart
+                            val end = selectionEnd
+                            if (start != null && end != null) {
+                                val text = getSelectedText(start, end)
+                                if (text.isNotEmpty()) {
+                                    try {
+                                        val sendIntent = Intent().apply {
+                                            action = Intent.ACTION_SEND
+                                            putExtra(Intent.EXTRA_TEXT, text)
+                                            type = "text/plain"
+                                        }
+                                        context.startActivity(Intent.createChooser(sendIntent, "Bagikan Teks Terminal"))
+                                    } catch (e: Exception) {
+                                        Toast.makeText(context, "Gagal membagikan: ${e.message}", Toast.LENGTH_SHORT).show()
+                                    }
+                                }
+                            }
+                            selectionStart = null
+                            selectionEnd = null
+                            currentActionMode?.finish()
+                            currentActionMode = null
+                        },
+                        modifier = Modifier.size(28.dp)
+                    ) {
+                        Icon(Icons.Default.Share, contentDescription = "Bagikan", tint = DevPrimary, modifier = Modifier.size(15.dp))
+                    }
+
+                    IconButton(
+                        onClick = {
+                            selectionStart = null
+                            selectionEnd = null
+                            currentActionMode?.finish()
+                            currentActionMode = null
+                        },
+                        modifier = Modifier.size(28.dp)
+                    ) {
+                        Icon(Icons.Default.Close, contentDescription = "Tutup", tint = Color.Gray, modifier = Modifier.size(16.dp))
+                    }
+                }
+            }
+        }
+    }
+}
+
+/**
+ * Interactive Selection Handle Composable (Overlay Handle Composable Pattern).
+ * Memiliki area sentuh 44dp dan mendeteksi drag terisolasi menggunakan detectDragGestures.
+ * Drag events dikonsumsi (change.consume()) sehingga tidak mengganggu kanvas, scroll parent,
+ * atau protokol mouse reporting Antigravity CLI.
+ */
+@Composable
+private fun SelectionHandle(
+    isStart: Boolean,
+    xPx: Float,
+    yPx: Float,
+    charWidth: Float,
+    charHeight: Float,
+    maxCols: Int,
+    maxRows: Int,
+    onPositionChange: (GridPoint) -> Unit
+) {
+    val density = LocalDensity.current
+    val handleTouchSizeDp = 44.dp
+    val handleTouchSizePx = with(density) { handleTouchSizeDp.toPx() }
+    val visualPinRadius = 6.dp
+
+    val offsetX = (xPx - handleTouchSizePx / 2f).coerceAtLeast(0f)
+    val offsetY = (yPx - 4f).coerceAtLeast(0f)
+
+    var dragAccumulatorX by remember { mutableFloatStateOf(xPx) }
+    var dragAccumulatorY by remember { mutableFloatStateOf(yPx) }
+
+    LaunchedEffect(xPx, yPx) {
+        dragAccumulatorX = xPx
+        dragAccumulatorY = yPx
+    }
+
+    Box(
+        modifier = Modifier
+            .offset { IntOffset(offsetX.toInt(), offsetY.toInt()) }
+            .size(handleTouchSizeDp)
+            .pointerInput(isStart) {
+                detectDragGestures(
+                    onDragStart = {
+                        dragAccumulatorX = xPx
+                        dragAccumulatorY = yPx
+                    },
+                    onDrag = { change, dragAmount ->
+                        change.consume()
+                        dragAccumulatorX = (dragAccumulatorX + dragAmount.x).coerceIn(0f, maxCols * charWidth)
+                        dragAccumulatorY = (dragAccumulatorY + dragAmount.y).coerceIn(0f, (maxRows * charHeight).coerceAtLeast(1f))
+
+                        val newCol = (dragAccumulatorX / charWidth).toInt().coerceIn(0, maxCols - 1)
+                        val newLine = (dragAccumulatorY / charHeight).toInt().coerceIn(0, (maxRows - 1).coerceAtLeast(0))
+
+                        onPositionChange(GridPoint(newLine, newCol))
+                    }
+                )
+            },
+        contentAlignment = Alignment.TopCenter
+    ) {
+        Canvas(modifier = Modifier.size(handleTouchSizeDp)) {
+            val cx = size.width / 2f
+            val cy = 12.dp.toPx()
+            val r = visualPinRadius.toPx()
+
+            // Glowing touch halo
+            drawCircle(
+                color = Color(0x4438BDF8),
+                radius = r + 4.dp.toPx(),
+                center = Offset(cx, cy)
+            )
+            // Pin head
+            drawCircle(
+                color = Color(0xFF38BDF8),
+                radius = r,
+                center = Offset(cx, cy)
+            )
+            // Pin pointer pointing to text anchor
+            val path = Path().apply {
+                moveTo(cx - 3.dp.toPx(), cy - 2.dp.toPx())
+                lineTo(cx, 0f)
+                lineTo(cx + 3.dp.toPx(), cy - 2.dp.toPx())
+                close()
+            }
+            drawPath(path, color = Color(0xFF38BDF8))
         }
     }
 }
