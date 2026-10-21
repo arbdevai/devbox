@@ -456,11 +456,14 @@ fun DashboardScreen(
                         onClick = {
                             scope.launch {
                                 isOperating = true
-                                actionMessage = "Menyalin direktori sistem dari /data/local/ubuntu-chroot ke ${ChrootManager.activeRootfs}... (15-20 detik)"
+                                actionMessage = "Menyalin direktori sistem dari /data/local/ubuntu-chroot ke ${ChrootManager.DEFAULT_ROOTFS}... (15-20 detik)"
                                 val res = ChrootManager.cloneExistingChroot(
-                                    sourceChroot = "/data/local/ubuntu-chroot",
-                                    targetRootfs = ChrootManager.activeRootfs
+                                    sourceChroot = ChrootManager.LEGACY_ROOTFS,
+                                    targetRootfs = ChrootManager.DEFAULT_ROOTFS
                                 )
+                                if (res.isSuccess) {
+                                    ChrootManager.setActiveRootfs(context, ChrootManager.DEFAULT_ROOTFS)
+                                }
                                 actionMessage = res.getOrNull() ?: res.exceptionOrNull()?.message
                                 refreshState()
                                 isOperating = false

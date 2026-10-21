@@ -85,12 +85,6 @@ object ChrootManager {
                 src_ok=0
             fi
 
-            # Auto-fallback jika rootfs target devbox-chroot kosong namun ubuntu-chroot ada
-            if [ "${'$'}status" != "EXISTS" ] && [ "${'$'}src_ok" = "1" ]; then
-                rf="$LEGACY_ROOTFS"
-                status="EXISTS"
-            fi
-
             if [ "${'$'}status" = "EXISTS" ]; then
                 grep -q " ${'$'}rf/proc " /proc/mounts 2>/dev/null && mnt=1 || mnt=0
 
@@ -136,16 +130,9 @@ object ChrootManager {
             val swapUsed = parts[5].toLongOrNull() ?: 0L
             val isCodeServer = parts[6] == "1"
             val isSsh = parts[7] == "1"
-            val detectedRf = if (parts.size >= 9 && parts[8].isNotBlank()) parts[8].trim() else rootfs
-
-            if (detectedRf != activeRootfs && statusText == "EXISTS") {
-                activeRootfs = detectedRf
-                appContext?.let { setActiveRootfs(it, detectedRf) }
-            }
-
             val isRootfsExists = statusText == "EXISTS"
             if (!isRootfsExists) {
-                AppLogger.w("ChrootManager", "Status rootfs di $detectedRf: $statusText")
+                AppLogger.w("ChrootManager", "Status rootfs di $rootfs: $statusText")
             }
 
             val resultState = ChrootState(

@@ -1904,7 +1904,7 @@ fun TerminalCanvas(
 
     fun findWordBounds(lineIdx: Int, col: Int): Pair<Int, Int> {
         val line = session.buffer.getLineAt(lineIdx) ?: return col to col
-        val maxC = session.buffer.maxCols
+        val maxC = minOf(session.buffer.maxCols, line.size)
         if (col !in 0 until maxC) return col to col
 
         val targetCell = line[col]
@@ -1936,8 +1936,10 @@ fun TerminalCanvas(
         val sb = StringBuilder()
         for (l in start.line..end.line) {
             val line = session.buffer.getLineAt(l) ?: continue
-            val colStart = if (l == start.line) start.col else 0
-            val colEnd = if (l == end.line) end.col else session.buffer.maxCols - 1
+            val maxC = minOf(session.buffer.maxCols, line.size)
+            if (maxC <= 0) continue
+            val colStart = if (l == start.line) start.col.coerceIn(0, maxC - 1) else 0
+            val colEnd = if (l == end.line) end.col.coerceIn(0, maxC - 1) else maxC - 1
             val lineText = StringBuilder()
             for (c in colStart..colEnd) {
                 val cell = line[c]
@@ -2202,12 +2204,14 @@ fun TerminalCanvas(
 
                 for (lineIdx in firstVisibleLine..lastVisibleLine) {
                     val line = session.buffer.getLineAt(lineIdx) ?: continue
+                    val lineCols = minOf(maxCols, line.size)
+                    if (lineCols <= 0) continue
                     val yTop = lineIdx * charHeight
                     val yText = yTop + baselineOffset
 
                     // 1. Gambar latar belakang sel (Batched runs dengan warna sama)
                     var bgCol = 0
-                    while (bgCol < maxCols) {
+                    while (bgCol < lineCols) {
                         val startCol = bgCol
                         val cell = line[bgCol]
                         val isCursor = (isCursorVisible && (lineIdx - historyCount) == cursorRow && bgCol == cursorCol)
@@ -2223,7 +2227,7 @@ fun TerminalCanvas(
                         var runLen = step
                         bgCol += step
 
-                        while (bgCol < maxCols) {
+                        while (bgCol < lineCols) {
                             val nextCell = line[bgCol]
                             val nextIsCursor = (isCursorVisible && (lineIdx - historyCount) == cursorRow && bgCol == cursorCol)
                             val nextPt = GridPoint(lineIdx, bgCol)
@@ -2253,7 +2257,7 @@ fun TerminalCanvas(
 
                     // 2. Gambar karakter teks (Batched text runs per style untuk 60 FPS di CPU low-end)
                     var col = 0
-                    while (col < maxCols) {
+                    while (col < lineCols) {
                         val cell = line[col]
                         if (cell.isWideContinuation) {
                             col++
@@ -2295,7 +2299,7 @@ fun TerminalCanvas(
                         val startCol = col
                         textBatch.setLength(0)
 
-                        while (col < maxCols) {
+                        while (col < lineCols) {
                             val curCell = line[col]
                             if (curCell.isWideContinuation || curCell.isWide || curCell.extraChar != null) {
                                 break
