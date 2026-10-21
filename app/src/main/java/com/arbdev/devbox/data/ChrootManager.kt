@@ -808,32 +808,54 @@ BRIDGE_EOF
             if ! grep -q "^sahal:" "${'$'}rf/etc/group" 2>/dev/null; then
                 echo "sahal:x:1000:" >> "${'$'}rf/etc/group" 2>/dev/null || true
             fi
+            if ! grep -q "^sudo:" "${'$'}rf/etc/group" 2>/dev/null; then
+                echo "sudo:x:27:coder,sahal" >> "${'$'}rf/etc/group" 2>/dev/null || true
+            else
+                sed -i '/^sudo:/ s/$/,coder,sahal/' "${'$'}rf/etc/group" 2>/dev/null || true
+            fi
 
-            # 3. Konfigurasi passwordless sudo & PAM su
+            # 3. Buka kunci password root dan user di shadow agar su & PAM tidak menolak autentikasi
+            if [ -f "${'$'}rf/etc/shadow" ]; then
+                sed -i 's/^root:[^:]*:/root::/' "${'$'}rf/etc/shadow" 2>/dev/null || true
+                sed -i 's/^coder:[^:]*:/coder::/' "${'$'}rf/etc/shadow" 2>/dev/null || true
+                sed -i 's/^sahal:[^:]*:/sahal::/' "${'$'}rf/etc/shadow" 2>/dev/null || true
+            fi
+
+            # 4. Konfigurasi PAM su & su-l (auth, account, session permit 100% tanpa password)
+            mkdir -p "${'$'}rf/etc/pam.d"
+            cat << 'PAM_SU_EOF' > "${'$'}rf/etc/pam.d/su"
+# PAM su configuration for DevBox (100% passwordless root switch)
+auth       sufficient pam_permit.so
+account    sufficient pam_permit.so
+session    sufficient pam_permit.so
+password   sufficient pam_permit.so
+PAM_SU_EOF
+            cp "${'$'}rf/etc/pam.d/su" "${'$'}rf/etc/pam.d/su-l" 2>/dev/null || true
+
+            # 5. Konfigurasi passwordless sudoers
             echo "coder ALL=(ALL) NOPASSWD:ALL" > "${'$'}rf/etc/sudoers.d/010_coder-nopasswd" 2>/dev/null || true
             echo "sahal ALL=(ALL) NOPASSWD:ALL" >> "${'$'}rf/etc/sudoers.d/010_coder-nopasswd" 2>/dev/null || true
             chmod 0440 "${'$'}rf/etc/sudoers.d/010_coder-nopasswd" 2>/dev/null || true
 
-            if [ -f "${'$'}rf/etc/pam.d/su" ]; then
-                if ! grep -q "pam_permit.so" "${'$'}rf/etc/pam.d/su" 2>/dev/null; then
-                    sed -i '1s/^/auth sufficient pam_permit.so\n/' "${'$'}rf/etc/pam.d/su" 2>/dev/null || true
-                fi
-            fi
-
-            # 4. Fallback wrapper sudo di /usr/local/bin/sudo jika paket sudo belum terpasang
+            # 6. Fallback wrapper sudo di /usr/local/bin/sudo (delegasi ke /usr/bin/sudo atau su root instan)
             cat << 'SUDO_EOF' > "${'$'}rf/usr/local/bin/sudo"
 #!/bin/bash
 if [ -x /usr/bin/sudo ]; then
     exec /usr/bin/sudo "${'$'}@"
 fi
+CUR_DIR="${'$'}(pwd)"
 if [ ${'$'}# -eq 0 ]; then
-    exec /bin/su - root
+    exec /bin/su root
 else
-    CUR_DIR="${'$'}(pwd)"
-    exec /bin/su - root -c "cd '${'$'}CUR_DIR' && $*"
+    exec /bin/su root -c "cd '${'$'}CUR_DIR' && $*"
 fi
 SUDO_EOF
             chmod 755 "${'$'}rf/usr/local/bin/sudo" 2>/dev/null || true
+
+            # 7. Pasang paket sudo resmi di background jika belum terinstal
+            if [ ! -x "${'$'}rf/usr/bin/sudo" ] && [ -x "${'$'}rf/usr/bin/apt-get" ]; then
+                ( chroot "${'$'}rf" /usr/bin/apt-get update -qq && chroot "${'$'}rf" /usr/bin/apt-get install -y -qq sudo ca-certificates ) >/dev/null 2>&1 &
+            fi
 
             # 5. Konfigurasi DNS & Host
             grep -qE '^127\.0\.0\.1[[:space:]]+localhost' "${'$'}rf/etc/hosts" 2>/dev/null || echo '127.0.0.1 localhost' >> "${'$'}rf/etc/hosts" 2>/dev/null || true
