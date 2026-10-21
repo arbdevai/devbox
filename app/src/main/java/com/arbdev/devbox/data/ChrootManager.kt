@@ -840,13 +840,13 @@ PAM_SU_EOF
             # 6. Wrapper sudo di /usr/local/bin/sudo (eksekusi langsung tanpa batas permission)
             cat << 'SUDO_EOF' > "${'$'}rf/usr/local/bin/sudo"
 #!/bin/bash
-if [ "$UID" -eq 0 ]; then
-    exec "$@"
+if [ "${'$'}UID" -eq 0 ]; then
+    exec "${'$'}@"
 fi
 if [ -x /usr/bin/sudo ]; then
-    exec /usr/bin/sudo "$@"
+    exec /usr/bin/sudo "${'$'}@"
 fi
-exec "$@"
+exec "${'$'}@"
 SUDO_EOF
             chmod 755 "${'$'}rf/usr/local/bin/sudo" 2>/dev/null || true
 
