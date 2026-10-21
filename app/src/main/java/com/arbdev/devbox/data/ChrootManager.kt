@@ -339,31 +339,100 @@ BRIDGE_EOF
      * Menghapus seluruh file dan sistem Linux (rootfs) untuk mengosongkan 2-5 GB memori HP.
      * Dilakukan sebelum mencopot pemasangan (uninstall) aplikasi DevBox.
      */
-    suspend fun uninstallRootfs(rootfs: String = activeRootfs): Result<String> = withContext(Dispatchers.IO) {
+    suspend fun uninstallRootfs(
+        rootfs: String = activeRootfs,
+        onLogLine: ((String) -> Unit)? = null
+    ): Result<String> = withContext(Dispatchers.IO) {
         val script = """
-            fuser -k -9 '$rootfs' 2>/dev/null || true
+            echo "[1/4] Menghentikan seluruh proses container devbox..."
             for p in /proc/[0-9]*; do
-                if [ "$(readlink ${'$'}p/root 2>/dev/null)" = '$rootfs' ]; then
-                    kill -9 "${'$'}(basename ${'$'}p)" 2>/dev/null || true
+                pid=${'$'}(basename "${'$'}p" 2>/dev/null || true)
+                target=${'$'}(readlink "${'$'}p/root" 2>/dev/null || true)
+                if [ "${'$'}target" = '$rootfs' ] || [ "${'$'}{target#$rootfs/}" != "${'$'}target" ]; then
+                    echo "Menghentikan PID ${'$'}pid..."
+                    kill -9 "${'$'}pid" 2>/dev/null || true
                 fi
             done
+            pkill -9 -f '$rootfs' 2>/dev/null || true
+            pkill -9 -f "code-server" 2>/dev/null || true
+            pkill -9 -f "antigravity" 2>/dev/null || true
+            sleep 1
+
+            echo "[2/4] Melepaskan semua mount point terkait..."
+            awk -v r='$rootfs' '${'$'}2 ~ ("^" r) {print ${'$'}2}' /proc/mounts 2>/dev/null | sort -r | while read -r m; do
+                echo "Unmounting ${'$'}m..."
+                umount -l "${'$'}m" 2>/dev/null || true
+            done
             umount -l '$rootfs/mnt/sdcard' 2>/dev/null || true
+            umount -l '$rootfs/sdcard' 2>/dev/null || true
             umount -l '$rootfs/sys' 2>/dev/null || true
             umount -l '$rootfs/proc' 2>/dev/null || true
             umount -l '$rootfs/dev/pts' 2>/dev/null || true
             umount -l '$rootfs/dev' 2>/dev/null || true
-            rm -rf '$rootfs'
-            echo 'UNINSTALLED'
+            sleep 1
+
+            if grep -q " $rootfs/mnt/sdcard " /proc/mounts 2>/dev/null || grep -q " $rootfs/sdcard " /proc/mounts 2>/dev/null; then
+                echo "PERINGATAN: Unmount storage sdcard gagal! Penghapusan dibatalkan demi keamanan data HP."
+                exit 1
+            fi
+
+            if [ ! -e '$rootfs' ]; then
+                echo "Direktori $rootfs tidak ditemukan (sudah bersih)."
+                echo "SUCCESS_UNINSTALLED"
+                exit 0
+            fi
+
+            echo "[3/4] Memberikan izin tulis penuh dan menghapus file..."
+            chmod -R 777 '$rootfs' 2>/dev/null || true
+
+            for d in bin boot dev etc home lib lib64 media mnt opt proc root run sbin srv sys tmp usr var; do
+                if [ -e '$rootfs/'"${'$'}d" ]; then
+                    echo "Menghapus $rootfs/${'$'}d..."
+                    rm -rf '$rootfs/'"${'$'}d" 2>&1 || true
+                fi
+            done
+
+            echo "Menghapus sisa direktori induk..."
+            rm -rf '$rootfs' 2>&1 || true
+
+            echo "[4/4] Verifikasi hasil penghapusan..."
+            if [ ! -d '$rootfs' ]; then
+                echo "SUCCESS_UNINSTALLED"
+                echo "Pembersihan selesai tanpa sisa."
+            else
+                rem=${'$'}(ls -A '$rootfs' 2>/dev/null || true)
+                if [ -z "${'$'}rem" ]; then
+                    rmdir '$rootfs' 2>/dev/null || true
+                    echo "SUCCESS_UNINSTALLED"
+                    echo "Pembersihan direktori kosong berhasil."
+                else
+                    echo "GAGAL: Terdapat file/folder terkunci di $rootfs:"
+                    echo "${'$'}rem"
+                    exit 1
+                fi
+            fi
         """.trimIndent()
 
-        val res = RootExecutor.execute(script)
-        if (res.getOrNull()?.stdout?.contains("UNINSTALLED") == true) {
+        val logOutput = StringBuilder()
+        var isSuccess = false
+
+        val exitCode = RootExecutor.executeStream(script) { line ->
+            logOutput.appendLine(line)
+            if (line.contains("SUCCESS_UNINSTALLED")) {
+                isSuccess = true
+            }
+            onLogLine?.invoke(line)
+        }
+
+        if (isSuccess || exitCode == 0) {
             lastKnownState = null
             AppLogger.i("ChrootManager", "Rootfs $rootfs berhasil di-uninstall dan dihapus total.")
             Result.success("Rootfs $rootfs dan seluruh file sistem berhasil dihapus total. Penyimpanan HP telah dibebaskan.")
         } else {
-            val err = res.getOrNull()?.stderr ?: "Gagal menghapus rootfs."
-            Result.failure(Exception(err))
+            val errLog = logOutput.toString().trim()
+            val finalErr = if (errLog.isNotEmpty()) errLog else "Gagal menghapus rootfs (Exit code: $exitCode)."
+            AppLogger.e("ChrootManager", finalErr)
+            Result.failure(Exception(finalErr))
         }
     }
 

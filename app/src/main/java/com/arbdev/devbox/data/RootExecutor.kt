@@ -79,12 +79,12 @@ object RootExecutor {
         available
     }
 
-    suspend fun execute(command: String, silent: Boolean = false): Result<CommandResult> = withContext(Dispatchers.IO) {
-        executeSync(command, silent)
+    suspend fun execute(command: String, silent: Boolean = false, timeoutMs: Long = 10000L): Result<CommandResult> = withContext(Dispatchers.IO) {
+        executeSync(command, silent, timeoutMs)
     }
 
-    fun executeSync(command: String, silent: Boolean = false): Result<CommandResult> {
-        return executeDirect(command, silent)
+    fun executeSync(command: String, silent: Boolean = false, timeoutMs: Long = 10000L): Result<CommandResult> {
+        return executeDirect(command, silent, timeoutMs)
     }
 
     private fun executeDirect(command: String, silent: Boolean = false, timeoutMs: Long = 10000L): Result<CommandResult> {

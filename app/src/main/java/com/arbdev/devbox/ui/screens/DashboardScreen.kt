@@ -1,10 +1,14 @@
 package com.arbdev.devbox.ui.screens
 
 import android.app.Activity
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
 import android.widget.Toast
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -13,9 +17,13 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
@@ -38,6 +46,7 @@ import androidx.compose.material.icons.filled.Code
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.DeleteSweep
 import androidx.compose.material.icons.filled.Dns
+import androidx.compose.material.icons.filled.Error
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Layers
@@ -134,6 +143,9 @@ fun DashboardScreen(
     // Dialog Konfirmasi Hapus Rootfs (Uninstall)
     var showUninstallDialog by remember { mutableStateOf(false) }
     var isUninstalling by remember { mutableStateOf(false) }
+    var uninstallLogs by remember { mutableStateOf(listOf<String>()) }
+    var uninstallFinished by remember { mutableStateOf(false) }
+    var uninstallSuccess by remember { mutableStateOf(false) }
 
     // In-App Updater State
     val updateStatus by UpdateManager.updateStatus.collectAsState()
@@ -777,27 +789,97 @@ fun DashboardScreen(
     // Dialog Konfirmasi Hapus Rootfs (Uninstall)
     if (showUninstallDialog) {
         AlertDialog(
-            onDismissRequest = { if (!isUninstalling) showUninstallDialog = false },
+            onDismissRequest = {
+                if (!isUninstalling) {
+                    showUninstallDialog = false
+                    uninstallFinished = false
+                    uninstallLogs = emptyList()
+                }
+            },
             title = {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(Icons.Default.Warning, contentDescription = null, tint = Color(0xFFFF5252))
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text("Hapus Rootfs & Bersihkan Memori", color = Color(0xFFFF5252), fontSize = 16.sp)
+                    when {
+                        isUninstalling -> {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(20.dp),
+                                color = Color(0xFFFF5252),
+                                strokeWidth = 2.5.dp
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text("Menghapus Rootfs...", color = Color(0xFFFF5252), fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                        }
+                        uninstallFinished -> {
+                            if (uninstallSuccess) {
+                                Icon(Icons.Default.CheckCircle, contentDescription = null, tint = DevSuccess)
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text("Rootfs Berhasil Dihapus", color = DevSuccess, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                            } else {
+                                Icon(Icons.Default.Error, contentDescription = null, tint = Color(0xFFFF5252))
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text("Gagal Menghapus Rootfs", color = Color(0xFFFF5252), fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                            }
+                        }
+                        else -> {
+                            Icon(Icons.Default.Warning, contentDescription = null, tint = Color(0xFFFF5252))
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text("Hapus Rootfs & Bersihkan Memori", color = Color(0xFFFF5252), fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                        }
+                    }
                 }
             },
             text = {
-                if (isUninstalling) {
-                    Column(
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        modifier = Modifier.fillMaxWidth().padding(vertical = 12.dp)
-                    ) {
-                        CircularProgressIndicator(color = Color(0xFFFF5252), modifier = Modifier.size(36.dp))
-                        Spacer(modifier = Modifier.height(12.dp))
+                if (isUninstalling || uninstallFinished) {
+                    val logListState = rememberLazyListState()
+                    LaunchedEffect(uninstallLogs.size) {
+                        if (uninstallLogs.isNotEmpty()) {
+                            logListState.animateScrollToItem(uninstallLogs.size - 1)
+                        }
+                    }
+
+                    Column(modifier = Modifier.fillMaxWidth()) {
                         Text(
-                            text = "Menghapus seluruh file Linux & mengosongkan memori HP...",
-                            fontSize = 13.sp,
-                            color = Color.White
+                            text = when {
+                                isUninstalling -> "Sedang menghentikan proses, melepas mountpoint, dan menghapus seluruh file Linux. Mohon jangan menutup aplikasi..."
+                                uninstallSuccess -> "Seluruh file sistem Linux di ${ChrootManager.activeRootfs} telah dibersihkan tanpa sisa. Ruang penyimpanan HP 2-5 GB telah dibebaskan."
+                                else -> "Terjadi kendala saat menghapus rootfs. Periksa riwayat log eksekusi root di bawah ini:"
+                            },
+                            fontSize = 12.sp,
+                            color = Color.LightGray
                         )
+                        Spacer(modifier = Modifier.height(10.dp))
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .heightIn(min = 120.dp, max = 220.dp)
+                                .background(Color(0xFF0D1117), RoundedCornerShape(8.dp))
+                                .border(
+                                    1.dp,
+                                    when {
+                                        isUninstalling -> Color(0xFFFF5252).copy(alpha = 0.5f)
+                                        uninstallSuccess -> DevSuccess.copy(alpha = 0.6f)
+                                        else -> Color(0xFFFF5252)
+                                    },
+                                    RoundedCornerShape(8.dp)
+                                )
+                                .padding(8.dp)
+                        ) {
+                            LazyColumn(state = logListState) {
+                                items(uninstallLogs) { line ->
+                                    Text(
+                                        text = line,
+                                        fontFamily = FontFamily.Monospace,
+                                        fontSize = 11.sp,
+                                        lineHeight = 15.sp,
+                                        color = when {
+                                            line.contains("SUCCESS", ignoreCase = true) || line.contains("selesai", ignoreCase = true) || line.contains("berhasil", ignoreCase = true) -> Color(0xFF81C784)
+                                            line.contains("GAGAL", ignoreCase = true) || line.contains("ERROR", ignoreCase = true) || line.contains("PERINGATAN", ignoreCase = true) -> Color(0xFFFF8A80)
+                                            line.startsWith("[") -> Color(0xFF80D8FF)
+                                            else -> Color(0xFFECEFF1)
+                                        }
+                                    )
+                                }
+                            }
+                        }
                     }
                 } else {
                     Column {
@@ -824,28 +906,73 @@ fun DashboardScreen(
                 }
             },
             confirmButton = {
-                if (!isUninstalling) {
-                    Button(
-                        onClick = {
-                            scope.launch {
-                                isUninstalling = true
-                                val res = ChrootManager.uninstallRootfs(ChrootManager.activeRootfs)
-                                isUninstalling = false
+                when {
+                    isUninstalling -> {
+                        // Tidak ada tombol confirm saat proses berjalan
+                    }
+                    uninstallFinished -> {
+                        Button(
+                            onClick = {
                                 showUninstallDialog = false
-                                refreshState()
-                                Toast.makeText(context, res.getOrNull() ?: res.exceptionOrNull()?.message, Toast.LENGTH_LONG).show()
-                            }
-                        },
-                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFF5252))
-                    ) {
-                        Text("Hapus Total Sekarang", color = Color.White, fontWeight = FontWeight.Bold)
+                                uninstallFinished = false
+                                uninstallLogs = emptyList()
+                            },
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = if (uninstallSuccess) DevSuccess else DevSurfaceVariant
+                            )
+                        ) {
+                            Text("Tutup", color = if (uninstallSuccess) Color.Black else Color.White, fontWeight = FontWeight.Bold)
+                        }
+                    }
+                    else -> {
+                        Button(
+                            onClick = {
+                                scope.launch {
+                                    isUninstalling = true
+                                    uninstallFinished = false
+                                    uninstallSuccess = false
+                                    uninstallLogs = listOf("Memulai proses penghapusan rootfs...")
+                                    val res = ChrootManager.uninstallRootfs(ChrootManager.activeRootfs) { line ->
+                                        uninstallLogs = (uninstallLogs + line).takeLast(80)
+                                    }
+                                    isUninstalling = false
+                                    uninstallFinished = true
+                                    uninstallSuccess = res.isSuccess
+                                    refreshState()
+                                }
+                            },
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFF5252))
+                        ) {
+                            Text("Hapus Total Sekarang", color = Color.White, fontWeight = FontWeight.Bold)
+                        }
                     }
                 }
             },
             dismissButton = {
-                if (!isUninstalling) {
-                    TextButton(onClick = { showUninstallDialog = false }) {
-                        Text("Batal", color = Color.Gray)
+                when {
+                    isUninstalling -> {
+                        // Dismiss dinonaktifkan saat sedang menghapus
+                    }
+                    uninstallFinished -> {
+                        if (!uninstallSuccess && uninstallLogs.isNotEmpty()) {
+                            OutlinedButton(
+                                onClick = {
+                                    val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
+                                    val clip = ClipData.newPlainText("DevBox Uninstall Log", uninstallLogs.joinToString("\n"))
+                                    clipboard?.setPrimaryClip(clip)
+                                    Toast.makeText(context, "Log error disalin ke clipboard", Toast.LENGTH_SHORT).show()
+                                }
+                            ) {
+                                Icon(Icons.Default.ContentCopy, contentDescription = null, modifier = Modifier.size(16.dp))
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text("Salin Log")
+                            }
+                        }
+                    }
+                    else -> {
+                        TextButton(onClick = { showUninstallDialog = false }) {
+                            Text("Batal", color = Color.Gray)
+                        }
                     }
                 }
             }
