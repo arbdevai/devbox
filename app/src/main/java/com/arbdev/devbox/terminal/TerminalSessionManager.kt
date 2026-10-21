@@ -208,15 +208,8 @@ class NativeTerminalSession(
     }
 
     fun pasteText(text: String) {
-        // Normalisasi karakter baris baru dan kirim teks murni langsung ke PTY.
-        // Hindari escape sequence bracketed paste (\u001B[200~...\u001B[201~) yang merusak
-        // token/kode OAuth CLI (antigravity, gh, git, curl) dan input prompt interaktif.
+        // Normalisasi karakter baris baru dan kirim teks murni langsung ke PTY (persis seperti Termux).
         val sanitized = text.replace("\r\n", "\r").replace("\n", "\r")
-        // Tampilkan teks masked '***' secara realtime di layar terminal
-        // agar user mendapat feedback visual instan pada prompt no-echo (seperti token OAuth agy, password sudo)
-        if (!sanitized.contains('\r') && sanitized.length <= 120) {
-            buffer.displayMaskedInput(sanitized.length)
-        }
         sendText(sanitized)
     }
 

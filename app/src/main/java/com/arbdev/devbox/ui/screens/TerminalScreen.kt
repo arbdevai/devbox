@@ -26,8 +26,11 @@ import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.waitForUpOrCancellation
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
@@ -91,6 +94,8 @@ import com.arbdev.devbox.data.ChrootProcessInfo
 import com.arbdev.devbox.terminal.TerminalInputView
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.TimeoutCancellationException
+import kotlinx.coroutines.withTimeout
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
@@ -724,7 +729,12 @@ fun TerminalScreen(
                                 true
                             }
                             android.view.KeyEvent.KEYCODE_TAB -> {
-                                activeSession.sendBytes(byteArrayOf(9))
+                                if (it.isShiftPressed || isShiftActive) {
+                                    activeSession.sendText("\u001B[Z")
+                                    isShiftActive = false
+                                } else {
+                                    activeSession.sendBytes(byteArrayOf(9))
+                                }
                                 true
                             }
                             android.view.KeyEvent.KEYCODE_ESCAPE -> {
@@ -775,6 +785,7 @@ fun TerminalScreen(
                     fontSizeSp = terminalFontSize,
                     verticalScrollState = verticalScrollState,
                     horizontalScrollState = horizontalScrollState,
+                    isShiftActive = isShiftActive,
                     onFocusRequest = {
                         autoScrollEnabled = true
                         terminalInputView?.requestKeyboard()
@@ -1224,9 +1235,14 @@ fun TerminalScreen(
                     activeSession.sendBytes(byteArrayOf(27))
                 }
 
-                // TAB
-                TerminalModifierKey(label = "TAB") {
-                    activeSession.sendBytes(byteArrayOf(9))
+                // TAB / SHIFT+TAB (Backtab untuk navigasi mundur di TUI agy/fzf/nano)
+                TerminalModifierKey(label = if (isShiftActive) "⇧TAB" else "TAB", highlight = isShiftActive) {
+                    if (isShiftActive) {
+                        activeSession.sendText("\u001B[Z")
+                        isShiftActive = false
+                    } else {
+                        activeSession.sendBytes(byteArrayOf(9))
+                    }
                 }
 
                 // Sticky CTRL
@@ -1441,6 +1457,7 @@ fun TerminalCanvas(
     fontSizeSp: Float,
     verticalScrollState: ScrollState,
     horizontalScrollState: ScrollState,
+    isShiftActive: Boolean = false,
     onFocusRequest: () -> Unit,
     onTapUrl: (String) -> Unit,
     onPasteLarge: (String) -> Unit = {},
@@ -1455,6 +1472,7 @@ fun TerminalCanvas(
     var currentActionMode by remember { mutableStateOf<ActionMode?>(null) }
     var selectionStart by remember { mutableStateOf<GridPoint?>(null) }
     var selectionEnd by remember { mutableStateOf<GridPoint?>(null) }
+    var isSelectingText by remember { mutableStateOf(false) }
 
     val fontSizePx = with(density) { fontSizeSp.sp.toPx() }
 
@@ -1672,72 +1690,127 @@ fun TerminalCanvas(
     Box(
         modifier = modifier
             .then(
-                if (!isAltBuffer) Modifier.verticalScroll(verticalScrollState)
+                if (!isAltBuffer) Modifier.verticalScroll(verticalScrollState, enabled = !isSelectingText)
                 else Modifier
             )
-            .horizontalScroll(horizontalScrollState)
+            .horizontalScroll(horizontalScrollState, enabled = !isSelectingText)
             .padding(horizontal = 6.dp, vertical = 4.dp)
-            .pointerInput(session.buffer.isMouseTrackingEnabled, fontSizeSp, isAltBuffer) {
-                detectTapGestures(
-                    onTap = { offset ->
-                        if (currentActionMode != null || selectionStart != null) {
-                            currentActionMode?.finish()
-                            currentActionMode = null
-                            selectionStart = null
-                            selectionEnd = null
-                        } else {
-                            onFocusRequest()
+            .pointerInput(session.buffer.isMouseTrackingEnabled, fontSizeSp, isAltBuffer, isShiftActive) {
+                awaitEachGesture {
+                    val down = awaitFirstDown(requireUnconsumed = false)
+                    val longPressTimeout = if (isShiftActive) 0L else viewConfiguration.longPressTimeoutMillis
+                    var isLongPress = false
 
-                            if (charWidth > 0 && charHeight > 0) {
-                                val actualX = offset.x + horizontalScrollState.value
-                                val actualY = if (!isAltBuffer) offset.y + verticalScrollState.value else offset.y
-                                val maxLine = (if (isAltBuffer) session.buffer.maxRows else session.buffer.getLineCount()) - 1
-                                val col = (actualX / charWidth).toInt().coerceIn(0, session.buffer.maxCols - 1)
-                                val line = (actualY / charHeight).toInt().coerceIn(0, maxLine.coerceAtLeast(0))
-                                val historyCount = if (session.buffer.isAltBuffer) 0 else session.buffer.getScrollbackSnapshot().size
-                                val activeRow = line - historyCount
-
-                                val detectedUrl = session.buffer.getUrlAt(line, col)
-                                if (detectedUrl != null) {
-                                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                                    onTapUrl(detectedUrl)
-                                } else if (session.buffer.isMouseTrackingEnabled) {
-                                    if (activeRow in 0 until session.buffer.maxRows) {
-                                        session.sendMouseEvent(0, col, activeRow, true)
-                                        session.sendMouseEvent(0, col, activeRow, false)
-                                    }
-                                }
-                            }
-                        }
-                    },
-                    onLongPress = { offset ->
+                    if (isShiftActive) {
+                        isLongPress = true
                         haptic.performHapticFeedback(HapticFeedbackType.LongPress)
                         onFocusRequest()
-
+                        currentActionMode?.finish()
+                        currentActionMode = null
                         if (charWidth > 0 && charHeight > 0) {
-                            val actualX = offset.x + horizontalScrollState.value
-                            val actualY = if (!isAltBuffer) offset.y + verticalScrollState.value else offset.y
+                            val actualX = down.position.x + horizontalScrollState.value
+                            val actualY = if (!isAltBuffer) down.position.y + verticalScrollState.value else down.position.y
                             val maxLine = (if (isAltBuffer) session.buffer.maxRows else session.buffer.getLineCount()) - 1
                             val col = (actualX / charWidth).toInt().coerceIn(0, session.buffer.maxCols - 1)
                             val line = (actualY / charHeight).toInt().coerceIn(0, maxLine.coerceAtLeast(0))
-
-                            // Jika menekan pada atau dekat URL, langsung buka prompt tautan!
-                            val detectedUrl = session.buffer.getUrlAt(line, col)
-                            if (detectedUrl != null) {
-                                onTapUrl(detectedUrl)
-                                return@detectTapGestures
-                            }
-
-                            // Jika bukan URL, lakukan seleksi kata/token
+                            isSelectingText = true
                             val (wStart, wEnd) = findWordBounds(line, col)
                             selectionStart = GridPoint(line, wStart)
                             selectionEnd = GridPoint(line, wEnd)
+                        }
+                    } else {
+                        try {
+                            withTimeout(longPressTimeout) {
+                                val up = waitForUpOrCancellation()
+                                if (up != null) {
+                                    // Event TAP terdeteksi
+                                    if (currentActionMode != null || selectionStart != null) {
+                                        currentActionMode?.finish()
+                                        currentActionMode = null
+                                        selectionStart = null
+                                        selectionEnd = null
+                                        isSelectingText = false
+                                    } else {
+                                        onFocusRequest()
+                                        if (charWidth > 0 && charHeight > 0) {
+                                            val actualX = up.position.x + horizontalScrollState.value
+                                            val actualY = if (!isAltBuffer) up.position.y + verticalScrollState.value else up.position.y
+                                            val maxLine = (if (isAltBuffer) session.buffer.maxRows else session.buffer.getLineCount()) - 1
+                                            val col = (actualX / charWidth).toInt().coerceIn(0, session.buffer.maxCols - 1)
+                                            val line = (actualY / charHeight).toInt().coerceIn(0, maxLine.coerceAtLeast(0))
+                                            val historyCount = if (session.buffer.isAltBuffer) 0 else session.buffer.getScrollbackSnapshot().size
+                                            val activeRow = line - historyCount
 
+                                            val detectedUrl = session.buffer.getUrlAt(line, col)
+                                            if (detectedUrl != null) {
+                                                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                                onTapUrl(detectedUrl)
+                                            } else if (session.buffer.isMouseTrackingEnabled) {
+                                                if (activeRow in 0 until session.buffer.maxRows) {
+                                                    session.sendMouseEvent(0, col, activeRow, true)
+                                                    session.sendMouseEvent(0, col, activeRow, false)
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        } catch (_: TimeoutCancellationException) {
+                            // Timeout terlampaui -> Pengguna menahan jari (LONG PRESS / SELECTION)
+                            isLongPress = true
+                            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                            onFocusRequest()
                             currentActionMode?.finish()
+                            currentActionMode = null
+
+                            if (charWidth > 0 && charHeight > 0) {
+                                val actualX = down.position.x + horizontalScrollState.value
+                                val actualY = if (!isAltBuffer) down.position.y + verticalScrollState.value else down.position.y
+                                val maxLine = (if (isAltBuffer) session.buffer.maxRows else session.buffer.getLineCount()) - 1
+                                val col = (actualX / charWidth).toInt().coerceIn(0, session.buffer.maxCols - 1)
+                                val line = (actualY / charHeight).toInt().coerceIn(0, maxLine.coerceAtLeast(0))
+
+                                // Jika menekan pada atau dekat URL, langsung buka prompt tautan
+                                val detectedUrl = session.buffer.getUrlAt(line, col)
+                                if (detectedUrl != null) {
+                                    onTapUrl(detectedUrl)
+                                    isLongPress = false
+                                } else {
+                                    isSelectingText = true
+                                    val (wStart, wEnd) = findWordBounds(line, col)
+                                    selectionStart = GridPoint(line, wStart)
+                                    selectionEnd = GridPoint(line, wEnd)
+                                }
+                            }
+                        }
+                    }
+
+                    if (isLongPress && isSelectingText) {
+                        // Loop drag untuk memperluas area seleksi secara bebas ke atas, bawah, kiri, kanan
+                        do {
+                            val event = awaitPointerEvent()
+                            val change = event.changes.firstOrNull() ?: break
+                            if (change.pressed) {
+                                change.consume()
+                                if (charWidth > 0 && charHeight > 0) {
+                                    val actualX = change.position.x + horizontalScrollState.value
+                                    val actualY = if (!isAltBuffer) change.position.y + verticalScrollState.value else change.position.y
+                                    val maxLine = (if (isAltBuffer) session.buffer.maxRows else session.buffer.getLineCount()) - 1
+                                    val col = (actualX / charWidth).toInt().coerceIn(0, session.buffer.maxCols - 1)
+                                    val line = (actualY / charHeight).toInt().coerceIn(0, maxLine.coerceAtLeast(0))
+                                    selectionEnd = GridPoint(line, col)
+                                }
+                            } else {
+                                break
+                            }
+                        } while (event.changes.any { it.pressed })
+
+                        isSelectingText = false
+                        if (selectionStart != null && selectionEnd != null) {
                             currentActionMode = view.startActionMode(actionModeCallback, ActionMode.TYPE_FLOATING)
                         }
                     }
-                )
+                }
             }
     ) {
         Canvas(
@@ -1912,6 +1985,25 @@ fun TerminalCanvas(
                         size = Size(charWidth, charHeight)
                     )
                 }
+            }
+
+            // Visual Draggable Handles untuk Penanda Seleksi Teks (Termux Selection Pins)
+            if (hasSelection && selMin != null && selMax != null) {
+                val startX = selMin.col * charWidth
+                val startY = selMin.line * charHeight + charHeight
+                drawCircle(
+                    color = Color(0xFF61AFEF),
+                    radius = 4.dp.toPx(),
+                    center = Offset(startX, startY)
+                )
+
+                val endX = (selMax.col + 1) * charWidth
+                val endY = selMax.line * charHeight + charHeight
+                drawCircle(
+                    color = Color(0xFF61AFEF),
+                    radius = 4.dp.toPx(),
+                    center = Offset(endX, endY)
+                )
             }
         }
     }
