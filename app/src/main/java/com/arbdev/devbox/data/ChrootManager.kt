@@ -795,16 +795,23 @@ BRIDGE_EOF
             mkdir -p "${'$'}rf/home/coder/projects" "${'$'}rf/root/projects" "${'$'}rf/etc/sudoers.d" "${'$'}rf/usr/local/bin" "${'$'}rf/tmp"
             chmod 1777 "${'$'}rf/tmp" 2>/dev/null || true
 
-            # 2. Pastikan user coder terdaftar di passwd & group
+            # 2. Pastikan user coder dan sahal terdaftar di passwd & group
             if ! grep -q "^coder:" "${'$'}rf/etc/passwd" 2>/dev/null; then
-                echo "coder:x:1000:1000:DevBox User:/home/coder:/bin/bash" >> "${'$'}rf/etc/passwd" 2>/dev/null || true
+                echo "coder:x:1000:1000:Sahal Arbani:/home/coder:/bin/bash" >> "${'$'}rf/etc/passwd" 2>/dev/null || true
+            fi
+            if ! grep -q "^sahal:" "${'$'}rf/etc/passwd" 2>/dev/null; then
+                echo "sahal:x:1000:1000:Sahal Arbani:/home/coder:/bin/bash" >> "${'$'}rf/etc/passwd" 2>/dev/null || true
             fi
             if ! grep -q "^coder:" "${'$'}rf/etc/group" 2>/dev/null; then
                 echo "coder:x:1000:" >> "${'$'}rf/etc/group" 2>/dev/null || true
             fi
+            if ! grep -q "^sahal:" "${'$'}rf/etc/group" 2>/dev/null; then
+                echo "sahal:x:1000:" >> "${'$'}rf/etc/group" 2>/dev/null || true
+            fi
 
             # 3. Konfigurasi passwordless sudo & PAM su
             echo "coder ALL=(ALL) NOPASSWD:ALL" > "${'$'}rf/etc/sudoers.d/010_coder-nopasswd" 2>/dev/null || true
+            echo "sahal ALL=(ALL) NOPASSWD:ALL" >> "${'$'}rf/etc/sudoers.d/010_coder-nopasswd" 2>/dev/null || true
             chmod 0440 "${'$'}rf/etc/sudoers.d/010_coder-nopasswd" 2>/dev/null || true
 
             if [ -f "${'$'}rf/etc/pam.d/su" ]; then
@@ -868,17 +875,18 @@ parse_git_branch() {
 if [ "${'$'}UID" -eq 0 ]; then
     PS1='\[\033[01;31m\]root\[\033[00m\] in \[\033[01;33m\]\w\[\033[01;35m\]$(parse_git_branch)\[\033[00m\] \[\033[01;31m\]#\[\033[00m\] '
 else
-    PS1='\[\033[01;32m\]coder\[\033[00m\] in \[\033[01;33m\]\w\[\033[01;35m\]$(parse_git_branch)\[\033[00m\] \[\033[01;36m\]➜\[\033[00m\] '
+    PS1='\[\033[01;32m\]sahal arbani\[\033[00m\] in \[\033[01;33m\]\w\[\033[01;35m\]$(parse_git_branch)\[\033[00m\] \[\033[01;36m\]➜\[\033[00m\] '
 fi
 
-# Banner Sambutan Ringkas DevBox
+# Banner Sambutan Ringkas DevBox (Clean, Anti-Emoji, Pixel-Perfect Monospace)
 if [ -z "${'$'}DEVBOX_BANNER_SHOWN" ]; then
     export DEVBOX_BANNER_SHOWN=1
-    echo -e "\033[01;36m┌────────────────────────────────────────────────────────┐\033[00m"
-    echo -e "\033[01;36m│\033[00m \033[01;32m📦 DevBox Linux (Ubuntu 24.04 ARM64)\033[00m                  \033[01;36m│\033[00m"
-    echo -e "\033[01;36m│\033[00m \033[01;33m👤 User: coder (sudo ready)  🏠 Folder: ~/projects\033[00m     \033[01;36m│\033[00m"
-    echo -e "\033[01;36m│\033[00m \033[00;37m💡 Ketik 'll' untuk melihat file & folder (diakhiri /) \033[00m \033[01;36m│\033[00m"
-    echo -e "\033[01;36m└────────────────────────────────────────────────────────┘\033[00m"
+    echo -e "\033[01;36m┌──────────────────────────────────────────────────────┐\033[00m"
+    echo -e "\033[01;36m│\033[00m \033[01;32mDevBox Linux (Ubuntu 24.04 ARM64)\033[00m                    \033[01;36m│\033[00m"
+    echo -e "\033[01;36m│\033[00m [•] User      : \033[01;33mSahal Arbani\033[00m (sudo ready)            \033[01;36m│\033[00m"
+    echo -e "\033[01;36m│\033[00m [•] Workspace : \033[01;33m~/projects\033[00m                           \033[01;36m│\033[00m"
+    echo -e "\033[01;36m│\033[00m [•] Shortcut  : ketik 'll' untuk list file & folder  \033[01;36m│\033[00m"
+    echo -e "\033[01;36m└──────────────────────────────────────────────────────┘\033[00m"
 fi
 BASHRC_EOF
 
