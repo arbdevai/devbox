@@ -61,7 +61,10 @@ import androidx.compose.material.icons.filled.DeleteSweep
 import androidx.compose.material.icons.filled.Layers
 import androidx.compose.material.icons.filled.Link
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.SelectAll
+import androidx.compose.material.icons.filled.Send
 import androidx.compose.material.icons.filled.Share
+import androidx.compose.material.icons.filled.SmartToy
 import androidx.compose.material.icons.filled.Terminal
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.AlertDialog
@@ -71,6 +74,7 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.ScrollableTabRow
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Tab
@@ -119,6 +123,7 @@ import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.DpOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -200,6 +205,49 @@ fun TerminalScreen(
         }
     }
 
+    // Mode Seleksi Teks (Termux-style Freeze Copy)
+    var isSelectModeActive by remember { mutableStateOf(false) }
+
+    // Dialog Antigravity CLI Agent Hub
+    var showAgentHubDialog by remember { mutableStateOf(false) }
+    var agentLastResponse by remember { mutableStateOf<String?>(null) }
+    var agentLastUrls by remember { mutableStateOf<List<String>>(emptyList()) }
+    var isLoadingAgentInfo by remember { mutableStateOf(false) }
+    var agentQuickPrompt by remember { mutableStateOf("") }
+
+    val loadAgentInfo: () -> Unit = {
+        coroutineScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            isLoadingAgentInfo = true
+            val rootfs = ChrootManager.activeRootfs
+            val cmd = """
+                BRAIN_DIR='$rootfs/home/coder/.gemini/antigravity-cli/brain'
+                [ -d "${'$'}BRAIN_DIR" ] || BRAIN_DIR='$rootfs/root/.gemini/antigravity-cli/brain'
+                LATEST_LOG=${'$'}(find "${'$'}BRAIN_DIR" -name "transcript.jsonl" -type f 2>/dev/null | xargs ls -t 2>/dev/null | head -n1)
+                if [ -f "${'$'}LATEST_LOG" ]; then
+                    grep '"type":"PLANNER_RESPONSE"' "${'$'}LATEST_LOG" | tail -n1
+                else
+                    echo ""
+                fi
+            """.trimIndent()
+            val res = RootExecutor.execute(cmd, silent = true)
+            val jsonLine = res.getOrNull()?.stdout?.trim().orEmpty()
+            if (jsonLine.isNotEmpty()) {
+                val contentRegex = Regex("\"content\"\\s*:\\s*\"((?:[^\"\\\\]|\\\\.)*)\"")
+                val match = contentRegex.find(jsonLine)
+                var rawContent = match?.groupValues?.get(1) ?: jsonLine
+                rawContent = rawContent.replace("\\n", "\n").replace("\\\"", "\"").replace("\\\\", "\\")
+                agentLastResponse = rawContent
+
+                val urlRegex = Regex("https?://[a-zA-Z0-9.-]+(?:/[a-zA-Z0-9._~:/?#\\[\\]@!$&'()*+,;=%-]*)?")
+                agentLastUrls = urlRegex.findAll(rawContent).map { it.value }.distinct().toList()
+            } else {
+                agentLastResponse = "Belum ada riwayat respon dari Antigravity CLI di direktori brain."
+                agentLastUrls = emptyList()
+            }
+            isLoadingAgentInfo = false
+        }
+    }
+
     // View input terminal berbasis BaseInputConnection (gaya Termux, tanpa Compose TextField delay)
     var terminalInputView by remember { mutableStateOf<TerminalInputView?>(null) }
 
@@ -214,28 +262,30 @@ fun TerminalScreen(
     LaunchedEffect(verticalScrollState.isScrollInProgress) {
         if (verticalScrollState.isScrollInProgress) {
             val distFromBottom = verticalScrollState.maxValue - verticalScrollState.value
-            // Jika user scroll ke atas (> 120px dari bawah), tahan auto-scroll agar nyaman membaca teks/log
-            // Jika user scroll kembali mendekati bawah (<= 120px), aktifkan lagi auto-scroll
             autoScrollEnabled = distFromBottom <= 120
         }
     }
 
-    // Helper navigasi tombol panah yang menghormati DECCKM (Application Cursor Mode pada TUI seperti agy)
+    // Helper navigasi tombol panah dinamis (menghormati DECCKM dan sesi aktif)
     val sendArrowUp = {
-        if (activeSession.buffer.isApplicationCursorKeys) activeSession.sendText("\u001BOA")
-        else activeSession.sendText("\u001B[A")
+        val s = TerminalSessionManager.getActiveSession()
+        if (s.buffer.isApplicationCursorKeys) s.sendText("\u001BOA")
+        else s.sendText("\u001B[A")
     }
     val sendArrowDown = {
-        if (activeSession.buffer.isApplicationCursorKeys) activeSession.sendText("\u001BOB")
-        else activeSession.sendText("\u001B[B")
+        val s = TerminalSessionManager.getActiveSession()
+        if (s.buffer.isApplicationCursorKeys) s.sendText("\u001BOB")
+        else s.sendText("\u001B[B")
     }
     val sendArrowRight = {
-        if (activeSession.buffer.isApplicationCursorKeys) activeSession.sendText("\u001BOC")
-        else activeSession.sendText("\u001B[C")
+        val s = TerminalSessionManager.getActiveSession()
+        if (s.buffer.isApplicationCursorKeys) s.sendText("\u001BOC")
+        else s.sendText("\u001B[C")
     }
     val sendArrowLeft = {
-        if (activeSession.buffer.isApplicationCursorKeys) activeSession.sendText("\u001BOD")
-        else activeSession.sendText("\u001B[D")
+        val s = TerminalSessionManager.getActiveSession()
+        if (s.buffer.isApplicationCursorKeys) s.sendText("\u001BOD")
+        else s.sendText("\u001B[D")
     }
 
     LaunchedEffect(Unit) {
@@ -559,15 +609,50 @@ fun TerminalScreen(
                     )
                 }
 
+                // Mode Seleksi Teks (Termux-style Freeze Copy)
+                IconButton(
+                    onClick = {
+                        isSelectModeActive = !isSelectModeActive
+                        if (isSelectModeActive) {
+                            Toast.makeText(context, "Mode Seleksi aktif: geser teks bebas", Toast.LENGTH_SHORT).show()
+                        }
+                    },
+                    modifier = Modifier.size(30.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.SelectAll,
+                        contentDescription = "Mode Seleksi Teks",
+                        tint = if (isSelectModeActive) DevSecondary else DevPrimary,
+                        modifier = Modifier.size(16.dp)
+                    )
+                }
+
+                // Antigravity CLI Agent Hub Dialog
+                IconButton(
+                    onClick = {
+                        loadAgentInfo()
+                        showAgentHubDialog = true
+                    },
+                    modifier = Modifier.size(30.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.SmartToy,
+                        contentDescription = "Antigravity Agent Hub",
+                        tint = if (activeSession.isAgentRunning) Color(0xFF00E676) else DevPrimary,
+                        modifier = Modifier.size(16.dp)
+                    )
+                }
+
                 // Paste Clipboard directly into active PTY session
                 IconButton(
                     onClick = {
                         val clip = clipboardManager.getText()?.text
+                        val curSess = TerminalSessionManager.getActiveSession()
                         if (!clip.isNullOrEmpty()) {
                             if (clip.length > 2000 || clip.count { it == '\n' } > 50) {
                                 pendingLargePaste = clip
                             } else {
-                                activeSession.pasteText(clip)
+                                curSess.pasteText(clip)
                             }
                         } else {
                             Toast.makeText(context, "Clipboard kosong", Toast.LENGTH_SHORT).show()
@@ -586,7 +671,7 @@ fun TerminalScreen(
                 // Reset / Clear Screen (Ctrl+L)
                 IconButton(
                     onClick = {
-                        activeSession.sendBytes(byteArrayOf(12)) // Send Ctrl+L
+                        TerminalSessionManager.getActiveSession().sendBytes(byteArrayOf(12)) // Send Ctrl+L
                     },
                     modifier = Modifier.size(30.dp)
                 ) {
@@ -682,6 +767,7 @@ fun TerminalScreen(
             factory = { ctx ->
                 TerminalInputView(ctx).apply {
                     onCommitText = { text ->
+                        val targetSession = TerminalSessionManager.getActiveSession()
                         if (isCtrlActive) {
                             val bytes = mutableListOf<Byte>()
                             for (ch in text) {
@@ -700,17 +786,18 @@ fun TerminalScreen(
                                 }
                                 bytes.add(code.toByte())
                             }
-                            activeSession.sendBytes(bytes.toByteArray())
+                            targetSession.sendBytes(bytes.toByteArray())
                             isCtrlActive = false
                         } else {
                             val sanitized = text.replace("\r\n", "\r").replace("\n", "\r")
-                            activeSession.sendText(sanitized)
+                            targetSession.sendText(sanitized)
                         }
                     }
                     onBackspace = {
-                        activeSession.sendBytes(byteArrayOf(127))
+                        TerminalSessionManager.getActiveSession().sendBytes(byteArrayOf(127))
                     }
                     onSendKey = { keyCode ->
+                        val targetSession = TerminalSessionManager.getActiveSession()
                         when (keyCode) {
                             android.view.KeyEvent.KEYCODE_DPAD_UP -> {
                                 sendArrowUp()
@@ -730,15 +817,15 @@ fun TerminalScreen(
                             }
                             android.view.KeyEvent.KEYCODE_TAB -> {
                                 if (isShiftActive) {
-                                    activeSession.sendText("\u001B[Z")
+                                    targetSession.sendText("\u001B[Z")
                                     isShiftActive = false
                                 } else {
-                                    activeSession.sendBytes(byteArrayOf(9))
+                                    targetSession.sendBytes(byteArrayOf(9))
                                 }
                                 true
                             }
                             android.view.KeyEvent.KEYCODE_ESCAPE -> {
-                                activeSession.sendBytes(byteArrayOf(27))
+                                targetSession.sendBytes(byteArrayOf(27))
                                 true
                             }
                             else -> false
@@ -754,6 +841,57 @@ fun TerminalScreen(
                 .size(1.dp)
                 .alpha(0.01f)
         )
+
+        // Banner Indikator Mode Seleksi Teks (Termux-style)
+        if (isSelectModeActive) {
+            Surface(
+                color = Color(0xFF1E222D),
+                border = BorderStroke(1.dp, DevPrimary),
+                shape = RoundedCornerShape(8.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 8.dp, vertical = 4.dp)
+            ) {
+                Row(
+                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(Icons.Default.SelectAll, contentDescription = null, tint = DevPrimary, modifier = Modifier.size(18.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(
+                            text = "Mode Seleksi (Geser Bebas)",
+                            color = DevPrimary,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 12.sp
+                        )
+                    }
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        IconButton(
+                            onClick = {
+                                val all = TerminalSessionManager.getActiveSession().buffer.getTranscriptText()
+                                if (all.isNotBlank()) {
+                                    clipboardManager.setText(AnnotatedString(all))
+                                    Toast.makeText(context, "Seluruh teks terminal disalin", Toast.LENGTH_SHORT).show()
+                                }
+                            },
+                            modifier = Modifier.size(30.dp)
+                        ) {
+                            Icon(Icons.Default.ContentCopy, contentDescription = "Salin Semua", tint = Color.White, modifier = Modifier.size(16.dp))
+                        }
+                        IconButton(
+                            onClick = {
+                                isSelectModeActive = false
+                            },
+                            modifier = Modifier.size(30.dp)
+                        ) {
+                            Icon(Icons.Default.Close, contentDescription = "Selesai", tint = Color.Gray, modifier = Modifier.size(16.dp))
+                        }
+                    }
+                }
+            }
+        }
 
         // Native 2D VT100 Matrix Canvas / Terminal Text Area with Direct Glyph Drawing
         BoxWithConstraints(
@@ -786,6 +924,7 @@ fun TerminalScreen(
                     verticalScrollState = verticalScrollState,
                     horizontalScrollState = horizontalScrollState,
                     isShiftActive = isShiftActive,
+                    isSelectModeActive = isSelectModeActive,
                     onFocusRequest = {
                         autoScrollEnabled = true
                         terminalInputView?.requestKeyboard()
@@ -1213,6 +1352,159 @@ fun TerminalScreen(
             )
         }
 
+        // Dialog Antigravity CLI Agent Hub (Konektor & Akses Cepat Output/Link Agent)
+        if (showAgentHubDialog) {
+            AlertDialog(
+                onDismissRequest = { showAgentHubDialog = false },
+                icon = {
+                    Icon(Icons.Default.SmartToy, contentDescription = null, tint = DevPrimary, modifier = Modifier.size(28.dp))
+                },
+                title = {
+                    Text(
+                        text = "Antigravity Agent Hub",
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 16.sp,
+                        color = Color.White
+                    )
+                },
+                text = {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(max = 420.dp)
+                    ) {
+                        Text(
+                            text = "Respon & Tautan Terakhir:",
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = DevPrimary
+                        )
+                        Spacer(modifier = Modifier.height(6.dp))
+
+                        if (isLoadingAgentInfo) {
+                            Box(modifier = Modifier.fillMaxWidth().height(120.dp), contentAlignment = Alignment.Center) {
+                                CircularProgressIndicator(color = DevPrimary, modifier = Modifier.size(28.dp))
+                            }
+                        } else {
+                            Surface(
+                                color = Color(0xFF14171E),
+                                shape = RoundedCornerShape(8.dp),
+                                border = BorderStroke(1.dp, Color(0xFF2C3240)),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .weight(1f, fill = false)
+                                    .verticalScroll(rememberScrollState())
+                                    .padding(2.dp)
+                            ) {
+                                Text(
+                                    text = agentLastResponse ?: "Belum ada riwayat percakapan.",
+                                    color = Color(0xFFE0E0E0),
+                                    fontFamily = FontFamily.Monospace,
+                                    fontSize = 11.sp,
+                                    modifier = Modifier.padding(10.dp)
+                                )
+                            }
+
+                            if (agentLastUrls.isNotEmpty()) {
+                                Spacer(modifier = Modifier.height(8.dp))
+                                Text(
+                                    text = "Tautan yang Ditemukan (${agentLastUrls.size}):",
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = DevSecondary
+                                )
+                                Spacer(modifier = Modifier.height(4.dp))
+                                agentLastUrls.forEach { url ->
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .clickable {
+                                                try {
+                                                    val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url))
+                                                    context.startActivity(intent)
+                                                } catch (e: Exception) {
+                                                    Toast.makeText(context, "Gagal membuka: ${e.message}", Toast.LENGTH_SHORT).show()
+                                                }
+                                            }
+                                            .padding(vertical = 3.dp),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Icon(Icons.Default.Link, contentDescription = null, tint = DevPrimary, modifier = Modifier.size(14.dp))
+                                        Spacer(modifier = Modifier.width(6.dp))
+                                        Text(
+                                            text = url,
+                                            fontSize = 11.sp,
+                                            color = DevPrimary,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+                                    }
+                                }
+                            }
+
+                            Spacer(modifier = Modifier.height(10.dp))
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                OutlinedTextField(
+                                    value = agentQuickPrompt,
+                                    onValueChange = { agentQuickPrompt = it },
+                                    placeholder = { Text("Ketik prompt ke agent...", fontSize = 11.sp) },
+                                    singleLine = true,
+                                    modifier = Modifier.weight(1f)
+                                )
+                                Spacer(modifier = Modifier.width(6.dp))
+                                IconButton(
+                                    onClick = {
+                                        if (agentQuickPrompt.isNotBlank()) {
+                                            val s = TerminalSessionManager.getActiveSession()
+                                            s.sendText(agentQuickPrompt.trim() + "\r")
+                                            agentQuickPrompt = ""
+                                            showAgentHubDialog = false
+                                            Toast.makeText(context, "Prompt terkirim ke sesi aktif", Toast.LENGTH_SHORT).show()
+                                        }
+                                    }
+                                ) {
+                                    Icon(Icons.Default.Send, contentDescription = "Kirim", tint = DevPrimary)
+                                }
+                            }
+                        }
+                    }
+                },
+                confirmButton = {
+                    TextButton(
+                        onClick = {
+                            val resp = agentLastResponse
+                            if (!resp.isNullOrBlank()) {
+                                clipboardManager.setText(AnnotatedString(resp))
+                                Toast.makeText(context, "Respon disalin ke clipboard", Toast.LENGTH_SHORT).show()
+                            }
+                        }
+                    ) {
+                        Icon(Icons.Default.ContentCopy, contentDescription = null, modifier = Modifier.size(14.dp))
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text("Salin Respon", color = DevPrimary, fontSize = 12.sp)
+                    }
+                },
+                dismissButton = {
+                    Row {
+                        TextButton(
+                            onClick = {
+                                isSelectModeActive = true
+                                showAgentHubDialog = false
+                            }
+                        ) {
+                            Text("Mode Seleksi", color = DevSecondary, fontSize = 12.sp)
+                        }
+                        TextButton(onClick = { showAgentHubDialog = false }) {
+                            Text("Tutup", color = Color.Gray, fontSize = 12.sp)
+                        }
+                    }
+                }
+            )
+        }
+
         // Comprehensive Mobile Extra Keys Panel (2 Scrollable Rows for FlorisBoard / Mobile Terminal)
         Column(
             modifier = Modifier
@@ -1232,16 +1524,22 @@ fun TerminalScreen(
             ) {
                 // ESC
                 TerminalModifierKey(label = "ESC") {
-                    activeSession.sendBytes(byteArrayOf(27))
+                    TerminalSessionManager.getActiveSession().sendBytes(byteArrayOf(27))
+                }
+
+                // Mode Seleksi Cepat (SEL)
+                TerminalToggleKey(label = "SEL", isActive = isSelectModeActive) {
+                    isSelectModeActive = !isSelectModeActive
                 }
 
                 // TAB / SHIFT+TAB (Backtab untuk navigasi mundur di TUI agy/fzf/nano)
                 TerminalModifierKey(label = if (isShiftActive) "⇧TAB" else "TAB", highlight = isShiftActive) {
+                    val cur = TerminalSessionManager.getActiveSession()
                     if (isShiftActive) {
-                        activeSession.sendText("\u001B[Z")
+                        cur.sendText("\u001B[Z")
                         isShiftActive = false
                     } else {
-                        activeSession.sendBytes(byteArrayOf(9))
+                        cur.sendBytes(byteArrayOf(9))
                     }
                 }
 
@@ -1252,7 +1550,7 @@ fun TerminalScreen(
 
                 // Quick Ctrl+C (Interrupt/Hentikan proses yang looping/hang)
                 TerminalModifierKey(label = "Ctrl+C", isSignal = true) {
-                    activeSession.cancelActiveProcess()
+                    TerminalSessionManager.getActiveSession().cancelActiveProcess()
                 }
 
                 // Sticky ALT
@@ -1267,17 +1565,17 @@ fun TerminalScreen(
 
                 // Dedicated ENTER
                 TerminalModifierKey(label = "ENTER", highlight = true) {
-                    activeSession.sendText("\r")
+                    TerminalSessionManager.getActiveSession().sendText("\r")
                 }
 
                 // Backspace (⌫)
                 TerminalModifierKey(label = "⌫") {
-                    activeSession.sendBytes(byteArrayOf(127))
+                    TerminalSessionManager.getActiveSession().sendBytes(byteArrayOf(127))
                 }
 
                 // Delete forward (DEL)
                 TerminalModifierKey(label = "DEL") {
-                    activeSession.sendText("\u001B[3~")
+                    TerminalSessionManager.getActiveSession().sendText("\u001B[3~")
                 }
 
                 // Arrow Left ◀
@@ -1302,22 +1600,22 @@ fun TerminalScreen(
 
                 // HOME
                 TerminalModifierKey(label = "HOME") {
-                    activeSession.sendText("\u001B[H")
+                    TerminalSessionManager.getActiveSession().sendText("\u001B[H")
                 }
 
                 // END
                 TerminalModifierKey(label = "END") {
-                    activeSession.sendText("\u001B[F")
+                    TerminalSessionManager.getActiveSession().sendText("\u001B[F")
                 }
 
                 // PGUP
                 TerminalModifierKey(label = "PGUP") {
-                    activeSession.sendText("\u001B[5~")
+                    TerminalSessionManager.getActiveSession().sendText("\u001B[5~")
                 }
 
                 // PGDN
                 TerminalModifierKey(label = "PGDN") {
-                    activeSession.sendText("\u001B[6~")
+                    TerminalSessionManager.getActiveSession().sendText("\u001B[6~")
                 }
             }
 
@@ -1347,7 +1645,7 @@ fun TerminalScreen(
                 )
                 functionKeys.forEach { (label, seq) ->
                     TerminalModifierKey(label = label) {
-                        activeSession.sendText(seq)
+                        TerminalSessionManager.getActiveSession().sendText(seq)
                     }
                 }
 
@@ -1359,7 +1657,7 @@ fun TerminalScreen(
                 )
                 symbols.forEach { sym ->
                     TerminalModifierKey(label = sym) {
-                        activeSession.sendText(sym)
+                        TerminalSessionManager.getActiveSession().sendText(sym)
                     }
                 }
             }
@@ -1458,6 +1756,7 @@ fun TerminalCanvas(
     verticalScrollState: ScrollState,
     horizontalScrollState: ScrollState,
     isShiftActive: Boolean = false,
+    isSelectModeActive: Boolean = false,
     onFocusRequest: () -> Unit,
     onTapUrl: (String) -> Unit,
     onPasteLarge: (String) -> Unit = {},
@@ -1695,16 +1994,15 @@ fun TerminalCanvas(
             )
             .horizontalScroll(horizontalScrollState, enabled = !isSelectingText)
             .padding(horizontal = 6.dp, vertical = 4.dp)
-            .pointerInput(session.buffer.isMouseTrackingEnabled, fontSizeSp, isAltBuffer, isShiftActive) {
+            .pointerInput(session.buffer.isMouseTrackingEnabled, fontSizeSp, isAltBuffer, isShiftActive, isSelectModeActive) {
                 awaitEachGesture {
                     val down = awaitFirstDown(requireUnconsumed = false)
-                    val longPressTimeout = if (isShiftActive) 0L else viewConfiguration.longPressTimeoutMillis
+                    val longPressTimeout = if (isShiftActive || isSelectModeActive) 0L else viewConfiguration.longPressTimeoutMillis
                     var isLongPress = false
 
-                    if (isShiftActive) {
+                    if (isSelectModeActive || isShiftActive) {
                         isLongPress = true
                         haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                        onFocusRequest()
                         currentActionMode?.finish()
                         currentActionMode = null
                         if (charWidth > 0 && charHeight > 0) {

@@ -134,9 +134,13 @@ fun DashboardScreen(
             isRefreshing = true
             state = ChrootManager.getChrootState()
             isInitialLoading = false
-            val activeIds = TerminalSessionManager.sessions.map { it.id }
-            val activePids = TerminalSessionManager.sessions.mapNotNull { it.getProcessPid() }
-            orphanProcesses = ChrootManager.getOrphanChrootProcesses(activeIds, activePids)
+            if (state.isMounted && state.isRootfsExists) {
+                val activeIds = TerminalSessionManager.sessions.map { it.id }
+                val activePids = TerminalSessionManager.sessions.mapNotNull { it.getProcessPid() }
+                orphanProcesses = ChrootManager.getOrphanChrootProcesses(activeIds, activePids)
+            } else {
+                orphanProcesses = emptyList()
+            }
             wakeLockActive = KeepAliveService.isRunning
             isRefreshing = false
         }
@@ -723,8 +727,7 @@ fun DashboardScreen(
                     onClick = {
                         val trimmed = tempPathInput.trim()
                         if (trimmed.startsWith("/")) {
-                            ChrootManager.activeRootfs = trimmed
-                            AppLogger.i("ChrootManager", "Jalur rootfs diubah ke: $trimmed")
+                            ChrootManager.setActiveRootfs(context, trimmed)
                             refreshState()
                             showCustomPathDialog = false
                         } else {

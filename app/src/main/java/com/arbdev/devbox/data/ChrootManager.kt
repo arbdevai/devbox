@@ -1,5 +1,6 @@
 package com.arbdev.devbox.data
 
+import android.content.Context
 import com.arbdev.devbox.util.AppLogger
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -26,7 +27,31 @@ data class ChrootState(
 
 object ChrootManager {
     const val DEFAULT_ROOTFS = "/data/local/devbox-chroot"
+    const val LEGACY_ROOTFS = "/data/local/ubuntu-chroot"
+    private const val PREFS_NAME = "devbox_prefs"
+    private const val KEY_ACTIVE_ROOTFS = "key_active_rootfs"
+
     var activeRootfs: String = DEFAULT_ROOTFS
+    private var appContext: Context? = null
+
+    fun init(context: Context) {
+        appContext = context.applicationContext
+        val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        val saved = prefs.getString(KEY_ACTIVE_ROOTFS, null)
+        if (!saved.isNullOrBlank()) {
+            activeRootfs = saved
+            AppLogger.i("ChrootManager", "Memuat rootfs dari SharedPreferences: $activeRootfs")
+        }
+    }
+
+    fun setActiveRootfs(context: Context, newPath: String) {
+        val trimmed = newPath.trim()
+        activeRootfs = trimmed
+        lastKnownState = null
+        val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        prefs.edit().putString(KEY_ACTIVE_ROOTFS, trimmed).apply()
+        AppLogger.i("ChrootManager", "Jalur rootfs aktif disimpan secara permanen: $trimmed")
+    }
 
     // State cache agar Dashboard dapat langsung ditampilkan instan tanpa buffering saat switch tab
     @Volatile
@@ -60,6 +85,12 @@ object ChrootManager {
                 src_ok=0
             fi
 
+            # Auto-fallback jika rootfs target devbox-chroot kosong namun ubuntu-chroot ada
+            if [ "${'$'}status" != "EXISTS" ] && [ "${'$'}src_ok" = "1" ] && [ "${'$'}rf" = "$DEFAULT_ROOTFS" ]; then
+                rf="$LEGACY_ROOTFS"
+                status="EXISTS"
+            fi
+
             if [ "${'$'}status" = "EXISTS" ]; then
                 mountpoint -q "${'$'}rf/proc" && mnt=1 || mnt=0
 
@@ -90,9 +121,9 @@ object ChrootManager {
                     echo "${'$'}ns_out" | grep -q ':8080 ' && cs=1
                     echo "${'$'}ns_out" | grep -q ':2222 ' && ssh=1
                 fi
-                echo "${'$'}status|${'$'}src_ok|${'$'}mnt|${'$'}procs|${'$'}ram|${'$'}swap|${'$'}cs|${'$'}ssh"
+                echo "${'$'}status|${'$'}src_ok|${'$'}mnt|${'$'}procs|${'$'}ram|${'$'}swap|${'$'}cs|${'$'}ssh|${'$'}rf"
             else
-                echo "${'$'}status|${'$'}src_ok|0|0|0|0|0|0"
+                echo "${'$'}status|${'$'}src_ok|0|0|0|0|0|0|${'$'}rf"
             fi
         """.trimIndent()
 
@@ -109,10 +140,16 @@ object ChrootManager {
             val swapUsed = parts[5].toLongOrNull() ?: 0L
             val isCodeServer = parts[6] == "1"
             val isSsh = parts[7] == "1"
+            val detectedRf = if (parts.size >= 9 && parts[8].isNotBlank()) parts[8].trim() else rootfs
+
+            if (detectedRf != activeRootfs && statusText == "EXISTS") {
+                activeRootfs = detectedRf
+                appContext?.let { setActiveRootfs(it, detectedRf) }
+            }
 
             val isRootfsExists = statusText == "EXISTS"
             if (!isRootfsExists) {
-                AppLogger.w("ChrootManager", "Status rootfs di $rootfs: $statusText")
+                AppLogger.w("ChrootManager", "Status rootfs di $detectedRf: $statusText")
             }
 
             val resultState = ChrootState(
@@ -124,7 +161,7 @@ object ChrootManager {
                 swapUsedMb = swapUsed,
                 isCodeServerRunning = isCodeServer,
                 isSshRunning = isSsh,
-                rootfsPath = rootfs,
+                rootfsPath = activeRootfs,
                 isSourceChrootAvailable = isSourceOk
             )
             lastKnownState = resultState
@@ -135,7 +172,7 @@ object ChrootManager {
         val fallbackState = ChrootState(
             isRootGranted = true,
             isRootfsExists = false,
-            rootfsPath = rootfs
+            rootfsPath = activeRootfs
         )
         lastKnownState = fallbackState
         return fallbackState
@@ -174,6 +211,65 @@ XDG_EOF
                 chmod 755 '$rootfs/usr/local/bin/xdg-open' 2>/dev/null || true
                 ln -sf /usr/local/bin/xdg-open '$rootfs/usr/bin/xdg-open' 2>/dev/null || true
                 ln -sf /usr/local/bin/xdg-open '$rootfs/usr/bin/x-www-browser' 2>/dev/null || true
+            fi
+
+            mkdir -p '$rootfs/tmp/devbox-bridge'
+            chmod 777 '$rootfs/tmp/devbox-bridge' 2>/dev/null || true
+            if [ ! -f '$rootfs/usr/local/bin/devbox-bridge' ]; then
+                mkdir -p '$rootfs/usr/local/bin'
+                cat <<'BRIDGE_EOF' > '$rootfs/usr/local/bin/devbox-bridge'
+#!/bin/sh
+BRIDGE_DIR="/tmp/devbox-bridge"
+mkdir -p "${'$'}BRIDGE_DIR" 2>/dev/null || true
+chmod 777 "${'$'}BRIDGE_DIR" 2>/dev/null || true
+
+CMD="${'$'}1"
+case "${'$'}CMD" in
+    copy|clip)
+        shift
+        TEXT="${'$'}*"
+        if [ -z "${'$'}TEXT" ]; then
+            TEXT=${'$'}(cat)
+        fi
+        printf "%s" "${'$'}TEXT" > "${'$'}BRIDGE_DIR/clipboard.txt" 2>/dev/null || true
+        printf "\033]52;c;%s\a" "${'$'}(printf "%s" "${'$'}TEXT" | base64 | tr -d '\r\n')" 2>/dev/null || true
+        echo "DevBox Bridge: Teks disalin ke clipboard."
+        ;;
+    notify)
+        shift
+        TITLE="${'$'}{1:-DevBox Agent}"
+        shift
+        MSG="${'$'}*"
+        printf "%s|%s\n" "${'$'}TITLE" "${'$'}MSG" > "${'$'}BRIDGE_DIR/notify.txt" 2>/dev/null || true
+        echo "DevBox Bridge: Notifikasi dikirim: ${'$'}TITLE - ${'$'}MSG"
+        ;;
+    open|url)
+        shift
+        URL="${'$'}1"
+        if [ -n "${'$'}URL" ]; then
+            printf "%s\n" "${'$'}URL" > "${'$'}BRIDGE_DIR/url.txt" 2>/dev/null || true
+            /usr/local/bin/xdg-open "${'$'}URL" 2>/dev/null || true
+        fi
+        ;;
+    transcript|last-agent)
+        BRAIN_DIR="${'$'}HOME/.gemini/antigravity-cli/brain"
+        [ -d "${'$'}BRAIN_DIR" ] || BRAIN_DIR="/home/coder/.gemini/antigravity-cli/brain"
+        LATEST_LOG=${'$'}(find "${'$'}BRAIN_DIR" -name "transcript.jsonl" -type f 2>/dev/null | xargs ls -t 2>/dev/null | head -n1)
+        if [ -f "${'$'}LATEST_LOG" ]; then
+            grep '"type":"PLANNER_RESPONSE"' "${'$'}LATEST_LOG" | tail -n1
+        else
+            echo "Belum ada riwayat Antigravity CLI."
+        fi
+        ;;
+    *)
+        echo "DevBox Bridge v1.0.48"
+        echo "Usage: devbox-bridge <copy|notify|open|transcript> [args...]"
+        ;;
+esac
+BRIDGE_EOF
+                chmod 755 '$rootfs/usr/local/bin/devbox-bridge' 2>/dev/null || true
+                ln -sf /usr/local/bin/devbox-bridge '$rootfs/usr/bin/devbox-bridge' 2>/dev/null || true
+                ln -sf /usr/local/bin/devbox-bridge '$rootfs/usr/local/bin/devbox-clip' 2>/dev/null || true
             fi
             echo 'SUCCESS'
         """.trimIndent()
@@ -267,23 +363,17 @@ XDG_EOF
             done
 
             for p in /proc/[0-9]*; do
+              [ -d "${'$'}p" ] || continue
               if [ "$(readlink ${'$'}p/root 2>/dev/null)" = '$rootfs' ]; then
                 pid=${'$'}(basename ${'$'}p)
 
-                # Proteksi 1: Lewati jika PID termasuk di pohon proses sesi aktif
-                is_active=0
-                for ap in ${'$'}active_pids ${'$'}active_descendants; do
-                    if [ -n "${'$'}ap" ] && [ "${'$'}ap" = "${'$'}pid" ]; then
-                        is_active=1
-                        break
-                    fi
-                done
-                if [ "${'$'}is_active" -eq 1 ]; then
-                    continue
-                fi
+                # Proteksi 1: Lewati jika PID termasuk di pohon proses sesi aktif (Cek cepat O(1))
+                case " ${'$'}active_pids ${'$'}active_descendants " in
+                    *" ${'$'}pid "*) continue ;;
+                esac
 
                 comm=${'$'}(cat ${'$'}p/comm 2>/dev/null)
-                sid=${'$'}(tr '\0' '\n' < ${'$'}p/environ 2>/dev/null | grep -a '^DEVBOX_SESSION_ID=' | head -n1 | cut -d= -f2)
+                sid=${'$'}(grep -s -a -z '^DEVBOX_SESSION_ID=' ${'$'}p/environ 2>/dev/null | tr -d '\0' | cut -d= -f2)
                 rss=${'$'}(awk '/VmRSS/{print ${'$'}2}' ${'$'}p/status 2>/dev/null || echo 0)
                 echo "${'$'}pid|${'$'}comm|${'$'}sid|${'$'}rss"
               fi

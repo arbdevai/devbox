@@ -98,22 +98,45 @@ object RootExecutor {
                 writer.write("echo \"$token $?\"\n")
                 writer.flush()
 
-                var line: String?
-                while (reader.readLine().also { line = it } != null) {
-                    if (line == token) break
+                val startTime = System.currentTimeMillis()
+                val timeoutMs = 12000L // Batas waktu 12 detik untuk mencegah deadlock shell
+
+                var tokenFound = false
+                while (System.currentTimeMillis() - startTime < timeoutMs) {
+                    if (reader.ready()) {
+                        val line = reader.readLine()
+                        if (line == token) {
+                            tokenFound = true
+                            break
+                        }
+                    } else {
+                        Thread.sleep(10)
+                    }
+                }
+                if (!tokenFound) {
+                    throw java.util.concurrent.TimeoutException("Perintah root timeout menunggu token mulai: $command")
                 }
 
                 val stdoutBuilder = StringBuilder()
                 var exitCode = 0
-                while (reader.readLine().also { line = it } != null) {
-                    val cur = line ?: break
-                    if (cur.startsWith(token)) {
-                        val codeStr = cur.substringAfter(token).trim()
-                        exitCode = codeStr.toIntOrNull() ?: 0
-                        break
+                var endTokenFound = false
+                while (System.currentTimeMillis() - startTime < timeoutMs) {
+                    if (reader.ready()) {
+                        val cur = reader.readLine() ?: break
+                        if (cur.startsWith(token)) {
+                            val codeStr = cur.substringAfter(token).trim()
+                            exitCode = codeStr.toIntOrNull() ?: 0
+                            endTokenFound = true
+                            break
+                        }
+                        if (stdoutBuilder.isNotEmpty()) stdoutBuilder.append('\n')
+                        stdoutBuilder.append(cur)
+                    } else {
+                        Thread.sleep(10)
                     }
-                    if (stdoutBuilder.isNotEmpty()) stdoutBuilder.append('\n')
-                    stdoutBuilder.append(cur)
+                }
+                if (!endTokenFound) {
+                    throw java.util.concurrent.TimeoutException("Perintah root timeout membaca output: $command")
                 }
 
                 val res = CommandResult(exitCode, stdoutBuilder.toString().trim(), "")

@@ -10,6 +10,7 @@ import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.lifecycleScope
+import com.arbdev.devbox.data.ChrootManager
 import com.arbdev.devbox.service.KeepAliveService
 import com.arbdev.devbox.ui.DevBoxApp
 import com.arbdev.devbox.ui.theme.DevBoxTheme
@@ -28,6 +29,9 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+
+        // Inisialisasi path rootfs persisten dari SharedPreferences
+        ChrootManager.init(applicationContext)
 
         // Otomatis bersihkan seluruh sisa file APK lama saat aplikasi dibuka
         lifecycleScope.launch(Dispatchers.IO) {
