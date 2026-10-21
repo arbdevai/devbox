@@ -33,9 +33,10 @@ class MainActivity : ComponentActivity() {
         // Inisialisasi path rootfs persisten dari SharedPreferences
         ChrootManager.init(applicationContext)
 
-        // Otomatis bersihkan seluruh sisa file APK lama saat aplikasi dibuka
+        // Otomatis bersihkan sisa APK lama dan lock proses agy usang saat aplikasi dibuka
         lifecycleScope.launch(Dispatchers.IO) {
             UpdateManager.cleanupOldApks(applicationContext)
+            ChrootManager.cleanStaleAgyLocks()
         }
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {

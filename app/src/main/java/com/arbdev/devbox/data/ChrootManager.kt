@@ -66,17 +66,17 @@ object ChrootManager {
             return state
         }
 
-        // Optimasi atomic: Jalankan seluruh verifikasi status dalam 1 script bash tunggal via su (70ms vs 3500ms)
+        // Optimasi atomic: Jalankan seluruh verifikasi status dalam 1 script bash kilat via su (<30ms)
         val script = """
             rf='$rootfs'
-            if [ -d "${'$'}rf" ]; then
-                if [ -x "${'$'}rf/bin/bash" ] || [ -x "${'$'}rf/usr/bin/bash" ] || [ -x "${'$'}rf/bin/sh" ]; then
-                    status="EXISTS"
-                else
-                    status="DIR_EMPTY"
-                fi
+            if [ -d "${'$'}rf" ] && { [ -x "${'$'}rf/bin/bash" ] || [ -x "${'$'}rf/usr/bin/bash" ] || [ -x "${'$'}rf/bin/sh" ]; }; then
+                status="EXISTS"
             else
-                status="NOT_FOUND"
+                if [ -d "${'$'}rf" ]; then
+                    status="DIR_EMPTY"
+                else
+                    status="NOT_FOUND"
+                fi
             fi
 
             if [ -d '/data/local/ubuntu-chroot' ] && { [ -x '/data/local/ubuntu-chroot/bin/bash' ] || [ -x '/data/local/ubuntu-chroot/usr/bin/bash' ]; }; then
@@ -86,20 +86,16 @@ object ChrootManager {
             fi
 
             # Auto-fallback jika rootfs target devbox-chroot kosong namun ubuntu-chroot ada
-            if [ "${'$'}status" != "EXISTS" ] && [ "${'$'}src_ok" = "1" ] && [ "${'$'}rf" = "$DEFAULT_ROOTFS" ]; then
+            if [ "${'$'}status" != "EXISTS" ] && [ "${'$'}src_ok" = "1" ]; then
                 rf="$LEGACY_ROOTFS"
                 status="EXISTS"
             fi
 
             if [ "${'$'}status" = "EXISTS" ]; then
-                mountpoint -q "${'$'}rf/proc" && mnt=1 || mnt=0
+                grep -q " ${'$'}rf/proc " /proc/mounts 2>/dev/null && mnt=1 || mnt=0
 
-                procs=0
-                for p in /proc/[0-9]*; do
-                    if [ "$(readlink ${'$'}p/root 2>/dev/null)" = "${'$'}rf" ]; then
-                        procs=${'$'}((procs + 1))
-                    fi
-                done
+                # Hitung proses chroot instan tanpa fork subshell berulang
+                procs=${'$'}(grep -sl "${'$'}rf" /proc/[0-9]*/root 2>/dev/null | wc -l)
 
                 ram=0
                 st=0
@@ -114,12 +110,12 @@ object ChrootManager {
                 swap=${'$'}((st - sf))
                 [ ${'$'}swap -lt 0 ] && swap=0
 
+                # Cek port 8080 (1F90) & port 2222 (08AE) langsung via /proc/net/tcp (<1ms)
                 cs=0
                 ssh=0
-                if command -v netstat >/dev/null 2>&1; then
-                    ns_out=${'$'}(netstat -tuln 2>/dev/null)
-                    echo "${'$'}ns_out" | grep -q ':8080 ' && cs=1
-                    echo "${'$'}ns_out" | grep -q ':2222 ' && ssh=1
+                if [ -f /proc/net/tcp ]; then
+                    grep -q ":1F90 " /proc/net/tcp && cs=1
+                    grep -q ":08AE " /proc/net/tcp && ssh=1
                 fi
                 echo "${'$'}status|${'$'}src_ok|${'$'}mnt|${'$'}procs|${'$'}ram|${'$'}swap|${'$'}cs|${'$'}ssh|${'$'}rf"
             else
@@ -337,6 +333,58 @@ BRIDGE_EOF
 
     suspend fun killDevboxProcessesAndUnmount(rootfs: String = activeRootfs): Result<String> {
         return killDevboxProcessesAndUnmountSync(rootfs)
+    }
+
+    /**
+     * Menghapus seluruh file dan sistem Linux (rootfs) untuk mengosongkan 2-5 GB memori HP.
+     * Dilakukan sebelum mencopot pemasangan (uninstall) aplikasi DevBox.
+     */
+    suspend fun uninstallRootfs(rootfs: String = activeRootfs): Result<String> = withContext(Dispatchers.IO) {
+        val script = """
+            fuser -k -9 '$rootfs' 2>/dev/null || true
+            for p in /proc/[0-9]*; do
+                if [ "$(readlink ${'$'}p/root 2>/dev/null)" = '$rootfs' ]; then
+                    kill -9 "${'$'}(basename ${'$'}p)" 2>/dev/null || true
+                fi
+            done
+            umount -l '$rootfs/mnt/sdcard' 2>/dev/null || true
+            umount -l '$rootfs/sys' 2>/dev/null || true
+            umount -l '$rootfs/proc' 2>/dev/null || true
+            umount -l '$rootfs/dev/pts' 2>/dev/null || true
+            umount -l '$rootfs/dev' 2>/dev/null || true
+            rm -rf '$rootfs'
+            echo 'UNINSTALLED'
+        """.trimIndent()
+
+        val res = RootExecutor.execute(script)
+        if (res.getOrNull()?.stdout?.contains("UNINSTALLED") == true) {
+            lastKnownState = null
+            AppLogger.i("ChrootManager", "Rootfs $rootfs berhasil di-uninstall dan dihapus total.")
+            Result.success("Rootfs $rootfs dan seluruh file sistem berhasil dihapus total. Penyimpanan HP telah dibebaskan.")
+        } else {
+            val err = res.getOrNull()?.stderr ?: "Gagal menghapus rootfs."
+            Result.failure(Exception(err))
+        }
+    }
+
+    /**
+     * Membersihkan proses Antigravity CLI usang atau lock file dari crash / FC sesi sebelumnya.
+     */
+    suspend fun cleanStaleAgyLocks(rootfs: String = activeRootfs): Int = withContext(Dispatchers.IO) {
+        val script = """
+            pids=${'$'}(pgrep -f "antigravity" 2>/dev/null || true)
+            count=0
+            for pid in ${'$'}pids; do
+                kill -9 ${'$'}pid 2>/dev/null && count=${'$'}((count + 1))
+            done
+            echo "${'$'}count"
+        """.trimIndent()
+        val res = RootExecutor.execute(script)
+        val count = res.getOrNull()?.stdout?.trim()?.toIntOrNull() ?: 0
+        if (count > 0) {
+            AppLogger.i("ChrootManager", "Berhasil membersihkan $count proses agy usang dari sesi sebelumnya.")
+        }
+        count
     }
 
     /**

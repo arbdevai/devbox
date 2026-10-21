@@ -627,6 +627,28 @@ fun TerminalScreen(
                             text = {
                                 Row(verticalAlignment = Alignment.CenterVertically) {
                                     Icon(
+                                        imageVector = Icons.Default.SmartToy,
+                                        contentDescription = null,
+                                        tint = Color(0xFFFF9800),
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(10.dp))
+                                    Text("Reset Lock agy (Anti-FC)", color = Color.White, fontSize = 13.sp)
+                                }
+                            },
+                            onClick = {
+                                showOverflowMenu = false
+                                coroutineScope.launch {
+                                    val count = ChrootManager.cleanStaleAgyLocks()
+                                    Toast.makeText(context, "$count sesi/lock agy lama dibersihkan", Toast.LENGTH_SHORT).show()
+                                }
+                            }
+                        )
+
+                        DropdownMenuItem(
+                            text = {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Icon(
                                         imageVector = Icons.Default.Link,
                                         contentDescription = null,
                                         tint = DevPrimary,

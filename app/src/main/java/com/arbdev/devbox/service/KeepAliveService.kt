@@ -115,21 +115,30 @@ class KeepAliveService : Service() {
         when (intent?.action) {
             ACTION_KILL_ALL -> {
                 serviceScope.launch {
-                    TerminalSessionManager.terminateAll()
-                    ChrootManager.killDevboxProcessesAndUnmount()
-                    releaseWakeLock()
-                    stopForeground(STOP_FOREGROUND_REMOVE)
+                    try {
+                        isRunning = false
+                        releaseWakeLock()
+                        stopForeground(STOP_FOREGROUND_REMOVE)
+                        val nm = getSystemService(NotificationManager::class.java)
+                        nm?.cancel(NOTIFICATION_ID)
+                        nm?.cancelAll()
+                        TerminalSessionManager.terminateAll()
+                        ChrootManager.killDevboxProcessesAndUnmountSync()
+                    } catch (_: Exception) {}
                     stopSelf()
-                    isRunning = false
+                    kotlinx.coroutines.delay(400)
                     android.os.Process.killProcess(android.os.Process.myPid())
                 }
                 return START_NOT_STICKY
             }
             ACTION_STOP -> {
+                isRunning = false
                 releaseWakeLock()
                 stopForeground(STOP_FOREGROUND_REMOVE)
+                val nm = getSystemService(NotificationManager::class.java)
+                nm?.cancel(NOTIFICATION_ID)
+                nm?.cancelAll()
                 stopSelf()
-                isRunning = false
                 return START_NOT_STICKY
             }
         }
@@ -139,7 +148,7 @@ class KeepAliveService : Service() {
         startForeground(NOTIFICATION_ID, notification)
         isRunning = true
 
-        return START_STICKY
+        return START_NOT_STICKY
     }
 
     private fun acquireWakeLock() {

@@ -36,6 +36,7 @@ import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.CloudDownload
 import androidx.compose.material.icons.filled.Code
 import androidx.compose.material.icons.filled.ContentCopy
+import androidx.compose.material.icons.filled.DeleteSweep
 import androidx.compose.material.icons.filled.Dns
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.Info
@@ -126,6 +127,14 @@ fun DashboardScreen(
     // Dialog Changelog Versi Saat Ini
     var showCurrentChangelogDialog by remember { mutableStateOf(false) }
 
+    // Dialog Konfirmasi Keluar Total
+    var showExitConfirmationDialog by remember { mutableStateOf(false) }
+    var isExiting by remember { mutableStateOf(false) }
+
+    // Dialog Konfirmasi Hapus Rootfs (Uninstall)
+    var showUninstallDialog by remember { mutableStateOf(false) }
+    var isUninstalling by remember { mutableStateOf(false) }
+
     // In-App Updater State
     val updateStatus by UpdateManager.updateStatus.collectAsState()
 
@@ -134,13 +143,6 @@ fun DashboardScreen(
             isRefreshing = true
             state = ChrootManager.getChrootState()
             isInitialLoading = false
-            if (state.isMounted && state.isRootfsExists) {
-                val activeIds = TerminalSessionManager.sessions.map { it.id }
-                val activePids = TerminalSessionManager.sessions.mapNotNull { it.getProcessPid() }
-                orphanProcesses = ChrootManager.getOrphanChrootProcesses(activeIds, activePids)
-            } else {
-                orphanProcesses = emptyList()
-            }
             wakeLockActive = KeepAliveService.isRunning
             isRefreshing = false
         }
@@ -677,11 +679,27 @@ fun DashboardScreen(
 
         Spacer(modifier = Modifier.height(28.dp))
 
+        // Tombol Uninstall Rootfs (Bebaskan 2-5 GB memori HP sebelum uninstall APK)
+        OutlinedButton(
+            onClick = { showUninstallDialog = true },
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(52.dp),
+            shape = RoundedCornerShape(12.dp),
+            colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFFFF5252)),
+            border = BorderStroke(1.dp, Color(0xFFFF5252).copy(alpha = 0.5f))
+        ) {
+            Icon(Icons.Default.DeleteSweep, contentDescription = null, tint = Color(0xFFFF5252))
+            Spacer(modifier = Modifier.width(8.dp))
+            Text("Hapus Rootfs Total (Bebaskan Memori)", fontWeight = FontWeight.SemiBold)
+        }
+
+        Spacer(modifier = Modifier.height(12.dp))
+
         // Exit & Stop Container Button
         OutlinedButton(
             onClick = {
-                KeepAliveService.killAllAndExit(context)
-                (context as? Activity)?.finishAffinity()
+                showExitConfirmationDialog = true
             },
             modifier = Modifier
                 .fillMaxWidth()
@@ -694,6 +712,144 @@ fun DashboardScreen(
             Spacer(modifier = Modifier.width(8.dp))
             Text("Matikan DevBox & Keluar Total", fontWeight = FontWeight.SemiBold)
         }
+    }
+
+    // Dialog Konfirmasi Keluar Total
+    if (showExitConfirmationDialog) {
+        AlertDialog(
+            onDismissRequest = { if (!isExiting) showExitConfirmationDialog = false },
+            title = {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Default.PowerSettingsNew, contentDescription = null, tint = DevError)
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("Matikan DevBox & Keluar Total", fontSize = 16.sp)
+                }
+            },
+            text = {
+                if (isExiting) {
+                    Column(
+                        horizontalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.fillMaxWidth().padding(vertical = 12.dp)
+                    ) {
+                        CircularProgressIndicator(color = DevError, modifier = Modifier.size(36.dp))
+                        Spacer(modifier = Modifier.height(12.dp))
+                        Text(
+                            text = "Menghentikan container & menutup background service...",
+                            fontSize = 13.sp,
+                            color = Color.White
+                        )
+                    }
+                } else {
+                    Text(
+                        text = "Apakah Anda yakin ingin mematikan semua proses container Linux, melepas mountpoint, dan menghentikan background service DevBox?",
+                        color = Color.LightGray,
+                        fontSize = 13.sp
+                    )
+                }
+            },
+            confirmButton = {
+                if (!isExiting) {
+                    Button(
+                        onClick = {
+                            scope.launch {
+                                isExiting = true
+                                KeepAliveService.killAllAndExit(context)
+                                kotlinx.coroutines.delay(600)
+                                (context as? Activity)?.finishAffinity()
+                            }
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = DevError)
+                    ) {
+                        Text("Matikan & Keluar", color = Color.White, fontWeight = FontWeight.Bold)
+                    }
+                }
+            },
+            dismissButton = {
+                if (!isExiting) {
+                    TextButton(onClick = { showExitConfirmationDialog = false }) {
+                        Text("Batal", color = Color.Gray)
+                    }
+                }
+            }
+        )
+    }
+
+    // Dialog Konfirmasi Hapus Rootfs (Uninstall)
+    if (showUninstallDialog) {
+        AlertDialog(
+            onDismissRequest = { if (!isUninstalling) showUninstallDialog = false },
+            title = {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Default.Warning, contentDescription = null, tint = Color(0xFFFF5252))
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("Hapus Rootfs & Bersihkan Memori", color = Color(0xFFFF5252), fontSize = 16.sp)
+                }
+            },
+            text = {
+                if (isUninstalling) {
+                    Column(
+                        horizontalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.fillMaxWidth().padding(vertical = 12.dp)
+                    ) {
+                        CircularProgressIndicator(color = Color(0xFFFF5252), modifier = Modifier.size(36.dp))
+                        Spacer(modifier = Modifier.height(12.dp))
+                        Text(
+                            text = "Menghapus seluruh file Linux & mengosongkan memori HP...",
+                            fontSize = 13.sp,
+                            color = Color.White
+                        )
+                    }
+                } else {
+                    Column {
+                        Text(
+                            text = "PERINGATAN KERAS: Tindakan ini akan menghentikan container, melepas mountpoint, dan MENGHAPUS SELURUH FILE SISTEM di:",
+                            fontSize = 13.sp,
+                            color = Color.White
+                        )
+                        Spacer(modifier = Modifier.height(6.dp))
+                        Text(
+                            text = ChrootManager.activeRootfs,
+                            fontFamily = FontFamily.Monospace,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 12.sp,
+                            color = DevPrimary
+                        )
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text(
+                            text = "Tindakan ini akan mengosongkan 2-5 GB penyimpanan internal HP Anda. Lakukan ini jika ingin mencopot (uninstall) aplikasi DevBox secara bersih. Data di dalam container TIDAK DAPAT dipulihkan.",
+                            fontSize = 12.sp,
+                            color = Color(0xFFFFB4AB)
+                        )
+                    }
+                }
+            },
+            confirmButton = {
+                if (!isUninstalling) {
+                    Button(
+                        onClick = {
+                            scope.launch {
+                                isUninstalling = true
+                                val res = ChrootManager.uninstallRootfs(ChrootManager.activeRootfs)
+                                isUninstalling = false
+                                showUninstallDialog = false
+                                refreshState()
+                                Toast.makeText(context, res.getOrNull() ?: res.exceptionOrNull()?.message, Toast.LENGTH_LONG).show()
+                            }
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFF5252))
+                    ) {
+                        Text("Hapus Total Sekarang", color = Color.White, fontWeight = FontWeight.Bold)
+                    }
+                }
+            },
+            dismissButton = {
+                if (!isUninstalling) {
+                    TextButton(onClick = { showUninstallDialog = false }) {
+                        Text("Batal", color = Color.Gray)
+                    }
+                }
+            }
+        )
     }
 
     // Custom Path Dialog

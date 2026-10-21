@@ -84,84 +84,59 @@ object RootExecutor {
     }
 
     fun executeSync(command: String, silent: Boolean = false): Result<CommandResult> {
-        synchronized(shellLock) {
-            if (!getOrCreateShell()) {
-                return executeDirect(command, silent)
-            }
-            return try {
-                val writer = shellWriter ?: return executeDirect(command, silent)
-                val reader = shellReader ?: return executeDirect(command, silent)
-                val token = "__DEVBOX_TOKEN_${System.nanoTime()}__"
-
-                writer.write("echo '$token'\n")
-                writer.write("($command)\n")
-                writer.write("echo \"$token $?\"\n")
-                writer.flush()
-
-                val startTime = System.currentTimeMillis()
-                val timeoutMs = 12000L // Batas waktu 12 detik untuk mencegah deadlock shell
-
-                var tokenFound = false
-                while (System.currentTimeMillis() - startTime < timeoutMs) {
-                    if (reader.ready()) {
-                        val line = reader.readLine()
-                        if (line == token) {
-                            tokenFound = true
-                            break
-                        }
-                    } else {
-                        Thread.sleep(10)
-                    }
-                }
-                if (!tokenFound) {
-                    throw java.util.concurrent.TimeoutException("Perintah root timeout menunggu token mulai: $command")
-                }
-
-                val stdoutBuilder = StringBuilder()
-                var exitCode = 0
-                var endTokenFound = false
-                while (System.currentTimeMillis() - startTime < timeoutMs) {
-                    if (reader.ready()) {
-                        val cur = reader.readLine() ?: break
-                        if (cur.startsWith(token)) {
-                            val codeStr = cur.substringAfter(token).trim()
-                            exitCode = codeStr.toIntOrNull() ?: 0
-                            endTokenFound = true
-                            break
-                        }
-                        if (stdoutBuilder.isNotEmpty()) stdoutBuilder.append('\n')
-                        stdoutBuilder.append(cur)
-                    } else {
-                        Thread.sleep(10)
-                    }
-                }
-                if (!endTokenFound) {
-                    throw java.util.concurrent.TimeoutException("Perintah root timeout membaca output: $command")
-                }
-
-                val res = CommandResult(exitCode, stdoutBuilder.toString().trim(), "")
-                if (!silent) {
-                    AppLogger.cmd(command, exitCode, res.stdout, "")
-                }
-                cachedRootAvailable = true
-                Result.success(res)
-            } catch (e: Exception) {
-                destroyShell()
-                executeDirect(command, silent)
-            }
-        }
+        return executeDirect(command, silent)
     }
 
-    private fun executeDirect(command: String, silent: Boolean = false): Result<CommandResult> {
+    private fun executeDirect(command: String, silent: Boolean = false, timeoutMs: Long = 10000L): Result<CommandResult> {
         return try {
             val process = ProcessBuilder("su", "-c", command).start()
-            val stdout = process.inputStream.bufferedReader().use(BufferedReader::readText)
-            val stderr = process.errorStream.bufferedReader().use(BufferedReader::readText)
-            val exitCode = process.waitFor()
-            val res = CommandResult(exitCode, stdout.trim(), stderr.trim())
+            val stdoutBuilder = StringBuilder()
+            val stderrBuilder = StringBuilder()
+
+            val stdoutThread = Thread {
+                try {
+                    process.inputStream.bufferedReader().useLines { lines ->
+                        lines.forEach { line ->
+                            if (stdoutBuilder.isNotEmpty()) stdoutBuilder.append('\n')
+                            stdoutBuilder.append(line)
+                        }
+                    }
+                } catch (_: Exception) {}
+            }
+
+            val stderrThread = Thread {
+                try {
+                    process.errorStream.bufferedReader().useLines { lines ->
+                        lines.forEach { line ->
+                            if (stderrBuilder.isNotEmpty()) stderrBuilder.append('\n')
+                            stderrBuilder.append(line)
+                        }
+                    }
+                } catch (_: Exception) {}
+            }
+
+            stdoutThread.start()
+            stderrThread.start()
+
+            val finished = process.waitFor(timeoutMs, java.util.concurrent.TimeUnit.MILLISECONDS)
+            if (!finished) {
+                process.destroyForcibly()
+                stdoutThread.interrupt()
+                stderrThread.interrupt()
+                val timeoutErr = "Perintah root timeout ($timeoutMs ms): $command"
+                if (!silent) AppLogger.w("RootExecutor", timeoutErr)
+                return Result.failure(java.util.concurrent.TimeoutException(timeoutErr))
+            }
+
+            stdoutThread.join(400)
+            stderrThread.join(400)
+
+            val exitCode = process.exitValue()
+            val res = CommandResult(exitCode, stdoutBuilder.toString().trim(), stderrBuilder.toString().trim())
             if (!silent) {
                 AppLogger.cmd(command, exitCode, res.stdout, res.stderr)
             }
+            cachedRootAvailable = true
             Result.success(res)
         } catch (e: Exception) {
             if (!silent) {

@@ -171,7 +171,7 @@ fun WebPreviewScreen() {
 
     val currentTab = tabs.getOrNull(activeTabIndex) ?: tabs.firstOrNull() ?: WebTabItem(initialUrl = "http://127.0.0.1:3000")
 
-    var urlInput by remember { mutableStateOf(currentTab.url) }
+    var urlInput by remember(currentTab.id) { mutableStateOf(currentTab.url) }
     var webViewRef by remember { mutableStateOf<WebView?>(null) }
     var isLoading by remember { mutableStateOf(false) }
     var loadProgress by remember { mutableFloatStateOf(0f) }
@@ -179,9 +179,18 @@ fun WebPreviewScreen() {
     var canBack by remember { mutableStateOf(false) }
     var canForward by remember { mutableStateOf(false) }
 
+    LaunchedEffect(currentTab.id) {
+        urlInput = currentTab.url
+        canBack = currentTab.webView?.canGoBack() == true
+        canForward = currentTab.webView?.canGoForward() == true
+    }
+
     // Intercept back button for in-webview history navigation
     BackHandler(enabled = canBack) {
-        (currentTab.webView ?: webViewRef)?.goBack()
+        val activeView = currentTab.webView ?: webViewRef
+        if (activeView?.canGoBack() == true) {
+            activeView.goBack()
+        }
     }
 
     fun navigateTo(url: String) {
@@ -231,6 +240,8 @@ fun WebPreviewScreen() {
                             if (activeTabIndex != index) {
                                 activeTabIndex = index
                                 urlInput = tab.url
+                                canBack = tab.webView?.canGoBack() == true
+                                canForward = tab.webView?.canGoForward() == true
                                 WebPreviewStateManager.save(context)
                             }
                         }
@@ -263,6 +274,8 @@ fun WebPreviewScreen() {
                                     }
                                     val newActive = tabs[activeTabIndex]
                                     urlInput = newActive.url
+                                    canBack = newActive.webView?.canGoBack() == true
+                                    canForward = newActive.webView?.canGoForward() == true
                                     WebPreviewStateManager.save(context)
                                 }
                         )
@@ -273,10 +286,16 @@ fun WebPreviewScreen() {
             // Add Tab Button (+)
             IconButton(
                 onClick = {
-                    val newTab = WebTabItem(initialUrl = "http://127.0.0.1:5173", initialTitle = ":5173")
+                    val defaultUrl = "http://127.0.0.1:3000"
+                    val newTab = WebTabItem(
+                        initialUrl = defaultUrl,
+                        initialTitle = WebPreviewStateManager.getDisplayTitle(defaultUrl)
+                    )
                     tabs.add(newTab)
                     activeTabIndex = tabs.size - 1
                     urlInput = newTab.url
+                    canBack = false
+                    canForward = false
                     WebPreviewStateManager.save(context)
                 },
                 modifier = Modifier.size(28.dp)
@@ -449,25 +468,37 @@ fun WebPreviewScreen() {
 
                                 webViewClient = object : WebViewClient() {
                                     override fun onPageStarted(view: WebView?, url: String?, favicon: Bitmap?) {
-                                        isLoading = true
-                                        canBack = view?.canGoBack() == true
-                                        canForward = view?.canGoForward() == true
+                                        val active = tabs.getOrNull(activeTabIndex)
+                                        if (active?.id == currentTab.id) {
+                                            isLoading = true
+                                            canBack = view?.canGoBack() == true
+                                            canForward = view?.canGoForward() == true
+                                            url?.let { urlInput = it }
+                                        }
                                         url?.let {
-                                            urlInput = it
                                             currentTab.url = it
                                             WebPreviewStateManager.save(context)
                                         }
                                     }
 
                                     override fun onPageFinished(view: WebView?, url: String?) {
-                                        isLoading = false
-                                        canBack = view?.canGoBack() == true
-                                        canForward = view?.canGoForward() == true
+                                        val active = tabs.getOrNull(activeTabIndex)
+                                        if (active?.id == currentTab.id) {
+                                            isLoading = false
+                                            canBack = view?.canGoBack() == true
+                                            canForward = view?.canGoForward() == true
+                                            url?.let { urlInput = it }
+                                        }
                                         url?.let {
-                                            urlInput = it
                                             currentTab.url = it
                                             WebPreviewStateManager.save(context)
                                         }
+                                    }
+
+                                    override fun shouldOverrideUrlLoading(view: WebView?, request: android.webkit.WebResourceRequest?): Boolean {
+                                        val targetUrl = request?.url?.toString() ?: return false
+                                        view?.loadUrl(targetUrl)
+                                        return true
                                     }
                                 }
 
