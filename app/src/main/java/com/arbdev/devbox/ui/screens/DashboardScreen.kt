@@ -728,7 +728,7 @@ fun DashboardScreen(
             text = {
                 if (isExiting) {
                     Column(
-                        horizontalAlignment = Alignment.CenterVertically,
+                        horizontalAlignment = Alignment.CenterHorizontally,
                         modifier = Modifier.fillMaxWidth().padding(vertical = 12.dp)
                     ) {
                         CircularProgressIndicator(color = DevError, modifier = Modifier.size(36.dp))
@@ -788,7 +788,7 @@ fun DashboardScreen(
             text = {
                 if (isUninstalling) {
                     Column(
-                        horizontalAlignment = Alignment.CenterVertically,
+                        horizontalAlignment = Alignment.CenterHorizontally,
                         modifier = Modifier.fillMaxWidth().padding(vertical = 12.dp)
                     ) {
                         CircularProgressIndicator(color = Color(0xFFFF5252), modifier = Modifier.size(36.dp))
