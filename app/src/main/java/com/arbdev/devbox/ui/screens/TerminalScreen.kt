@@ -43,6 +43,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -95,6 +96,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.viewinterop.AndroidView
 import com.arbdev.devbox.data.ChrootManager
 import com.arbdev.devbox.data.ChrootProcessInfo
+import com.arbdev.devbox.data.RootExecutor
 import com.arbdev.devbox.terminal.TerminalInputView
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
