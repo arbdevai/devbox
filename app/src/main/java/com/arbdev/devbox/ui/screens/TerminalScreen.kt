@@ -2068,130 +2068,84 @@ fun TerminalCanvas(
             modifier = Modifier
                 .fillMaxSize()
                 .then(
-                    if (!isAltBuffer) Modifier.verticalScroll(verticalScrollState, enabled = !isSelectingText && selectionStart == null)
+                    if (!isAltBuffer) Modifier.verticalScroll(
+                        verticalScrollState,
+                        enabled = selectionStart == null && !isSelectModeActive
+                    )
                     else Modifier
                 )
-                .horizontalScroll(horizontalScrollState, enabled = !isSelectingText && selectionStart == null)
+                .horizontalScroll(
+                    horizontalScrollState,
+                    enabled = selectionStart == null && !isSelectModeActive
+                )
                 .padding(horizontal = 6.dp, vertical = 4.dp)
-                .pointerInput(session.buffer.isMouseTrackingEnabled, fontSizeSp, isAltBuffer, isShiftActive, isSelectModeActive) {
-                    awaitEachGesture {
-                        val down = awaitFirstDown(requireUnconsumed = false)
-                        val longPressTimeout = if (isShiftActive || isSelectModeActive) 0L else viewConfiguration.longPressTimeoutMillis
-                        var isLongPress = false
-
-                        if (isSelectModeActive || isShiftActive) {
-                            isLongPress = true
-                            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                            currentActionMode?.finish()
-                            currentActionMode = null
-                            if (charWidth > 0 && charHeight > 0) {
-                                val actualX = down.position.x + horizontalScrollState.value
-                                val actualY = if (!isAltBuffer) down.position.y + verticalScrollState.value else down.position.y
-                                val maxLine = (if (isAltBuffer) session.buffer.maxRows else session.buffer.getLineCount()) - 1
-                                val col = (actualX / charWidth).toInt().coerceIn(0, session.buffer.maxCols - 1)
-                                val line = (actualY / charHeight).toInt().coerceIn(0, maxLine.coerceAtLeast(0))
-                                isSelectingText = true
-                                val (wStart, wEnd) = findWordBounds(line, col)
-                                selectionStart = GridPoint(line, wStart)
-                                selectionEnd = GridPoint(line, wEnd)
-                            }
-                        } else {
-                            try {
-                                withTimeout(longPressTimeout) {
-                                    val up = waitForUpOrCancellation()
-                                    if (up != null) {
-                                        // Event TAP terdeteksi
-                                        if (currentActionMode != null || selectionStart != null) {
-                                            currentActionMode?.finish()
-                                            currentActionMode = null
-                                            selectionStart = null
-                                            selectionEnd = null
-                                            isSelectingText = false
-                                        } else {
-                                            onFocusRequest()
-                                            if (charWidth > 0 && charHeight > 0) {
-                                                val actualX = up.position.x + horizontalScrollState.value
-                                                val actualY = if (!isAltBuffer) up.position.y + verticalScrollState.value else up.position.y
-                                                val maxLine = (if (isAltBuffer) session.buffer.maxRows else session.buffer.getLineCount()) - 1
-                                                val col = (actualX / charWidth).toInt().coerceIn(0, session.buffer.maxCols - 1)
-                                                val line = (actualY / charHeight).toInt().coerceIn(0, maxLine.coerceAtLeast(0))
-                                                val historyCount = if (session.buffer.isAltBuffer) 0 else session.buffer.getScrollbackSnapshot().size
-                                                val activeRow = line - historyCount
-
-                                                val detectedUrl = session.buffer.getUrlAt(line, col)
-                                                if (detectedUrl != null) {
-                                                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                                                    onTapUrl(detectedUrl)
-                                                } else if (!isSelectModeActive && selectionStart == null && session.buffer.isMouseTrackingEnabled) {
-                                                    if (activeRow in 0 until session.buffer.maxRows) {
-                                                        session.sendMouseEvent(0, col, activeRow, true)
-                                                        session.sendMouseEvent(0, col, activeRow, false)
-                                                    }
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-                            } catch (_: TimeoutCancellationException) {
-                                // Timeout terlampaui -> Pengguna menahan jari (LONG PRESS / SELECTION)
-                                isLongPress = true
-                                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                                onFocusRequest()
-                                currentActionMode?.finish()
-                                currentActionMode = null
-
+        ) {
+            Canvas(
+                modifier = Modifier
+                    .size(width = totalWidthDp, height = totalHeightDp)
+                    .pointerInput(session.buffer.isMouseTrackingEnabled, fontSizeSp, isAltBuffer, isShiftActive, isSelectModeActive) {
+                        detectTapGestures(
+                            onLongPress = { offset ->
                                 if (charWidth > 0 && charHeight > 0) {
-                                    val actualX = down.position.x + horizontalScrollState.value
-                                    val actualY = if (!isAltBuffer) down.position.y + verticalScrollState.value else down.position.y
+                                    val col = (offset.x / charWidth).toInt().coerceIn(0, session.buffer.maxCols - 1)
                                     val maxLine = (if (isAltBuffer) session.buffer.maxRows else session.buffer.getLineCount()) - 1
-                                    val col = (actualX / charWidth).toInt().coerceIn(0, session.buffer.maxCols - 1)
-                                    val line = (actualY / charHeight).toInt().coerceIn(0, maxLine.coerceAtLeast(0))
+                                    val line = (offset.y / charHeight).toInt().coerceIn(0, maxLine.coerceAtLeast(0))
 
-                                    // Jika menekan pada atau dekat URL, langsung buka prompt tautan
                                     val detectedUrl = session.buffer.getUrlAt(line, col)
                                     if (detectedUrl != null) {
+                                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
                                         onTapUrl(detectedUrl)
-                                        isLongPress = false
                                     } else {
-                                        isSelectingText = true
+                                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
                                         val (wStart, wEnd) = findWordBounds(line, col)
                                         selectionStart = GridPoint(line, wStart)
                                         selectionEnd = GridPoint(line, wEnd)
                                     }
                                 }
-                            }
-                        }
-
-                        if (isLongPress && isSelectingText) {
-                            // Loop drag untuk memperluas area seleksi secara bebas ke atas, bawah, kiri, kanan
-                            do {
-                                val event = awaitPointerEvent()
-                                val change = event.changes.firstOrNull() ?: break
-                                if (change.pressed) {
-                                    change.consume()
+                            },
+                            onTap = { offset ->
+                                if (selectionStart != null) {
+                                    selectionStart = null
+                                    selectionEnd = null
+                                    currentActionMode?.finish()
+                                    currentActionMode = null
+                                } else if (isSelectModeActive) {
+                                    // Dalam Mode Seleksi (SEL), tap langsung memilih kata di bawah jari
                                     if (charWidth > 0 && charHeight > 0) {
-                                        val actualX = change.position.x + horizontalScrollState.value
-                                        val actualY = if (!isAltBuffer) change.position.y + verticalScrollState.value else change.position.y
+                                        val col = (offset.x / charWidth).toInt().coerceIn(0, session.buffer.maxCols - 1)
                                         val maxLine = (if (isAltBuffer) session.buffer.maxRows else session.buffer.getLineCount()) - 1
-                                        val col = (actualX / charWidth).toInt().coerceIn(0, session.buffer.maxCols - 1)
-                                        val line = (actualY / charHeight).toInt().coerceIn(0, maxLine.coerceAtLeast(0))
-                                        selectionEnd = GridPoint(line, col)
+                                        val line = (offset.y / charHeight).toInt().coerceIn(0, maxLine.coerceAtLeast(0))
+
+                                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                        val (wStart, wEnd) = findWordBounds(line, col)
+                                        selectionStart = GridPoint(line, wStart)
+                                        selectionEnd = GridPoint(line, wEnd)
                                     }
                                 } else {
-                                    break
-                                }
-                            } while (event.changes.any { it.pressed })
+                                    if (charWidth > 0 && charHeight > 0) {
+                                        val col = (offset.x / charWidth).toInt().coerceIn(0, session.buffer.maxCols - 1)
+                                        val maxLine = (if (isAltBuffer) session.buffer.maxRows else session.buffer.getLineCount()) - 1
+                                        val line = (offset.y / charHeight).toInt().coerceIn(0, maxLine.coerceAtLeast(0))
+                                        val historyCount = if (session.buffer.isAltBuffer) 0 else session.buffer.getScrollbackSnapshot().size
+                                        val activeRow = line - historyCount
 
-                            isSelectingText = false
-                            if (selectionStart != null && selectionEnd != null) {
-                                currentActionMode = view.startActionMode(actionModeCallback, ActionMode.TYPE_FLOATING)
+                                        val detectedUrl = session.buffer.getUrlAt(line, col)
+                                        if (detectedUrl != null) {
+                                            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                            onTapUrl(detectedUrl)
+                                        } else if (session.buffer.isMouseTrackingEnabled && selectionStart == null) {
+                                            if (activeRow in 0 until session.buffer.maxRows) {
+                                                session.sendMouseEvent(0, col, activeRow, true)
+                                                session.sendMouseEvent(0, col, activeRow, false)
+                                            }
+                                        } else {
+                                            onFocusRequest()
+                                        }
+                                    }
+                                }
                             }
-                        }
+                        )
                     }
-                }
-        ) {
-            Canvas(
-                modifier = Modifier.size(width = totalWidthDp, height = totalHeightDp)
             ) {
                 val v = session.buffer.version.intValue // Daftarkan state di draw phase agar realtime redraw
                 val nativeCanvas = drawContext.canvas.nativeCanvas
@@ -2376,8 +2330,7 @@ fun TerminalCanvas(
                 // Pin Mulai (Start Handle)
                 SelectionHandle(
                     isStart = true,
-                    xPx = selMin.col * charWidth,
-                    yPx = (selMin.line + 1) * charHeight,
+                    gridPoint = selMin,
                     charWidth = charWidth,
                     charHeight = charHeight,
                     maxCols = session.buffer.maxCols,
@@ -2398,8 +2351,7 @@ fun TerminalCanvas(
                 // Pin Selesai (End Handle)
                 SelectionHandle(
                     isStart = false,
-                    xPx = (selMax.col + 1) * charWidth,
-                    yPx = (selMax.line + 1) * charHeight,
+                    gridPoint = selMax,
                     charWidth = charWidth,
                     charHeight = charHeight,
                     maxCols = session.buffer.maxCols,
@@ -2547,14 +2499,13 @@ fun TerminalCanvas(
 /**
  * Interactive Selection Handle Composable (Overlay Handle Composable Pattern).
  * Memiliki area sentuh 44dp dan mendeteksi drag terisolasi menggunakan detectDragGestures.
- * Drag events dikonsumsi (change.consume()) sehingga tidak mengganggu kanvas, scroll parent,
- * atau protokol mouse reporting Antigravity CLI.
+ * Drag delta dihitung relatif terhadap posisi sentuh awal (dragStartLine, dragStartCol),
+ * mencegah feedback loop yang membuat handle melompat liar ke baris paling bawah.
  */
 @Composable
 private fun SelectionHandle(
     isStart: Boolean,
-    xPx: Float,
-    yPx: Float,
+    gridPoint: GridPoint,
     charWidth: Float,
     charHeight: Float,
     maxCols: Int,
@@ -2566,16 +2517,16 @@ private fun SelectionHandle(
     val handleTouchSizePx = with(density) { handleTouchSizeDp.toPx() }
     val visualPinRadius = 6.dp
 
-    val offsetX = (xPx - handleTouchSizePx / 2f).coerceAtLeast(0f)
-    val offsetY = (yPx - 4f).coerceAtLeast(0f)
+    val pinX = if (isStart) gridPoint.col * charWidth else (gridPoint.col + 1) * charWidth
+    val pinY = (gridPoint.line + 1) * charHeight
 
-    var dragAccumulatorX by remember { mutableFloatStateOf(xPx) }
-    var dragAccumulatorY by remember { mutableFloatStateOf(yPx) }
+    val offsetX = (pinX - handleTouchSizePx / 2f).coerceAtLeast(0f)
+    val offsetY = (pinY - 4f).coerceAtLeast(0f)
 
-    LaunchedEffect(xPx, yPx) {
-        dragAccumulatorX = xPx
-        dragAccumulatorY = yPx
-    }
+    var dragStartLine by remember { mutableStateOf(0) }
+    var dragStartCol by remember { mutableStateOf(0) }
+    var totalDragX by remember { mutableFloatStateOf(0f) }
+    var totalDragY by remember { mutableFloatStateOf(0f) }
 
     Box(
         modifier = Modifier
@@ -2584,16 +2535,21 @@ private fun SelectionHandle(
             .pointerInput(isStart) {
                 detectDragGestures(
                     onDragStart = {
-                        dragAccumulatorX = xPx
-                        dragAccumulatorY = yPx
+                        dragStartLine = gridPoint.line
+                        dragStartCol = gridPoint.col
+                        totalDragX = 0f
+                        totalDragY = 0f
                     },
                     onDrag = { change, dragAmount ->
                         change.consume()
-                        dragAccumulatorX = (dragAccumulatorX + dragAmount.x).coerceIn(0f, maxCols * charWidth)
-                        dragAccumulatorY = (dragAccumulatorY + dragAmount.y).coerceIn(0f, (maxRows * charHeight).coerceAtLeast(1f))
+                        totalDragX += dragAmount.x
+                        totalDragY += dragAmount.y
 
-                        val newCol = (dragAccumulatorX / charWidth).toInt().coerceIn(0, maxCols - 1)
-                        val newLine = (dragAccumulatorY / charHeight).toInt().coerceIn(0, (maxRows - 1).coerceAtLeast(0))
+                        val deltaCol = (totalDragX / charWidth).toInt()
+                        val deltaLine = (totalDragY / charHeight).toInt()
+
+                        val newLine = (dragStartLine + deltaLine).coerceIn(0, (maxRows - 1).coerceAtLeast(0))
+                        val newCol = (dragStartCol + deltaCol).coerceIn(0, maxCols - 1)
 
                         onPositionChange(GridPoint(newLine, newCol))
                     }
