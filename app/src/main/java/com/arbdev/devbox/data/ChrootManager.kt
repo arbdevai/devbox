@@ -837,18 +837,16 @@ PAM_SU_EOF
             echo "sahal ALL=(ALL) NOPASSWD:ALL" >> "${'$'}rf/etc/sudoers.d/010_coder-nopasswd" 2>/dev/null || true
             chmod 0440 "${'$'}rf/etc/sudoers.d/010_coder-nopasswd" 2>/dev/null || true
 
-            # 6. Fallback wrapper sudo di /usr/local/bin/sudo (delegasi ke /usr/bin/sudo atau su root instan)
+            # 6. Wrapper sudo di /usr/local/bin/sudo (eksekusi langsung tanpa batas permission)
             cat << 'SUDO_EOF' > "${'$'}rf/usr/local/bin/sudo"
 #!/bin/bash
+if [ "$UID" -eq 0 ]; then
+    exec "$@"
+fi
 if [ -x /usr/bin/sudo ]; then
-    exec /usr/bin/sudo "${'$'}@"
+    exec /usr/bin/sudo "$@"
 fi
-CUR_DIR="${'$'}(pwd)"
-if [ ${'$'}# -eq 0 ]; then
-    exec /bin/su root
-else
-    exec /bin/su root -c "cd '${'$'}CUR_DIR' && $*"
-fi
+exec "$@"
 SUDO_EOF
             chmod 755 "${'$'}rf/usr/local/bin/sudo" 2>/dev/null || true
 
@@ -874,6 +872,10 @@ export TERM=xterm-256color
 export COLORTERM=truecolor
 export LANG=C.UTF-8
 export LC_ALL=C.UTF-8
+export HOME=/home/coder
+export USER=coder
+export LOGNAME=sahal
+umask 022
 
 # Alias navigasi & classify file vs folder (tanpa butuh Nerd Font icon)
 alias ls='ls --color=auto -F'
@@ -883,9 +885,8 @@ alias l='ls -CF --color=auto'
 alias grep='grep --color=auto'
 alias diff='diff --color=auto'
 
-# Shortcut auto-sudo untuk perintah manajemen paket
-alias apt='sudo apt'
-alias apt-get='sudo apt-get'
+# Alias sudo agar perintah sudo apt / sudo cmd berjalan langsung tanpa terganjal SUID
+alias sudo='eval'
 
 # Fungsi pendeteksi branch git untuk prompt
 parse_git_branch() {
@@ -894,11 +895,7 @@ parse_git_branch() {
 
 # DevBox Modern Prompt (PS1)
 # Menampilkan user (hijau), folder aktif (kuning bold), branch git (ungu), dan prompt simbol (cyan)
-if [ "${'$'}UID" -eq 0 ]; then
-    PS1='\[\033[01;31m\]root\[\033[00m\] in \[\033[01;33m\]\w\[\033[01;35m\]$(parse_git_branch)\[\033[00m\] \[\033[01;31m\]#\[\033[00m\] '
-else
-    PS1='\[\033[01;32m\]sahal arbani\[\033[00m\] in \[\033[01;33m\]\w\[\033[01;35m\]$(parse_git_branch)\[\033[00m\] \[\033[01;36m\]➜\[\033[00m\] '
-fi
+PS1='\[\033[01;32m\]sahal arbani\[\033[00m\] in \[\033[01;33m\]\w\[\033[01;35m\]$(parse_git_branch)\[\033[00m\] \[\033[01;36m\]➜\[\033[00m\] '
 
 # Banner Sambutan Ringkas DevBox (Clean, Anti-Emoji, Pixel-Perfect Monospace)
 if [ -z "${'$'}DEVBOX_BANNER_SHOWN" ]; then
@@ -930,7 +927,7 @@ PROFILE_EOF
 
             # Hak milik direktori home coder
             chown -R 1000:1000 "${'$'}rf/home/coder" 2>/dev/null || true
-            chmod 755 "${'$'}rf/home/coder" "${'$'}rf/home/coder/projects" 2>/dev/null || true
+            chmod -R 777 "${'$'}rf/home/coder" 2>/dev/null || true
         """.trimIndent()
     }
 
