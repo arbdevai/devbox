@@ -263,6 +263,7 @@ BRIDGE_EOF
 
         val res = RootExecutor.execute(script)
         return if (res.getOrNull()?.isSuccess == true && res.getOrNull()?.stdout?.contains("SUCCESS") == true) {
+            ensureEnvironmentReady(rootfs)
             AppLogger.i("ChrootManager", "Mount DevBox berhasil dipasang.")
             Result.success("Mount chroot DevBox berhasil dipasang.")
         } else {
@@ -634,6 +635,7 @@ BRIDGE_EOF
         val res = RootExecutor.execute(script)
         val out = res.getOrNull()?.stdout ?: ""
         return@withContext if (out.contains("CLONE_SUCCESS")) {
+            ensureEnvironmentReady(targetRootfs)
             AppLogger.i("ChrootManager", "Kloning rootfs berhasil! Container DevBox di $targetRootfs siap digunakan.")
             Result.success("Kloning rootfs berhasil! Container DevBox siap digunakan.")
         } else {
@@ -772,6 +774,8 @@ BRIDGE_EOF
         destFile.delete()
 
         if (isExtractSuccess || extractExit == 0) {
+            ensureEnvironmentReady(targetRootfs)
+            onLogLine?.invoke("[3/3] Menyiapkan lingkungan user coder, sudo, direktori ~/projects, dan bashrc modern...")
             AppLogger.i("ChrootManager", "Ubuntu Base resmi berhasil dipasang di $targetRootfs!")
             appContext?.let { setActiveRootfs(it, targetRootfs) }
             Result.success("Ubuntu Base resmi berhasil dipasang di $targetRootfs! Container siap digunakan.")
@@ -780,6 +784,136 @@ BRIDGE_EOF
             AppLogger.e("ChrootManager", err)
             Result.failure(Exception(err))
         }
+    }
+
+    fun getEnvironmentSetupScript(rootfs: String = activeRootfs): String {
+        return """
+            rf='$rootfs'
+            [ -d "${'$'}rf" ] || exit 0
+
+            # 1. Pastikan direktori home coder, root, dan workspace projects ada
+            mkdir -p "${'$'}rf/home/coder/projects" "${'$'}rf/root/projects" "${'$'}rf/etc/sudoers.d" "${'$'}rf/usr/local/bin" "${'$'}rf/tmp"
+            chmod 1777 "${'$'}rf/tmp" 2>/dev/null || true
+
+            # 2. Pastikan user coder terdaftar di passwd & group
+            if ! grep -q "^coder:" "${'$'}rf/etc/passwd" 2>/dev/null; then
+                echo "coder:x:1000:1000:DevBox User:/home/coder:/bin/bash" >> "${'$'}rf/etc/passwd" 2>/dev/null || true
+            fi
+            if ! grep -q "^coder:" "${'$'}rf/etc/group" 2>/dev/null; then
+                echo "coder:x:1000:" >> "${'$'}rf/etc/group" 2>/dev/null || true
+            fi
+
+            # 3. Konfigurasi passwordless sudo & PAM su
+            echo "coder ALL=(ALL) NOPASSWD:ALL" > "${'$'}rf/etc/sudoers.d/010_coder-nopasswd" 2>/dev/null || true
+            chmod 0440 "${'$'}rf/etc/sudoers.d/010_coder-nopasswd" 2>/dev/null || true
+
+            if [ -f "${'$'}rf/etc/pam.d/su" ]; then
+                if ! grep -q "pam_permit.so" "${'$'}rf/etc/pam.d/su" 2>/dev/null; then
+                    sed -i '1s/^/auth sufficient pam_permit.so\n/' "${'$'}rf/etc/pam.d/su" 2>/dev/null || true
+                fi
+            fi
+
+            # 4. Fallback wrapper sudo di /usr/local/bin/sudo jika paket sudo belum terpasang
+            cat << 'SUDO_EOF' > "${'$'}rf/usr/local/bin/sudo"
+#!/bin/bash
+if [ -x /usr/bin/sudo ]; then
+    exec /usr/bin/sudo "${'$'}@"
+fi
+if [ ${'$'}# -eq 0 ]; then
+    exec /bin/su - root
+else
+    CUR_DIR="${'$'}(pwd)"
+    exec /bin/su - root -c "cd '${'$'}CUR_DIR' && $*"
+fi
+SUDO_EOF
+            chmod 755 "${'$'}rf/usr/local/bin/sudo" 2>/dev/null || true
+
+            # 5. Konfigurasi DNS & Host
+            grep -qE '^127\.0\.0\.1[[:space:]]+localhost' "${'$'}rf/etc/hosts" 2>/dev/null || echo '127.0.0.1 localhost' >> "${'$'}rf/etc/hosts" 2>/dev/null || true
+            echo "nameserver 8.8.8.8" > "${'$'}rf/etc/resolv.conf" 2>/dev/null || true
+            echo "nameserver 1.1.1.1" >> "${'$'}rf/etc/resolv.conf" 2>/dev/null || true
+
+            # Aktifkan universe repository jika ada ubuntu.sources
+            if [ -f "${'$'}rf/etc/apt/sources.list.d/ubuntu.sources" ]; then
+                sed -i 's/Components: main/Components: main universe restricted multiverse/' "${'$'}rf/etc/apt/sources.list.d/ubuntu.sources" 2>/dev/null || true
+            fi
+
+            # 6. Konfigurasi .bashrc modern (PS1 berwarna tebal, alias ls -F classify, dan MOTD)
+            cat << 'BASHRC_EOF' > "${'$'}rf/home/coder/.bashrc"
+# DevBox Bash Configuration
+export TERM=xterm-256color
+export COLORTERM=truecolor
+export LANG=C.UTF-8
+export LC_ALL=C.UTF-8
+
+# Alias navigasi & classify file vs folder (tanpa butuh Nerd Font icon)
+alias ls='ls --color=auto -F'
+alias ll='ls -lah -F --color=auto'
+alias la='ls -A -F --color=auto'
+alias l='ls -CF --color=auto'
+alias grep='grep --color=auto'
+alias diff='diff --color=auto'
+
+# Shortcut auto-sudo untuk perintah manajemen paket
+alias apt='sudo apt'
+alias apt-get='sudo apt-get'
+
+# Fungsi pendeteksi branch git untuk prompt
+parse_git_branch() {
+    git branch 2>/dev/null | sed -e '/^[^*]/d' -e 's/* \(.*\)/ (\1)/'
+}
+
+# DevBox Modern Prompt (PS1)
+# Menampilkan user (hijau), folder aktif (kuning bold), branch git (ungu), dan prompt simbol (cyan)
+if [ "${'$'}UID" -eq 0 ]; then
+    PS1='\[\033[01;31m\]root\[\033[00m\] in \[\033[01;33m\]\w\[\033[01;35m\]$(parse_git_branch)\[\033[00m\] \[\033[01;31m\]#\[\033[00m\] '
+else
+    PS1='\[\033[01;32m\]coder\[\033[00m\] in \[\033[01;33m\]\w\[\033[01;35m\]$(parse_git_branch)\[\033[00m\] \[\033[01;36m\]➜\[\033[00m\] '
+fi
+
+# Banner Sambutan Ringkas DevBox
+if [ -z "${'$'}DEVBOX_BANNER_SHOWN" ]; then
+    export DEVBOX_BANNER_SHOWN=1
+    echo -e "\033[01;36m┌────────────────────────────────────────────────────────┐\033[00m"
+    echo -e "\033[01;36m│\033[00m \033[01;32m📦 DevBox Linux (Ubuntu 24.04 ARM64)\033[00m                  \033[01;36m│\033[00m"
+    echo -e "\033[01;36m│\033[00m \033[01;33m👤 User: coder (sudo ready)  🏠 Folder: ~/projects\033[00m     \033[01;36m│\033[00m"
+    echo -e "\033[01;36m│\033[00m \033[00;37m💡 Ketik 'll' untuk melihat file & folder (diakhiri /) \033[00m \033[01;36m│\033[00m"
+    echo -e "\033[01;36m└────────────────────────────────────────────────────────┘\033[00m"
+fi
+BASHRC_EOF
+
+            # Salin ke root dan skel agar konsisten
+            cp "${'$'}rf/home/coder/.bashrc" "${'$'}rf/root/.bashrc" 2>/dev/null || true
+            mkdir -p "${'$'}rf/etc/skel"
+            cp "${'$'}rf/home/coder/.bashrc" "${'$'}rf/etc/skel/.bashrc" 2>/dev/null || true
+
+            # Pastikan .profile dan .bash_profile mengeksekusi .bashrc
+            cat << 'PROFILE_EOF' > "${'$'}rf/home/coder/.profile"
+if [ -f "${'$'}HOME/.bashrc" ]; then
+    . "${'$'}HOME/.bashrc"
+fi
+PROFILE_EOF
+            cp "${'$'}rf/home/coder/.profile" "${'$'}rf/home/coder/.bash_profile" 2>/dev/null || true
+            cp "${'$'}rf/home/coder/.profile" "${'$'}rf/root/.profile" 2>/dev/null || true
+            cp "${'$'}rf/home/coder/.profile" "${'$'}rf/root/.bash_profile" 2>/dev/null || true
+            cp "${'$'}rf/home/coder/.profile" "${'$'}rf/etc/skel/.profile" 2>/dev/null || true
+
+            # Hak milik direktori home coder
+            chown -R 1000:1000 "${'$'}rf/home/coder" 2>/dev/null || true
+            chmod 755 "${'$'}rf/home/coder" "${'$'}rf/home/coder/projects" 2>/dev/null || true
+        """.trimIndent()
+    }
+
+    suspend fun ensureEnvironmentReady(rootfs: String = activeRootfs): Result<Unit> = withContext(Dispatchers.IO) {
+        val script = getEnvironmentSetupScript(rootfs)
+        RootExecutor.execute(script, silent = true)
+        Result.success(Unit)
+    }
+
+    fun ensureEnvironmentReadySync(rootfs: String = activeRootfs): Result<Unit> {
+        val script = getEnvironmentSetupScript(rootfs)
+        RootExecutor.executeSync(script, silent = true)
+        Result.success(Unit)
     }
 
     suspend fun runEnvironmentDiagnostics(): String = withContext(Dispatchers.IO) {

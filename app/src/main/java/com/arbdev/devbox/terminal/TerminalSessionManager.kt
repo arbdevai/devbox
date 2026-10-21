@@ -94,6 +94,9 @@ class NativeTerminalSession(
 
             AppLogger.i("NativeTerminal", "Meluncurkan sesi terminal [$name] di $targetRootfs via $suBinary")
 
+            // Pastikan lingkungan user coder, passwordless sudo, direktori ~/projects, dan .bashrc modern siap
+            ChrootManager.ensureEnvironmentReadySync(targetRootfs)
+
             // Menggunakan /usr/bin/script untuk mengalokasikan PTY sejati tanpa JNI,
             // dan setpriv untuk menjalankan shell sebagai user coder (UID 1000).
             val chrootCmd = "mkdir -p '$targetRootfs/dev' '$targetRootfs/dev/pts' '$targetRootfs/proc' '$targetRootfs/sys' '$targetRootfs/mnt/sdcard' '$targetRootfs/tmp' 2>/dev/null; " +
