@@ -94,8 +94,8 @@ object ChrootManager {
             if [ "${'$'}status" = "EXISTS" ]; then
                 grep -q " ${'$'}rf/proc " /proc/mounts 2>/dev/null && mnt=1 || mnt=0
 
-                # Hitung proses chroot instan tanpa fork subshell berulang
-                procs=${'$'}(grep -sl "${'$'}rf" /proc/[0-9]*/root 2>/dev/null | wc -l)
+                # Hitung proses chroot milik DevBox secara instan
+                procs=${'$'}(grep -sl "DEVBOX" /proc/[0-9]*/environ 2>/dev/null | wc -l)
 
                 ram=0
                 st=0
@@ -179,11 +179,12 @@ object ChrootManager {
         val script = """
             mkdir -p '$rootfs/dev' '$rootfs/dev/pts' '$rootfs/proc' '$rootfs/sys' '$rootfs/mnt/sdcard' '$rootfs/tmp'
             chmod 1777 '$rootfs/tmp' 2>/dev/null || true
-            mountpoint -q '$rootfs/dev' || mount --bind /dev '$rootfs/dev'
-            mountpoint -q '$rootfs/dev/pts' || mount -t devpts devpts '$rootfs/dev/pts'
+            mountpoint -q '$rootfs/dev' || { mount --bind /dev '$rootfs/dev' && mount --make-private '$rootfs/dev'; }
+            mountpoint -q '$rootfs/dev/pts' || mount -t devpts devpts '$rootfs/dev/pts' 2>/dev/null || mount --bind /dev/pts '$rootfs/dev/pts'
             mountpoint -q '$rootfs/proc' || mount -t proc proc '$rootfs/proc'
             mountpoint -q '$rootfs/sys' || mount -t sysfs sysfs '$rootfs/sys'
-            mountpoint -q '$rootfs/mnt/sdcard' || mount --bind /sdcard '$rootfs/mnt/sdcard'
+            mountpoint -q '$rootfs/mnt/sdcard' || { mount --bind /sdcard '$rootfs/mnt/sdcard' && mount --make-private '$rootfs/mnt/sdcard'; }
+            mount --make-rprivate '$rootfs' 2>/dev/null || true
             grep -qE '^127\.0\.0\.1[[:space:]]+localhost' '$rootfs/etc/hosts' 2>/dev/null || echo '127.0.0.1 localhost' >> '$rootfs/etc/hosts' 2>/dev/null || true
             grep -q 'nameserver' '$rootfs/etc/resolv.conf' 2>/dev/null || echo 'nameserver 8.8.8.8' >> '$rootfs/etc/resolv.conf' 2>/dev/null || true
             if [ ! -f '$rootfs/usr/local/bin/xdg-open' ]; then
@@ -284,8 +285,8 @@ BRIDGE_EOF
     suspend fun unmountAll(rootfs: String = activeRootfs): Result<String> {
         AppLogger.i("ChrootManager", "Membersihkan mount points untuk $rootfs...")
         val script = """
-            fuser -k -9 '$rootfs' 2>/dev/null || true
             umount -l '$rootfs/mnt/sdcard' 2>/dev/null || true
+            umount -l '$rootfs/sdcard' 2>/dev/null || true
             umount -l '$rootfs/sys' 2>/dev/null || true
             umount -l '$rootfs/proc' 2>/dev/null || true
             umount -l '$rootfs/dev/pts' 2>/dev/null || true
@@ -306,17 +307,22 @@ BRIDGE_EOF
 
     fun killDevboxProcessesAndUnmountSync(rootfs: String = activeRootfs): Result<String> {
         val script = """
-            fuser -k -9 '$rootfs' 2>/dev/null || true
+            # 1. Matikan HANYA proses yang diluncurkan oleh DevBox (memiliki tag DEVBOX di environ)
             for p in /proc/[0-9]*; do
-                if [ "$(readlink ${'$'}p/root 2>/dev/null)" = '$rootfs' ]; then
+                if grep -q 'DEVBOX' "${'$'}p/environ" 2>/dev/null; then
                     kill -9 "${'$'}(basename ${'$'}p)" 2>/dev/null || true
                 fi
             done
-            umount -l '$rootfs/mnt/sdcard' 2>/dev/null || true
-            umount -l '$rootfs/sys' 2>/dev/null || true
-            umount -l '$rootfs/proc' 2>/dev/null || true
-            umount -l '$rootfs/dev/pts' 2>/dev/null || true
-            umount -l '$rootfs/dev' 2>/dev/null || true
+
+            # 2. Lepaskan mountpoint jika ini container devbox-chroot mandiri, atau jika Termux tidak ada
+            if [ '$rootfs' = '/data/local/devbox-chroot' ] || [ ! -d '/data/data/com.termux' ]; then
+                umount -l '$rootfs/mnt/sdcard' 2>/dev/null || true
+                umount -l '$rootfs/sdcard' 2>/dev/null || true
+                umount -l '$rootfs/sys' 2>/dev/null || true
+                umount -l '$rootfs/proc' 2>/dev/null || true
+                umount -l '$rootfs/dev/pts' 2>/dev/null || true
+                umount -l '$rootfs/dev' 2>/dev/null || true
+            fi
             echo 'TERMINATED'
         """.trimIndent()
 
@@ -338,28 +344,44 @@ BRIDGE_EOF
     /**
      * Menghapus seluruh file dan sistem Linux (rootfs) untuk mengosongkan 2-5 GB memori HP.
      * Dilakukan sebelum mencopot pemasangan (uninstall) aplikasi DevBox.
+     * Dilengkapi proteksi ketat agar TIDAK menyentuh atau menghapus rootfs milik Termux!
      */
     suspend fun uninstallRootfs(
         rootfs: String = activeRootfs,
         onLogLine: ((String) -> Unit)? = null
     ): Result<String> = withContext(Dispatchers.IO) {
         val script = """
-            echo "[1/4] Menghentikan seluruh proses container devbox..."
+            echo "=== MEMULAI PENGHAPUSAN CONTAINER DEVBOX ==="
+            echo "Target: $rootfs"
+
+            echo "[1/4] Menghentikan seluruh proses container DevBox..."
             for p in /proc/[0-9]*; do
-                pid=${'$'}(basename "${'$'}p" 2>/dev/null || true)
-                target=${'$'}(readlink "${'$'}p/root" 2>/dev/null || true)
-                if [ "${'$'}target" = '$rootfs' ] || [ "${'$'}{target#$rootfs/}" != "${'$'}target" ]; then
-                    echo "Menghentikan PID ${'$'}pid..."
+                if grep -q "DEVBOX" "${'$'}p/environ" 2>/dev/null; then
+                    pid=${'$'}(basename "${'$'}p" 2>/dev/null || true)
+                    echo "Menghentikan PID DevBox ${'$'}pid..."
                     kill -9 "${'$'}pid" 2>/dev/null || true
                 fi
             done
-            pkill -9 -f '$rootfs' 2>/dev/null || true
-            pkill -9 -f "code-server" 2>/dev/null || true
-            pkill -9 -f "antigravity" 2>/dev/null || true
             sleep 1
 
+            # Proteksi Termux: Jangan hapus /data/local/ubuntu-chroot jika digunakan Termux
+            if [ '$rootfs' = '/data/local/ubuntu-chroot' ]; then
+                echo "[PROTEKSI AKTIF] Direktori ini adalah /data/local/ubuntu-chroot (Chroot Milik Termux)."
+                echo "DevBox TIDAK AKAN menghapus folder sistem ini demi melindungi data Termux Anda."
+                echo "Membersihkan file integrasi bridge, socket, dan log DevBox..."
+                rm -rf '$rootfs/tmp/devbox-bridge' '$rootfs/tmp/devbox_latest_url' 2>/dev/null || true
+                rm -rf /tmp/devbox* /data/local/tmp/devbox* 2>/dev/null || true
+                if [ -d '/data/local/devbox-chroot' ]; then
+                    echo "Menghapus container /data/local/devbox-chroot terpisah..."
+                    rm -rf '/data/local/devbox-chroot' 2>/dev/null || true
+                fi
+                echo "SUCCESS_UNINSTALLED"
+                echo "=== PEMBERSIHAN SELESAI (DATA TERMUX AMAN 100%) ==="
+                exit 0
+            fi
+
             echo "[2/4] Melepaskan semua mount point terkait..."
-            awk -v r='$rootfs' '${'$'}2 ~ ("^" r) {print ${'$'}2}' /proc/mounts 2>/dev/null | sort -r | while read -r m; do
+            awk -v r='$rootfs/' '${'$'}2 ~ ("^" r) {print ${'$'}2}' /proc/mounts 2>/dev/null | sort -r | while read -r m; do
                 echo "Unmounting ${'$'}m..."
                 umount -l "${'$'}m" 2>/dev/null || true
             done
@@ -382,7 +404,7 @@ BRIDGE_EOF
                 exit 0
             fi
 
-            echo "[3/4] Memberikan izin tulis penuh dan menghapus file..."
+            echo "[3/4] Memberikan izin tulis penuh dan menghapus file container..."
             chmod -R 777 '$rootfs' 2>/dev/null || true
 
             for d in bin boot dev etc home lib lib64 media mnt opt proc root run sbin srv sys tmp usr var; do
@@ -392,7 +414,7 @@ BRIDGE_EOF
                 fi
             done
 
-            echo "Menghapus sisa direktori induk..."
+            echo "Menghapus sisa direktori induk container..."
             rm -rf '$rootfs' 2>&1 || true
 
             echo "[4/4] Verifikasi hasil penghapusan..."
@@ -426,8 +448,8 @@ BRIDGE_EOF
 
         if (isSuccess || exitCode == 0) {
             lastKnownState = null
-            AppLogger.i("ChrootManager", "Rootfs $rootfs berhasil di-uninstall dan dihapus total.")
-            Result.success("Rootfs $rootfs dan seluruh file sistem berhasil dihapus total. Penyimpanan HP telah dibebaskan.")
+            AppLogger.i("ChrootManager", "Rootfs $rootfs berhasil di-uninstall dan dibersihkan.")
+            Result.success("Rootfs $rootfs berhasil dibersihkan total. Penyimpanan HP telah dibebaskan.")
         } else {
             val errLog = logOutput.toString().trim()
             val finalErr = if (errLog.isNotEmpty()) errLog else "Gagal menghapus rootfs (Exit code: $exitCode)."
@@ -438,20 +460,26 @@ BRIDGE_EOF
 
     /**
      * Membersihkan proses Antigravity CLI usang atau lock file dari crash / FC sesi sebelumnya.
+     * HANYA mematikan proses milik DevBox, tidak akan pernah menyentuh antigravity di Termux!
      */
     suspend fun cleanStaleAgyLocks(rootfs: String = activeRootfs): Int = withContext(Dispatchers.IO) {
         val script = """
-            pids=${'$'}(pgrep -f "antigravity" 2>/dev/null || true)
             count=0
-            for pid in ${'$'}pids; do
-                kill -9 ${'$'}pid 2>/dev/null && count=${'$'}((count + 1))
+            for p in /proc/[0-9]*; do
+                if grep -q "DEVBOX" "${'$'}p/environ" 2>/dev/null; then
+                    comm=${'$'}(cat "${'$'}p/comm" 2>/dev/null || true)
+                    cmdline=${'$'}(cat "${'$'}p/cmdline" 2>/dev/null || true)
+                    if [ "${'$'}comm" = "antigravity" ] || [ "${'$'}{cmdline#*antigravity}" != "${'$'}cmdline" ]; then
+                        kill -9 "${'$'}(basename ${'$'}p)" 2>/dev/null && count=${'$'}((count + 1))
+                    fi
+                fi
             done
             echo "${'$'}count"
         """.trimIndent()
         val res = RootExecutor.execute(script)
         val count = res.getOrNull()?.stdout?.trim()?.toIntOrNull() ?: 0
         if (count > 0) {
-            AppLogger.i("ChrootManager", "Berhasil membersihkan $count proses agy usang dari sesi sebelumnya.")
+            AppLogger.i("ChrootManager", "Berhasil membersihkan $count proses agy usang milik DevBox.")
         }
         count
     }
@@ -515,8 +543,9 @@ BRIDGE_EOF
                 }
 
                 val sid = rawSid.takeIf { it.isNotEmpty() }
-                // Sesi usang: sid tidak ada (legacy/crash lama) atau sid tidak aktif di DevBox
-                if (sid == null || !activeSessionIds.contains(sid)) {
+                // Sesi usang HANYA jika proses ini pernah dibuat oleh DevBox (ada sid), tapi sesinya sudah mati/crash
+                // Jangan anggap proses tanpa sid sebagai orphan, karena bisa merupakan proses eksternal Termux!
+                if (sid != null && !activeSessionIds.contains(sid)) {
                     orphans.add(ChrootProcessInfo(pid, comm, sid, rssKb))
                 }
             }
@@ -526,7 +555,7 @@ BRIDGE_EOF
 
     /**
      * Mematikan semua proses orphan yang tertinggal di chroot dari crash/force close sebelumnya.
-     * Tidak akan mematikan proses sesi aktif DevBox!
+     * Tidak akan mematikan proses sesi aktif DevBox dan tidak akan menyentuh proses Termux!
      */
     suspend fun killOrphanChrootProcesses(
         activeSessionIds: List<String>,
@@ -544,19 +573,31 @@ BRIDGE_EOF
 
         val pidsToKill = safeOrphans.map { it.pid }.joinToString(" ")
         RootExecutor.execute("kill -9 $pidsToKill 2>/dev/null || true")
-        AppLogger.i("ChrootManager", "Berhasil membersihkan ${safeOrphans.size} proses orphan di chroot: $pidsToKill")
+        AppLogger.i("ChrootManager", "Berhasil membersihkan ${safeOrphans.size} proses orphan DevBox: $pidsToKill")
         safeOrphans.size
     }
 
     suspend fun toggleCodeServer(enable: Boolean, rootfs: String = activeRootfs): Result<Unit> {
         return if (enable) {
             mountAll(rootfs)
-            val envPrefix = "env -i HOME=/home/coder USER=coder LOGNAME=coder SHELL=/bin/bash TERM=xterm-256color PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
-            val cmd = "chroot '$rootfs' /usr/bin/$envPrefix /usr/sbin/runuser -u coder -- /bin/bash -lc 'nohup code-server --bind-addr 127.0.0.1:8080 >/tmp/code-server.log 2>&1 &'"
+            val envPrefix = "env -i HOME=/home/coder USER=coder LOGNAME=coder SHELL=/bin/bash TERM=xterm-256color DEVBOX=1 DEVBOX_SERVICE=code-server PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+            val cmd = "chroot '$rootfs' /usr/bin/$envPrefix /usr/sbin/runuser -u coder -- /bin/bash -lc 'nohup code-server --bind-addr 127.0.0.1:8080 >/tmp/devbox-code-server.log 2>&1 & echo \$! > /tmp/devbox-code-server.pid'"
             RootExecutor.execute(cmd)
             Result.success(Unit)
         } else {
-            RootExecutor.execute("fuser -k -9 8080/tcp 2>/dev/null || pkill -f code-server || true")
+            val cmd = """
+                pid=${'$'}(cat '$rootfs/tmp/devbox-code-server.pid' 2>/dev/null || cat /tmp/devbox-code-server.pid 2>/dev/null || true)
+                if [ -n "${'$'}pid" ]; then
+                    kill -9 "${'$'}pid" 2>/dev/null || true
+                    rm -f '$rootfs/tmp/devbox-code-server.pid' /tmp/devbox-code-server.pid 2>/dev/null || true
+                fi
+                for p in /proc/[0-9]*; do
+                    if grep -q 'DEVBOX_SERVICE=code-server' "${'$'}p/environ" 2>/dev/null; then
+                        kill -9 "${'$'}(basename ${'$'}p)" 2>/dev/null || true
+                    fi
+                done
+            """.trimIndent()
+            RootExecutor.execute(cmd)
             Result.success(Unit)
         }
     }

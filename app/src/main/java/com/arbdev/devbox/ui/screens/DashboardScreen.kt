@@ -882,26 +882,49 @@ fun DashboardScreen(
                         }
                     }
                 } else {
-                    Column {
-                        Text(
-                            text = "PERINGATAN KERAS: Tindakan ini akan menghentikan container, melepas mountpoint, dan MENGHAPUS SELURUH FILE SISTEM di:",
-                            fontSize = 13.sp,
-                            color = Color.White
-                        )
-                        Spacer(modifier = Modifier.height(6.dp))
-                        Text(
-                            text = ChrootManager.activeRootfs,
-                            fontFamily = FontFamily.Monospace,
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 12.sp,
-                            color = DevPrimary
-                        )
-                        Spacer(modifier = Modifier.height(8.dp))
-                        Text(
-                            text = "Tindakan ini akan mengosongkan 2-5 GB penyimpanan internal HP Anda. Lakukan ini jika ingin mencopot (uninstall) aplikasi DevBox secara bersih. Data di dalam container TIDAK DAPAT dipulihkan.",
-                            fontSize = 12.sp,
-                            color = Color(0xFFFFB4AB)
-                        )
+                    if (ChrootManager.activeRootfs == ChrootManager.LEGACY_ROOTFS) {
+                        Column {
+                            Text(
+                                text = "🛡️ PROTEKSI CHROOT TERMUX AKTIF",
+                                fontSize = 14.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = DevSuccess
+                            )
+                            Spacer(modifier = Modifier.height(6.dp))
+                            Text(
+                                text = "Jalur saat ini terhubung ke: /data/local/ubuntu-chroot (Milik Termux).",
+                                fontSize = 12.sp,
+                                color = Color.White
+                            )
+                            Spacer(modifier = Modifier.height(8.dp))
+                            Text(
+                                text = "Demi keamanan data Anda, DevBox TIDAK AKAN menghapus sistem Linux Termux ini. Tindakan ini hanya akan mematikan proses DevBox, melepas mountpoint, dan membersihkan file cache/bridge DevBox secara bersih tanpa merusak data Termux.",
+                                fontSize = 12.sp,
+                                color = Color(0xFF80D8FF)
+                            )
+                        }
+                    } else {
+                        Column {
+                            Text(
+                                text = "PERINGATAN KERAS: Tindakan ini akan menghentikan container, melepas mountpoint, dan MENGHAPUS SELURUH FILE SISTEM di:",
+                                fontSize = 13.sp,
+                                color = Color.White
+                            )
+                            Spacer(modifier = Modifier.height(6.dp))
+                            Text(
+                                text = ChrootManager.activeRootfs,
+                                fontFamily = FontFamily.Monospace,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 12.sp,
+                                color = DevPrimary
+                            )
+                            Spacer(modifier = Modifier.height(8.dp))
+                            Text(
+                                text = "Tindakan ini akan mengosongkan 2-5 GB penyimpanan internal HP Anda. Lakukan ini jika ingin mencopot (uninstall) aplikasi DevBox secara bersih. Data di dalam container TIDAK DAPAT dipulihkan.",
+                                fontSize = 12.sp,
+                                color = Color(0xFFFFB4AB)
+                            )
+                        }
                     }
                 }
             },
