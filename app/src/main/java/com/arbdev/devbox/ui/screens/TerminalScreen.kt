@@ -105,6 +105,7 @@ import com.arbdev.devbox.data.ChrootManager
 import com.arbdev.devbox.data.ChrootProcessInfo
 import com.arbdev.devbox.data.RootExecutor
 import com.arbdev.devbox.terminal.TerminalInputView
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.TimeoutCancellationException
@@ -166,13 +167,15 @@ fun TerminalScreen(
     // Persistensi ukuran font terminal via SharedPreferences (default 12sp, rentang 8sp - 28sp)
     val prefs = remember { context.getSharedPreferences("devbox_terminal_prefs", Context.MODE_PRIVATE) }
     var terminalFontSize by remember { mutableFloatStateOf(prefs.getFloat("terminal_font_size", 12f)) }
+    var fontToast by remember { mutableStateOf<android.widget.Toast?>(null) }
 
     // Helper untuk mengubah dan menyimpan ukuran font secara smooth (step 0.5f)
     val updateFontSize: (Float) -> Unit = { newSize ->
         val clamped = (Math.round(newSize * 2f) / 2f).coerceIn(8f, 28f)
         terminalFontSize = clamped
         prefs.edit().putFloat("terminal_font_size", clamped).apply()
-        Toast.makeText(context, "Ukuran font: ${String.format(java.util.Locale.US, "%.1f", clamped)} sp", Toast.LENGTH_SHORT).show()
+        fontToast?.cancel()
+        fontToast = android.widget.Toast.makeText(context, "Ukuran font: ${String.format(java.util.Locale.US, "%.1f", clamped)} sp", android.widget.Toast.LENGTH_SHORT).apply { show() }
     }
 
     val hapticFeedback = LocalHapticFeedback.current
@@ -1001,6 +1004,7 @@ fun TerminalScreen(
         ) {
             val density = LocalDensity.current
             LaunchedEffect(maxWidth, maxHeight, terminalFontSize) {
+                delay(100)
                 with(density) {
                     val charWidth = (terminalFontSize * 0.6f).sp.toPx()
                     val charHeight = (terminalFontSize * 1.25f).sp.toPx()
@@ -1907,24 +1911,24 @@ fun TerminalCanvas(
         val maxC = minOf(session.buffer.maxCols, line.size)
         if (col !in 0 until maxC) return col to col
 
-        val targetCell = line[col]
+        val targetCell = line.getOrNull(col) ?: return col to col
         if (targetCell.char == ' ') {
             // Jika menekan spasi, cari kata terdekat di sebelah kiri atau kanan
             var left = col
-            while (left > 0 && line[left - 1].char == ' ') left--
+            while (left > 0 && line.getOrNull(left - 1)?.char == ' ') left--
             if (left > 0) return findWordBounds(lineIdx, left - 1)
             var right = col
-            while (right < maxC - 1 && line[right + 1].char == ' ') right++
+            while (right < maxC - 1 && line.getOrNull(right + 1)?.char == ' ') right++
             if (right < maxC - 1) return findWordBounds(lineIdx, right + 1)
             return col to col
         }
 
         var start = col
-        while (start > 0 && line[start - 1].char != ' ') {
+        while (start > 0 && line.getOrNull(start - 1)?.char != ' ') {
             start--
         }
         var end = col
-        while (end < maxC - 1 && line[end + 1].char != ' ') {
+        while (end < maxC - 1 && line.getOrNull(end + 1)?.char != ' ') {
             end++
         }
         return start to end
@@ -1942,7 +1946,7 @@ fun TerminalCanvas(
             val colEnd = if (l == end.line) end.col.coerceIn(0, maxC - 1) else maxC - 1
             val lineText = StringBuilder()
             for (c in colStart..colEnd) {
-                val cell = line[c]
+                val cell = line.getOrNull(c) ?: continue
                 if (cell.isWideContinuation) continue
                 lineText.append(cell.char)
                 if (cell.extraChar != null) lineText.append(cell.extraChar)
@@ -2171,177 +2175,181 @@ fun TerminalCanvas(
                         )
                     }
             ) {
-                val v = session.buffer.version.intValue // Daftarkan state di draw phase agar realtime redraw
-                val nativeCanvas = drawContext.canvas.nativeCanvas
-                val maxCols = session.buffer.maxCols
-                val cursorRow = session.buffer.cursorRow
-                val cursorCol = session.buffer.cursorCol
-                val isCursorVisible = session.buffer.isCursorVisible
-                val historyCount = if (session.buffer.isAltBuffer) 0 else session.buffer.getScrollbackSnapshot().size
+                try {
+                    val v = session.buffer.version.intValue // Daftarkan state di draw phase agar realtime redraw
+                    val nativeCanvas = drawContext.canvas.nativeCanvas
+                    val maxCols = session.buffer.maxCols
+                    val cursorRow = session.buffer.cursorRow
+                    val cursorCol = session.buffer.cursorCol
+                    val isCursorVisible = session.buffer.isCursorVisible
+                    val historyCount = if (session.buffer.isAltBuffer) 0 else session.buffer.getScrollbackSnapshot().size
 
-                val selStart = selectionStart
-                val selEnd = selectionEnd
-                val hasSelection = selStart != null && selEnd != null
-                val selMin = if (hasSelection) minOf(selStart!!, selEnd!!) else null
-                val selMax = if (hasSelection) maxOf(selStart!!, selEnd!!) else null
+                    val selStart = selectionStart
+                    val selEnd = selectionEnd
+                    val hasSelection = selStart != null && selEnd != null
+                    val selMin = if (hasSelection) minOf(selStart!!, selEnd!!) else null
+                    val selMax = if (hasSelection) maxOf(selStart!!, selEnd!!) else null
 
-                // Viewport culling: Hanya render baris yang masuk dalam viewport layar
-                val scrollY = if (isAltBuffer) 0f else verticalScrollState.value.toFloat()
-                val viewportHeight = if (isAltBuffer || verticalScrollState.viewportSize == 0) {
-                    totalHeightPx.toFloat()
-                } else {
-                    verticalScrollState.viewportSize.toFloat()
-                }
-
-                val firstVisibleLine = if (charHeight > 0) {
-                    ((scrollY - charHeight) / charHeight).toInt().coerceIn(0, lineCount - 1)
-                } else 0
-                val lastVisibleLine = if (charHeight > 0) {
-                    ((scrollY + viewportHeight + charHeight) / charHeight).toInt().coerceIn(0, lineCount - 1)
-                } else lineCount - 1
-
-                val textBatch = StringBuilder()
-
-                for (lineIdx in firstVisibleLine..lastVisibleLine) {
-                    val line = session.buffer.getLineAt(lineIdx) ?: continue
-                    val lineCols = minOf(maxCols, line.size)
-                    if (lineCols <= 0) continue
-                    val yTop = lineIdx * charHeight
-                    val yText = yTop + baselineOffset
-
-                    // 1. Gambar latar belakang sel (Batched runs dengan warna sama)
-                    var bgCol = 0
-                    while (bgCol < lineCols) {
-                        val startCol = bgCol
-                        val cell = line[bgCol]
-                        val isCursor = (isCursorVisible && (lineIdx - historyCount) == cursorRow && bgCol == cursorCol)
-                        val pt = GridPoint(lineIdx, bgCol)
-                        val isSelected = hasSelection && selMin != null && selMax != null && pt >= selMin && pt <= selMax
-                        val runBg = when {
-                            isSelected -> Color(0x6638BDF8)
-                            isCursor -> Color(0xFF61AFEF)
-                            else -> cell.bgColor
-                        }
-
-                        val step = if (cell.isWide) 2 else 1
-                        var runLen = step
-                        bgCol += step
-
-                        while (bgCol < lineCols) {
-                            val nextCell = line[bgCol]
-                            val nextIsCursor = (isCursorVisible && (lineIdx - historyCount) == cursorRow && bgCol == cursorCol)
-                            val nextPt = GridPoint(lineIdx, bgCol)
-                            val nextIsSelected = hasSelection && selMin != null && selMax != null && nextPt >= selMin && nextPt <= selMax
-                            val nextBg = when {
-                                nextIsSelected -> Color(0x6638BDF8)
-                                nextIsCursor -> Color(0xFF61AFEF)
-                                else -> nextCell.bgColor
-                            }
-                            if (nextBg == runBg) {
-                                val nextStep = if (nextCell.isWide) 2 else 1
-                                runLen += nextStep
-                                bgCol += nextStep
-                            } else {
-                                break
-                            }
-                        }
-
-                        if (runBg != Color.Transparent) {
-                            drawRect(
-                                color = runBg,
-                                topLeft = Offset(startCol * charWidth, yTop),
-                                size = Size(runLen * charWidth, charHeight)
-                            )
-                        }
+                    // Viewport culling: Hanya render baris yang masuk dalam viewport layar
+                    val scrollY = if (isAltBuffer) 0f else verticalScrollState.value.toFloat()
+                    val viewportHeight = if (isAltBuffer || verticalScrollState.viewportSize == 0) {
+                        totalHeightPx.toFloat()
+                    } else {
+                        verticalScrollState.viewportSize.toFloat()
                     }
 
-                    // 2. Gambar karakter teks (Batched text runs per style untuk 60 FPS di CPU low-end)
-                    var col = 0
-                    while (col < lineCols) {
-                        val cell = line[col]
-                        if (cell.isWideContinuation) {
-                            col++
-                            continue
+                    val firstVisibleLine = if (charHeight > 0) {
+                        ((scrollY - charHeight) / charHeight).toInt().coerceIn(0, lineCount - 1)
+                    } else 0
+                    val lastVisibleLine = if (charHeight > 0) {
+                        ((scrollY + viewportHeight + charHeight) / charHeight).toInt().coerceIn(0, lineCount - 1)
+                    } else lineCount - 1
+
+                    val textBatch = StringBuilder()
+
+                    for (lineIdx in firstVisibleLine..lastVisibleLine) {
+                        val line = session.buffer.getLineAt(lineIdx) ?: continue
+                        val lineCols = minOf(maxCols, line.size)
+                        if (lineCols <= 0) continue
+                        val yTop = lineIdx * charHeight
+                        val yText = yTop + baselineOffset
+
+                        // 1. Gambar latar belakang sel (Batched runs dengan warna sama)
+                        var bgCol = 0
+                        while (bgCol < lineCols) {
+                            val startCol = bgCol
+                            val cell = line.getOrNull(bgCol) ?: break
+                            val isCursor = (isCursorVisible && (lineIdx - historyCount) == cursorRow && bgCol == cursorCol)
+                            val pt = GridPoint(lineIdx, bgCol)
+                            val isSelected = hasSelection && selMin != null && selMax != null && pt >= selMin && pt <= selMax
+                            val runBg = when {
+                                isSelected -> Color(0x6638BDF8)
+                                isCursor -> Color(0xFF61AFEF)
+                                else -> cell.bgColor
+                            }
+
+                            val step = if (cell.isWide) 2 else 1
+                            var runLen = step
+                            bgCol += step
+
+                            while (bgCol < lineCols) {
+                                val nextCell = line.getOrNull(bgCol) ?: break
+                                val nextIsCursor = (isCursorVisible && (lineIdx - historyCount) == cursorRow && bgCol == cursorCol)
+                                val nextPt = GridPoint(lineIdx, bgCol)
+                                val nextIsSelected = hasSelection && selMin != null && selMax != null && nextPt >= selMin && nextPt <= selMax
+                                val nextBg = when {
+                                    nextIsSelected -> Color(0x6638BDF8)
+                                    nextIsCursor -> Color(0xFF61AFEF)
+                                    else -> nextCell.bgColor
+                                }
+                                if (nextBg == runBg) {
+                                    val nextStep = if (nextCell.isWide) 2 else 1
+                                    runLen += nextStep
+                                    bgCol += nextStep
+                                } else {
+                                    break
+                                }
+                            }
+
+                            if (runBg != Color.Transparent) {
+                                drawRect(
+                                    color = runBg,
+                                    topLeft = Offset(startCol * charWidth, yTop),
+                                    size = Size(runLen * charWidth, charHeight)
+                                )
+                            }
                         }
 
-                        val pt = GridPoint(lineIdx, col)
-                        val isSelected = hasSelection && selMin != null && selMax != null && pt >= selMin && pt <= selMax
-                        val isCursor = (isCursorVisible && (lineIdx - historyCount) == cursorRow && col == cursorCol)
-                        val fg = when {
-                            isSelected -> Color.White
-                            isCursor -> Color.Black
-                            else -> cell.fgColor
-                        }
-                        val isBold = cell.isBold || isSelected
-                        val isUnderline = cell.isUnderline || cell.hyperlinkUrl != null
-
-                        // Karakter dengan extra combining mark
-                        if (cell.extraChar != null) {
-                            textPaint.color = fg.toArgb()
-                            textPaint.isFakeBoldText = isBold
-                            textPaint.isUnderlineText = isUnderline
-                            nativeCanvas.drawText("${cell.char}${cell.extraChar}", col * charWidth, yText, textPaint)
-                            col++
-                            continue
-                        }
-
-                        // Karakter wide (CJK / wide symbol)
-                        if (cell.isWide) {
-                            textPaint.color = fg.toArgb()
-                            textPaint.isFakeBoldText = isBold
-                            textPaint.isUnderlineText = isUnderline
-                            nativeCanvas.drawText(cell.char.toString(), col * charWidth, yText, textPaint)
-                            col++
-                            continue
-                        }
-
-                        // Kumpulkan rentetan karakter normal dengan style dan warna yang persis sama
-                        val startCol = col
-                        textBatch.setLength(0)
-
+                        // 2. Gambar karakter teks (Batched text runs per style untuk 60 FPS di CPU low-end)
+                        var col = 0
                         while (col < lineCols) {
-                            val curCell = line[col]
-                            if (curCell.isWideContinuation || curCell.isWide || curCell.extraChar != null) {
-                                break
-                            }
-                            val curPt = GridPoint(lineIdx, col)
-                            val curIsSelected = hasSelection && selMin != null && selMax != null && curPt >= selMin && curPt <= selMax
-                            val curIsCursor = (isCursorVisible && (lineIdx - historyCount) == cursorRow && col == cursorCol)
-                            val curFg = when {
-                                curIsSelected -> Color.White
-                                curIsCursor -> Color.Black
-                                else -> curCell.fgColor
-                            }
-                            val curBold = curCell.isBold || curIsSelected
-                            val curUnderline = curCell.isUnderline || curCell.hyperlinkUrl != null
-
-                            if (curFg == fg && curBold == isBold && curUnderline == isUnderline) {
-                                textBatch.append(curCell.char)
+                            val cell = line.getOrNull(col) ?: break
+                            if (cell.isWideContinuation) {
                                 col++
-                            } else {
-                                break
+                                continue
                             }
-                        }
 
-                        if (textBatch.isNotEmpty()) {
-                            val runStr = textBatch.toString()
-                            if (runStr.isNotBlank()) {
+                            val pt = GridPoint(lineIdx, col)
+                            val isSelected = hasSelection && selMin != null && selMax != null && pt >= selMin && pt <= selMax
+                            val isCursor = (isCursorVisible && (lineIdx - historyCount) == cursorRow && col == cursorCol)
+                            val fg = when {
+                                isSelected -> Color.White
+                                isCursor -> Color.Black
+                                else -> cell.fgColor
+                            }
+                            val isBold = cell.isBold || isSelected
+                            val isUnderline = cell.isUnderline || cell.hyperlinkUrl != null
+
+                            // Karakter dengan extra combining mark
+                            if (cell.extraChar != null) {
                                 textPaint.color = fg.toArgb()
                                 textPaint.isFakeBoldText = isBold
                                 textPaint.isUnderlineText = isUnderline
-                                nativeCanvas.drawText(runStr, startCol * charWidth, yText, textPaint)
+                                nativeCanvas.drawText("${cell.char}${cell.extraChar}", col * charWidth, yText, textPaint)
+                                col++
+                                continue
+                            }
+
+                            // Karakter wide (CJK / wide symbol)
+                            if (cell.isWide) {
+                                textPaint.color = fg.toArgb()
+                                textPaint.isFakeBoldText = isBold
+                                textPaint.isUnderlineText = isUnderline
+                                nativeCanvas.drawText(cell.char.toString(), col * charWidth, yText, textPaint)
+                                col++
+                                continue
+                            }
+
+                            // Kumpulkan rentetan karakter normal dengan style dan warna yang persis sama
+                            val startCol = col
+                            textBatch.setLength(0)
+
+                            while (col < lineCols) {
+                                val curCell = line.getOrNull(col) ?: break
+                                if (curCell.isWideContinuation || curCell.isWide || curCell.extraChar != null) {
+                                    break
+                                }
+                                val curPt = GridPoint(lineIdx, col)
+                                val curIsSelected = hasSelection && selMin != null && selMax != null && curPt >= selMin && curPt <= selMax
+                                val curIsCursor = (isCursorVisible && (lineIdx - historyCount) == cursorRow && col == cursorCol)
+                                val curFg = when {
+                                    curIsSelected -> Color.White
+                                    curIsCursor -> Color.Black
+                                    else -> curCell.fgColor
+                                }
+                                val curBold = curCell.isBold || curIsSelected
+                                val curUnderline = curCell.isUnderline || curCell.hyperlinkUrl != null
+
+                                if (curFg == fg && curBold == isBold && curUnderline == isUnderline) {
+                                    textBatch.append(curCell.char)
+                                    col++
+                                } else {
+                                    break
+                                }
+                            }
+
+                            if (textBatch.isNotEmpty()) {
+                                val runStr = textBatch.toString()
+                                if (runStr.isNotBlank()) {
+                                    textPaint.color = fg.toArgb()
+                                    textPaint.isFakeBoldText = isBold
+                                    textPaint.isUnderlineText = isUnderline
+                                    nativeCanvas.drawText(runStr, startCol * charWidth, yText, textPaint)
+                                }
                             }
                         }
-                    }
 
-                    // Kursor di luar batas kolom karakter
-                    if (isCursorVisible && (lineIdx - historyCount) == cursorRow && cursorCol >= maxCols) {
-                        drawRect(
-                            color = Color(0xFF61AFEF),
-                            topLeft = Offset((maxCols - 1) * charWidth, yTop),
-                            size = Size(charWidth, charHeight)
-                        )
+                        // Kursor di luar batas kolom karakter
+                        if (isCursorVisible && (lineIdx - historyCount) == cursorRow && cursorCol >= maxCols) {
+                            drawRect(
+                                color = Color(0xFF61AFEF),
+                                topLeft = Offset((maxCols - 1) * charWidth, yTop),
+                                size = Size(charWidth, charHeight)
+                            )
+                        }
                     }
+                } catch (_: Exception) {
+                    // Safe guard: jika terjadi race condition saat window resize instan, frame render ini diskip secara aman tanpa crash
                 }
             }
 

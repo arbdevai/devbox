@@ -1,5 +1,7 @@
 package com.arbdev.devbox.terminal
 
+import android.os.Handler
+import android.os.Looper
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.snapshots.Snapshot
 import androidx.compose.ui.graphics.Color
@@ -770,11 +772,40 @@ class TerminalGridBuffer(
         }
     }
 
+    // Frame throttling untuk streaming teks cepat (misal respons AI / compiler)
+    private var lastNotifyTime = 0L
+    private var hasPendingUpdate = false
+    private val notifyHandler by lazy { Handler(Looper.getMainLooper()) }
+    private val notifyRunnable = Runnable {
+        synchronized(lock) {
+            if (hasPendingUpdate) {
+                hasPendingUpdate = false
+                lastNotifyTime = System.currentTimeMillis()
+                version.intValue++
+                try {
+                    Snapshot.sendApplyNotifications()
+                } catch (_: Exception) {}
+            }
+        }
+    }
+
     private fun notifyUpdate() {
-        version.intValue++
-        try {
-            Snapshot.sendApplyNotifications()
-        } catch (_: Exception) {}
+        val now = System.currentTimeMillis()
+        val elapsed = now - lastNotifyTime
+        if (elapsed >= 16L) { // Maksimum ~60 FPS (anti-freeze UI saat AI streaming cepat)
+            lastNotifyTime = now
+            hasPendingUpdate = false
+            notifyHandler.removeCallbacks(notifyRunnable)
+            version.intValue++
+            try {
+                Snapshot.sendApplyNotifications()
+            } catch (_: Exception) {}
+        } else {
+            if (!hasPendingUpdate) {
+                hasPendingUpdate = true
+                notifyHandler.postDelayed(notifyRunnable, (16L - elapsed).coerceAtLeast(1L))
+            }
+        }
     }
 
     /**
@@ -958,7 +989,7 @@ class TerminalGridBuffer(
                 return scrollback.getOrNull(absoluteIndex)
             }
             val activeRow = absoluteIndex - historyCount
-            if (activeRow in 0 until maxRows) {
+            if (activeRow in 0 until maxRows && activeRow in activeGrid.indices) {
                 return activeGrid[activeRow]
             }
             return null
