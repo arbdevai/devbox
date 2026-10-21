@@ -913,7 +913,7 @@ PROFILE_EOF
     fun ensureEnvironmentReadySync(rootfs: String = activeRootfs): Result<Unit> {
         val script = getEnvironmentSetupScript(rootfs)
         RootExecutor.executeSync(script, silent = true)
-        Result.success(Unit)
+        return Result.success(Unit)
     }
 
     suspend fun runEnvironmentDiagnostics(): String = withContext(Dispatchers.IO) {
