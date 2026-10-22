@@ -902,10 +902,16 @@ XDG_EOF
                 sed -i 's/Components: main/Components: main universe restricted multiverse/' "${'$'}rf/etc/apt/sources.list.d/ubuntu.sources" 2>/dev/null || true
             fi
 
-            # 6. Konfigurasi .bashrc modern (PS1 berwarna tebal, alias ls -F classify, dan MOTD)
-            cat << 'BASHRC_EOF' > "${'$'}rf/home/coder/.bashrc"
-# DevBox Bash Configuration
-export TERM=xterm-256color
+            # 6. Konfigurasi .bashrc modern DevBox
+            # Hanya buat jika belum ada atau jika masih menggunakan template lama (DevBox Bash Configuration)
+            if [ ! -f "${'$'}rf/home/coder/.bashrc" ] || grep -q 'DevBox Bash Configuration' "${'$'}rf/home/coder/.bashrc" 2>/dev/null; then
+                cat << 'BASHRC_EOF' > "${'$'}rf/home/coder/.bashrc"
+# ============================================================
+# DEVBOX | Custom Bash Environment
+# Ubuntu 24.04 LTS ARM64
+# ============================================================
+
+export TERM="${'$'}{TERM:-xterm-256color}"
 export COLORTERM=truecolor
 export LANG=C.UTF-8
 export LC_ALL=C.UTF-8
@@ -915,7 +921,30 @@ export LOGNAME=sahal
 export GH_NO_KEYRING=1
 umask 022
 
-# Alias navigasi & classify file vs folder (tanpa butuh Nerd Font icon)
+# Backup konfigurasi lama
+if [ ! -f ~/.bashrc.backup ] && [ -f ~/.bashrc ]; then
+    cp ~/.bashrc ~/.bashrc.backup 2>/dev/null || true
+fi
+
+# Colors
+if [[ -t 1 ]]; then
+    C_RESET='\[\033[0m\]'
+    C_BOLD='\[\033[1m\]'
+    C_BLUE='\[\033[38;5;75m\]'
+    C_CYAN='\[\033[38;5;81m\]'
+    C_GREEN='\[\033[38;5;114m\]'
+    C_YELLOW='\[\033[38;5;221m\]'
+    C_PURPLE='\[\033[38;5;183m\]'
+    C_WHITE='\[\033[38;5;255m\]'
+    C_GRAY='\[\033[38;5;245m\]'
+    C_PANEL='\[\033[38;5;39m\]'
+else
+    C_RESET='' C_BOLD='' C_BLUE='' C_CYAN=''
+    C_GREEN='' C_YELLOW='' C_PURPLE=''
+    C_WHITE='' C_GRAY='' C_PANEL=''
+fi
+
+# Navigation and file aliases
 alias ls='ls --color=auto -F'
 alias ll='ls -lah -F --color=auto'
 alias la='ls -A -F --color=auto'
@@ -923,44 +952,106 @@ alias l='ls -CF --color=auto'
 alias grep='grep --color=auto'
 alias diff='diff --color=auto'
 
-# Alias sudo agar perintah sudo apt / sudo cmd berjalan langsung tanpa terganjal SUID
+# Compatibility alias for proot/chroot.
+# This does not grant root privileges.
 alias sudo='eval'
 
-# Fungsi pendeteksi branch git untuk prompt
-parse_git_branch() {
-    git branch 2>/dev/null | sed -e '/^[^*]/d' -e 's/* \(.*\)/ (\1)/'
-}
-
-# DevBox Modern Prompt (PS1)
-# Menampilkan user (hijau), folder aktif (kuning bold), branch git (ungu), dan prompt simbol (cyan)
-PS1='\[\033[01;32m\]sahal arbani\[\033[00m\] in \[\033[01;33m\]\w\[\033[01;35m\]$(parse_git_branch)\[\033[00m\] \[\033[01;36m\]➜\[\033[00m\] '
-
-# Navigasi Cepat DevBox
 alias projects='cd ~/projects'
 alias storage='cd ~/storage'
 alias downloads='cd ~/storage/downloads'
 
-# Paket Perkakas Developer Lengkap Sekali Perintah
-devbox-install-tools() {
-    sudo apt-get update && sudo apt-get install -y build-essential python3 python3-pip nodejs npm curl wget htop neofetch
+# Git branch
+parse_git_branch() {
+    git symbolic-ref --quiet --short HEAD 2>/dev/null |
+        sed 's/^/ /'
 }
 
-# Banner Sambutan Ringkas DevBox (Clean, Anti-Emoji, Pixel-Perfect Monospace)
-if [ -z "${'$'}DEVBOX_BANNER_SHOWN" ]; then
+# Powerline prompt
+devbox_prompt() {
+    local exit_code=${'$'}?
+    local branch=''
+    local status_color
+
+    if [[ ${'$'}exit_code -eq 0 ]]; then
+        status_color='\[\033[38;5;114m\]'
+    else
+        status_color='\[\033[38;5;203m\]'
+    fi
+
+    if git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+        branch="${'$'}(git symbolic-ref --quiet --short HEAD 2>/dev/null)"
+        [[ -n "${'$'}branch" ]] || branch='DETACHED'
+        branch=" ${'$'}{branch}"
+    fi
+
+    PS1="${'$'}{C_BLUE}┌─${'$'}{C_RESET}"
+    PS1+="${'$'}{C_WHITE}${'$'}{C_BOLD}sahal arbani${'$'}{C_RESET}"
+    PS1+=" ${'$'}{C_GRAY}at${'$'}{C_RESET} "
+    PS1+="${'$'}{C_YELLOW}${'$'}{C_BOLD}\w${'$'}{C_RESET}"
+
+    if [[ -n "${'$'}branch" ]]; then
+        PS1+=" ${'$'}{C_PURPLE}${'$'}{branch}${'$'}{C_RESET}"
+    fi
+
+    PS1+="\n${'$'}{status_color}└─❯ ${'$'}{C_RESET}"
+}
+
+PROMPT_COMMAND='devbox_prompt'
+
+# Developer tools installer
+devbox-install-tools() {
+    printf '\n%bDEVBOX%b Installing developer tools...\n' \
+        "${'$'}C_CYAN" "${'$'}C_RESET"
+
+    sudo apt-get update &&
+        sudo apt-get install -y \
+            build-essential python3 python3-pip \
+            nodejs npm curl wget htop neofetch
+}
+
+# DevBox system panel
+devbox_banner() {
+    [[ -t 1 ]] || return 0
+    [[ -z "${'$'}{DEVBOX_BANNER_SHOWN:-}" ]] || return 0
     export DEVBOX_BANNER_SHOWN=1
-    echo -e "\033[01;36m┌──────────────────────────────────────────────────────┐\033[00m"
-    echo -e "\033[01;36m│\033[00m \033[01;32mDevBox Linux (Ubuntu 24.04 ARM64)\033[00m                    \033[01;36m│\033[00m"
-    echo -e "\033[01;36m│\033[00m [•] User      : \033[01;33mSahal Arbani\033[00m (sudo ready)            \033[01;36m│\033[00m"
-    echo -e "\033[01;36m│\033[00m [•] Workspace : \033[01;33m~/projects\033[00m                           \033[01;36m│\033[00m"
-    echo -e "\033[01;36m│\033[00m [•] Shortcut  : ketik 'll' untuk list file & folder  \033[01;36m│\033[00m"
-    echo -e "\033[01;36m└──────────────────────────────────────────────────────┘\033[00m"
-fi
+
+    local os_name='Ubuntu Linux'
+    local arch kernel host_user
+
+    arch="${'$'}(uname -m 2>/dev/null || printf 'unknown')"
+    kernel="${'$'}(uname -r 2>/dev/null || printf 'unknown')"
+    host_user="${'$'}{USER:-coder}"
+
+    if [[ -r /etc/os-release ]]; then
+        . /etc/os-release
+        os_name="${'$'}{PRETTY_NAME:-Ubuntu Linux}"
+    fi
+
+    printf '\n'
+    printf '  %b┌──────────────────────────────────────────┐%b\n' "${'$'}C_PANEL" "${'$'}C_RESET"
+    printf '  %b│%b  %bDEVBOX%b  %b/ DEVELOPER ENVIRONMENT%b      %b│%b\n' "${'$'}C_PANEL" "${'$'}C_RESET" "${'$'}C_WHITE" "${'$'}C_RESET" "${'$'}C_GRAY" "${'$'}C_RESET" "${'$'}C_PANEL" "${'$'}C_RESET"
+    printf '  %b├──────────────────────────────────────────┤%b\n' "${'$'}C_PANEL" "${'$'}C_RESET"
+    printf '  %b│%b  %-12s %b%-27.27s%b %b│%b\n' "${'$'}C_PANEL" "${'$'}C_RESET" 'SYSTEM' "${'$'}C_CYAN" "${'$'}os_name" "${'$'}C_RESET" "${'$'}C_PANEL" "${'$'}C_RESET"
+    printf '  %b│%b  %-12s %b%-27.27s%b %b│%b\n' "${'$'}C_PANEL" "${'$'}C_RESET" 'ARCH' "${'$'}C_GREEN" "${'$'}arch" "${'$'}C_RESET" "${'$'}C_PANEL" "${'$'}C_RESET"
+    printf '  %b│%b  %-12s %b%-27.27s%b %b│%b\n' "${'$'}C_PANEL" "${'$'}C_RESET" 'USER' "${'$'}C_YELLOW" "${'$'}host_user" "${'$'}C_RESET" "${'$'}C_PANEL" "${'$'}C_RESET"
+    printf '  %b│%b  %-12s %b%-27.27s%b %b│%b\n' "${'$'}C_PANEL" "${'$'}C_RESET" 'KERNEL' "${'$'}C_GRAY" "${'$'}kernel" "${'$'}C_RESET" "${'$'}C_PANEL" "${'$'}C_RESET"
+    printf '  %b│%b  %-12s %b%-27.27s%b %b│%b\n' "${'$'}C_PANEL" "${'$'}C_RESET" 'WORKSPACE' "${'$'}C_CYAN" '~/projects' "${'$'}C_RESET" "${'$'}C_PANEL" "${'$'}C_RESET"
+    printf '  %b├──────────────────────────────────────────┤%b\n' "${'$'}C_PANEL" "${'$'}C_RESET"
+    printf '  %b│%b  %bll%b files  %b|%b  %bprojects%b  %b|%b  %bstorage%b  %b│%b\n' "${'$'}C_PANEL" "${'$'}C_RESET" "${'$'}C_YELLOW" "${'$'}C_RESET" "${'$'}C_GRAY" "${'$'}C_RESET" "${'$'}C_YELLOW" "${'$'}C_RESET" "${'$'}C_GRAY" "${'$'}C_RESET" "${'$'}C_YELLOW" "${'$'}C_RESET" "${'$'}C_PANEL" "${'$'}C_RESET"
+    printf '  %b└──────────────────────────────────────────┘%b\n\n' "${'$'}C_PANEL" "${'$'}C_RESET"
+}
+
+devbox_banner
+# ============================================================
+# End DevBox Configuration
+# ============================================================
 BASHRC_EOF
 
-            # Salin ke root dan skel agar konsisten
-            cp "${'$'}rf/home/coder/.bashrc" "${'$'}rf/root/.bashrc" 2>/dev/null || true
-            mkdir -p "${'$'}rf/etc/skel"
-            cp "${'$'}rf/home/coder/.bashrc" "${'$'}rf/etc/skel/.bashrc" 2>/dev/null || true
+                # Salin ke root dan skel agar konsisten
+                cp "${'$'}rf/home/coder/.bashrc" "${'$'}rf/root/.bashrc" 2>/dev/null || true
+                mkdir -p "${'$'}rf/etc/skel"
+                cp "${'$'}rf/home/coder/.bashrc" "${'$'}rf/etc/skel/.bashrc" 2>/dev/null || true
+            fi
 
             # Pastikan .profile dan .bash_profile mengeksekusi .bashrc
             cat << 'PROFILE_EOF' > "${'$'}rf/home/coder/.profile"
