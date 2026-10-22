@@ -1930,6 +1930,12 @@ fun TerminalCanvas(
         return sb.toString()
     }
 
+    val selStart = selectionStart
+    val selEnd = selectionEnd
+    val hasSelection = selStart != null && selEnd != null
+    val selMin = if (hasSelection) minOf(selStart!!, selEnd!!) else null
+    val selMax = if (hasSelection) maxOf(selStart!!, selEnd!!) else null
+
     Box(modifier = modifier.fillMaxSize()) {
         Box(
             modifier = Modifier
@@ -2192,12 +2198,6 @@ fun TerminalCanvas(
             }
 
             // Draggable Interactive Selection Handles (Overlay Handle Composable Pattern)
-            val selStart = selectionStart
-            val selEnd = selectionEnd
-            val hasSelection = selStart != null && selEnd != null
-            val selMin = if (hasSelection) minOf(selStart!!, selEnd!!) else null
-            val selMax = if (hasSelection) maxOf(selStart!!, selEnd!!) else null
-
             if (hasSelection && selMin != null && selMax != null) {
                 // Pin Mulai (Start Handle)
                 SelectionHandle(
