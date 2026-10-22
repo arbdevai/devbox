@@ -95,11 +95,14 @@ import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.window.Popup
+import androidx.compose.ui.window.PopupProperties
 import androidx.compose.ui.viewinterop.AndroidView
 import com.arbdev.devbox.data.ChrootManager
 import com.arbdev.devbox.data.ChrootProcessInfo
@@ -218,9 +221,6 @@ fun TerminalScreen(
             orphanProcesses = ChrootManager.getOrphanChrootProcesses(activeIds, activePids)
         }
     }
-
-    // Mode Seleksi Teks (Termux-style Freeze Copy)
-    var isSelectModeActive by remember { mutableStateOf(false) }
 
     // Menu Overflow Titik Tiga (Action Toolbar Ringkas)
     var showOverflowMenu by remember { mutableStateOf(false) }
@@ -527,29 +527,11 @@ fun TerminalScreen(
 
             Spacer(modifier = Modifier.width(6.dp))
 
-            // Sisi Kanan: 4 Kontrol Rapi & Bersih (SEL, Keyboard, Agent Hub, 3-Dots Menu)
+            // Sisi Kanan: Kontrol Bersih (Keyboard, Agent Hub, 3-Dots Menu)
             Row(
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                // 1. Toggle Mode Seleksi Teks (Termux-style pin selection)
-                IconButton(
-                    onClick = {
-                        isSelectModeActive = !isSelectModeActive
-                        if (isSelectModeActive) {
-                            Toast.makeText(context, "Mode Seleksi aktif: seret pin untuk memilih teks", Toast.LENGTH_SHORT).show()
-                        }
-                    },
-                    modifier = Modifier.size(30.dp)
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.SelectAll,
-                        contentDescription = "Mode Seleksi Teks",
-                        tint = if (isSelectModeActive) DevSecondary else DevPrimary,
-                        modifier = Modifier.size(17.dp)
-                    )
-                }
-
-                // 2. Toggle Soft Keyboard
+                // 1. Toggle Soft Keyboard
                 IconButton(
                     onClick = {
                         autoScrollEnabled = true
@@ -946,57 +928,6 @@ fun TerminalScreen(
                 .alpha(0.01f)
         )
 
-        // Banner Indikator Mode Seleksi Teks (Termux-style)
-        if (isSelectModeActive) {
-            Surface(
-                color = Color(0xFF1E222D),
-                border = BorderStroke(1.dp, DevPrimary),
-                shape = RoundedCornerShape(8.dp),
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 8.dp, vertical = 4.dp)
-            ) {
-                Row(
-                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(Icons.Default.SelectAll, contentDescription = null, tint = DevPrimary, modifier = Modifier.size(18.dp))
-                        Spacer(modifier = Modifier.width(6.dp))
-                        Text(
-                            text = "Mode Seleksi (Geser Bebas)",
-                            color = DevPrimary,
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 12.sp
-                        )
-                    }
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        IconButton(
-                            onClick = {
-                                val all = TerminalSessionManager.getActiveSession().buffer.getTranscriptText()
-                                if (all.isNotBlank()) {
-                                    clipboardManager.setText(AnnotatedString(all))
-                                    Toast.makeText(context, "Seluruh teks terminal disalin", Toast.LENGTH_SHORT).show()
-                                }
-                            },
-                            modifier = Modifier.size(30.dp)
-                        ) {
-                            Icon(Icons.Default.ContentCopy, contentDescription = "Salin Semua", tint = Color.White, modifier = Modifier.size(16.dp))
-                        }
-                        IconButton(
-                            onClick = {
-                                isSelectModeActive = false
-                            },
-                            modifier = Modifier.size(30.dp)
-                        ) {
-                            Icon(Icons.Default.Close, contentDescription = "Selesai", tint = Color.Gray, modifier = Modifier.size(16.dp))
-                        }
-                    }
-                }
-            }
-        }
-
         // Native 2D VT100 Matrix Canvas / Terminal Text Area with Direct Glyph Drawing
         BoxWithConstraints(
             modifier = Modifier
@@ -1029,7 +960,6 @@ fun TerminalScreen(
                     verticalScrollState = verticalScrollState,
                     horizontalScrollState = horizontalScrollState,
                     isShiftActive = isShiftActive,
-                    isSelectModeActive = isSelectModeActive,
                     onFocusRequest = {
                         autoScrollEnabled = true
                         terminalInputView?.requestKeyboard()
@@ -1633,18 +1563,8 @@ fun TerminalScreen(
                     }
                 },
                 dismissButton = {
-                    Row {
-                        TextButton(
-                            onClick = {
-                                isSelectModeActive = true
-                                showAgentHubDialog = false
-                            }
-                        ) {
-                            Text("Mode Seleksi", color = DevSecondary, fontSize = 12.sp)
-                        }
-                        TextButton(onClick = { showAgentHubDialog = false }) {
-                            Text("Tutup", color = Color.Gray, fontSize = 12.sp)
-                        }
+                    TextButton(onClick = { showAgentHubDialog = false }) {
+                        Text("Tutup", color = Color.Gray, fontSize = 12.sp)
                     }
                 }
             )
@@ -1672,9 +1592,18 @@ fun TerminalScreen(
                     TerminalSessionManager.getActiveSession().sendBytes(byteArrayOf(27))
                 }
 
-                // Mode Seleksi Cepat (SEL)
-                TerminalToggleKey(label = "SEL", isActive = isSelectModeActive) {
-                    isSelectModeActive = !isSelectModeActive
+                // Tombol Cepat Tempel (PASTE) langsung dari baris tombol bantuan
+                TerminalModifierKey(label = "PASTE", isSignal = true) {
+                    val clip = clipboardManager.getText()?.text
+                    if (!clip.isNullOrEmpty()) {
+                        if (clip.length > 2000 || clip.count { it == '\n' } > 50) {
+                            pendingLargePaste = clip
+                        } else {
+                            TerminalSessionManager.getActiveSession().pasteText(clip)
+                        }
+                    } else {
+                        Toast.makeText(context, "Clipboard kosong", Toast.LENGTH_SHORT).show()
+                    }
                 }
 
                 // TAB / SHIFT+TAB (Backtab untuk navigasi mundur di TUI agy/fzf/nano)
@@ -1903,22 +1832,20 @@ fun TerminalCanvas(
     verticalScrollState: ScrollState,
     horizontalScrollState: ScrollState,
     isShiftActive: Boolean = false,
-    isSelectModeActive: Boolean = false,
     onFocusRequest: () -> Unit,
     onTapUrl: (String) -> Unit,
     onPasteLarge: (String) -> Unit = {},
     modifier: Modifier = Modifier
 ) {
-    val view = LocalView.current
     val density = LocalDensity.current
     val haptic = LocalHapticFeedback.current
     val clipboardManager = LocalClipboardManager.current
     val context = LocalContext.current
 
-    var currentActionMode by remember { mutableStateOf<ActionMode?>(null) }
     var selectionStart by remember { mutableStateOf<GridPoint?>(null) }
     var selectionEnd by remember { mutableStateOf<GridPoint?>(null) }
-    var isSelectingText by remember { mutableStateOf(false) }
+    var pasteMenuOffset by remember { mutableStateOf<Offset?>(null) }
+    var isDraggingHandle by remember { mutableStateOf(false) }
 
     val fontSizePx = with(density) { fontSizeSp.sp.toPx() }
 
@@ -1958,29 +1885,23 @@ fun TerminalCanvas(
     val totalWidthDp = with(density) { totalWidthPx.toDp() }
     val totalHeightDp = with(density) { totalHeightPx.toDp() }
 
-    fun findWordBounds(lineIdx: Int, col: Int): Pair<Int, Int> {
-        val line = session.buffer.getLineAt(lineIdx) ?: return col to col
+    fun findWordBounds(lineIdx: Int, col: Int): Pair<Int, Int>? {
+        val line = session.buffer.getLineAt(lineIdx) ?: return null
         val maxC = minOf(session.buffer.maxCols, line.size)
-        if (col !in 0 until maxC) return col to col
+        if (col !in 0 until maxC) return null
 
-        val targetCell = line.getOrNull(col) ?: return col to col
-        if (targetCell.char == ' ') {
-            // Jika menekan spasi, cari kata terdekat di sebelah kiri atau kanan
-            var left = col
-            while (left > 0 && line.getOrNull(left - 1)?.char == ' ') left--
-            if (left > 0) return findWordBounds(lineIdx, left - 1)
-            var right = col
-            while (right < maxC - 1 && line.getOrNull(right + 1)?.char == ' ') right++
-            if (right < maxC - 1) return findWordBounds(lineIdx, right + 1)
-            return col to col
+        val targetCell = line.getOrNull(col) ?: return null
+        if (targetCell.char == ' ' || targetCell.isWideContinuation) {
+            // Sentuhan pada sel kosong TIDAK memilih kata terdekat (agar paste contextual berfungsi)
+            return null
         }
 
         var start = col
-        while (start > 0 && line.getOrNull(start - 1)?.char != ' ') {
+        while (start > 0 && line.getOrNull(start - 1)?.let { it.char != ' ' && !it.isWideContinuation } == true) {
             start--
         }
         var end = col
-        while (end < maxC - 1 && line.getOrNull(end + 1)?.char != ' ') {
+        while (end < maxC - 1 && line.getOrNull(end + 1)?.let { it.char != ' ' && !it.isWideContinuation } == true) {
             end++
         }
         return start to end
@@ -2009,140 +1930,6 @@ fun TerminalCanvas(
         return sb.toString()
     }
 
-    fun getSelectionBoundingRect(p1: GridPoint, p2: GridPoint): android.graphics.Rect {
-        val start = minOf(p1, p2)
-        val end = maxOf(p1, p2)
-        val scrollX = horizontalScrollState.value
-        val scrollY = if (!isAltBuffer) verticalScrollState.value else 0
-
-        val left = ((start.col * charWidth - scrollX).toInt()).coerceAtLeast(0)
-        val top = ((start.line * charHeight - scrollY).toInt()).coerceAtLeast(0)
-        val right = (((end.col + 1) * charWidth - scrollX).toInt()).coerceAtLeast(left + 1)
-        val bottom = (((end.line + 1) * charHeight - scrollY).toInt()).coerceAtLeast(top + 1)
-
-        return android.graphics.Rect(left, top, right, bottom)
-    }
-
-    val actionModeCallback = remember(session, clipboardManager, context) {
-        object : ActionMode.Callback2() {
-            override fun onCreateActionMode(mode: ActionMode, menu: Menu): Boolean {
-                menu.add(Menu.NONE, 1, 1, android.R.string.copy).apply {
-                    setShowAsAction(MenuItem.SHOW_AS_ACTION_ALWAYS)
-                }
-                menu.add(Menu.NONE, 2, 2, android.R.string.paste).apply {
-                    setShowAsAction(MenuItem.SHOW_AS_ACTION_ALWAYS)
-                }
-                menu.add(Menu.NONE, 3, 3, android.R.string.selectAll).apply {
-                    setShowAsAction(MenuItem.SHOW_AS_ACTION_IF_ROOM)
-                }
-                menu.add(Menu.NONE, 5, 4, "Salin Baris").apply {
-                    setShowAsAction(MenuItem.SHOW_AS_ACTION_IF_ROOM)
-                }
-                menu.add(Menu.NONE, 4, 5, "Bagikan").apply {
-                    setShowAsAction(MenuItem.SHOW_AS_ACTION_IF_ROOM)
-                }
-                return true
-            }
-
-            override fun onPrepareActionMode(mode: ActionMode, menu: Menu): Boolean = false
-
-            override fun onActionItemClicked(mode: ActionMode, item: MenuItem): Boolean {
-                when (item.itemId) {
-                    1 -> { // Salin Teks Terpilih
-                        val start = selectionStart
-                        val end = selectionEnd
-                        if (start != null && end != null) {
-                            val text = getSelectedText(start, end)
-                            if (text.isNotEmpty()) {
-                                clipboardManager.setText(AnnotatedString(text))
-                                Toast.makeText(context, "Teks disalin (${text.length} karakter)", Toast.LENGTH_SHORT).show()
-                            }
-                        }
-                        mode.finish()
-                        return true
-                    }
-                    2 -> { // Tempel
-                        val clip = clipboardManager.getText()?.text
-                        if (!clip.isNullOrEmpty()) {
-                            if (clip.length > 2000 || clip.count { it == '\n' } > 50) {
-                                onPasteLarge(clip)
-                            } else {
-                                session.pasteText(clip)
-                            }
-                        } else {
-                            Toast.makeText(context, "Clipboard kosong", Toast.LENGTH_SHORT).show()
-                        }
-                        mode.finish()
-                        return true
-                    }
-                    3 -> { // Pilih Semua
-                        val totalLines = if (isAltBuffer) session.buffer.maxRows else session.buffer.getLineCount()
-                        val s = GridPoint(0, 0)
-                        val e = GridPoint((totalLines - 1).coerceAtLeast(0), session.buffer.maxCols - 1)
-                        selectionStart = s
-                        selectionEnd = e
-                        val text = getSelectedText(s, e)
-                        if (text.isNotEmpty()) {
-                            clipboardManager.setText(AnnotatedString(text))
-                            Toast.makeText(context, "Semua teks disalin (${text.length} karakter)", Toast.LENGTH_SHORT).show()
-                        }
-                        mode.invalidateContentRect()
-                        return true
-                    }
-                    5 -> { // Salin Baris yang Aktif
-                        val lineIdx = selectionStart?.line ?: 0
-                        val line = session.buffer.getLineAt(lineIdx)
-                        val lineText = line?.filter { !it.isWideContinuation }?.map { it.char }?.joinToString("")?.trimEnd() ?: ""
-                        if (lineText.isNotEmpty()) {
-                            clipboardManager.setText(AnnotatedString(lineText))
-                            Toast.makeText(context, "Baris disalin", Toast.LENGTH_SHORT).show()
-                        }
-                        mode.finish()
-                        return true
-                    }
-                    4 -> { // Bagikan
-                        val start = selectionStart
-                        val end = selectionEnd
-                        if (start != null && end != null) {
-                            val text = getSelectedText(start, end)
-                            if (text.isNotEmpty()) {
-                                try {
-                                    val sendIntent = Intent().apply {
-                                        action = Intent.ACTION_SEND
-                                        putExtra(Intent.EXTRA_TEXT, text)
-                                        type = "text/plain"
-                                    }
-                                    context.startActivity(Intent.createChooser(sendIntent, "Bagikan Teks Terminal"))
-                                } catch (e: Exception) {
-                                    Toast.makeText(context, "Gagal membagikan: ${e.message}", Toast.LENGTH_SHORT).show()
-                                }
-                            }
-                        }
-                        mode.finish()
-                        return true
-                    }
-                }
-                return false
-            }
-
-            override fun onDestroyActionMode(mode: ActionMode) {
-                selectionStart = null
-                selectionEnd = null
-                currentActionMode = null
-            }
-
-            override fun onGetContentRect(mode: ActionMode, view: View, outRect: android.graphics.Rect) {
-                val start = selectionStart
-                val end = selectionEnd
-                if (start != null && end != null) {
-                    outRect.set(getSelectionBoundingRect(start, end))
-                } else {
-                    super.onGetContentRect(mode, view, outRect)
-                }
-            }
-        }
-    }
-
     Box(modifier = modifier.fillMaxSize()) {
         Box(
             modifier = Modifier
@@ -2150,20 +1937,20 @@ fun TerminalCanvas(
                 .then(
                     if (!isAltBuffer) Modifier.verticalScroll(
                         verticalScrollState,
-                        enabled = selectionStart == null && !isSelectModeActive
+                        enabled = !isDraggingHandle
                     )
                     else Modifier
                 )
                 .horizontalScroll(
                     horizontalScrollState,
-                    enabled = selectionStart == null && !isSelectModeActive
+                    enabled = !isDraggingHandle
                 )
                 .padding(horizontal = 6.dp, vertical = 4.dp)
         ) {
             Canvas(
                 modifier = Modifier
                     .size(width = totalWidthDp, height = totalHeightDp)
-                    .pointerInput(session.buffer.isMouseTrackingEnabled, fontSizeSp, isAltBuffer, isShiftActive, isSelectModeActive) {
+                    .pointerInput(session.buffer.isMouseTrackingEnabled, fontSizeSp, isAltBuffer, isShiftActive) {
                         detectTapGestures(
                             onLongPress = { offset ->
                                 if (charWidth > 0 && charHeight > 0) {
@@ -2176,31 +1963,30 @@ fun TerminalCanvas(
                                         haptic.performHapticFeedback(HapticFeedbackType.LongPress)
                                         onTapUrl(detectedUrl)
                                     } else {
-                                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                                        val (wStart, wEnd) = findWordBounds(line, col)
-                                        selectionStart = GridPoint(line, wStart)
-                                        selectionEnd = GridPoint(line, wEnd)
+                                        val wordBounds = findWordBounds(line, col)
+                                        if (wordBounds != null) {
+                                            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                            pasteMenuOffset = null
+                                            selectionStart = GridPoint(line, wordBounds.first)
+                                            selectionEnd = GridPoint(line, wordBounds.second)
+                                        } else {
+                                            // Long-press di sel kosong / kursor: Tampilkan menu Tempel jika ada isi clipboard
+                                            val clip = clipboardManager.getText()?.text
+                                            if (!clip.isNullOrEmpty()) {
+                                                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                                selectionStart = null
+                                                selectionEnd = null
+                                                pasteMenuOffset = offset
+                                            }
+                                        }
                                     }
                                 }
                             },
                             onTap = { offset ->
-                                if (selectionStart != null) {
+                                if (selectionStart != null || pasteMenuOffset != null) {
                                     selectionStart = null
                                     selectionEnd = null
-                                    currentActionMode?.finish()
-                                    currentActionMode = null
-                                } else if (isSelectModeActive) {
-                                    // Dalam Mode Seleksi (SEL), tap langsung memilih kata di bawah jari
-                                    if (charWidth > 0 && charHeight > 0) {
-                                        val col = (offset.x / charWidth).toInt().coerceIn(0, session.buffer.maxCols - 1)
-                                        val maxLine = (if (isAltBuffer) session.buffer.maxRows else session.buffer.getLineCount()) - 1
-                                        val line = (offset.y / charHeight).toInt().coerceIn(0, maxLine.coerceAtLeast(0))
-
-                                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                                        val (wStart, wEnd) = findWordBounds(line, col)
-                                        selectionStart = GridPoint(line, wStart)
-                                        selectionEnd = GridPoint(line, wEnd)
-                                    }
+                                    pasteMenuOffset = null
                                 } else {
                                     if (charWidth > 0 && charHeight > 0) {
                                         val col = (offset.x / charWidth).toInt().coerceIn(0, session.buffer.maxCols - 1)
@@ -2431,7 +2217,8 @@ fun TerminalCanvas(
                         } else {
                             selectionStart = newPoint
                         }
-                    }
+                    },
+                    onDragStateChange = { isDraggingHandle = it }
                 )
 
                 // Pin Selesai (End Handle)
@@ -2452,129 +2239,164 @@ fun TerminalCanvas(
                         } else {
                             selectionEnd = newPoint
                         }
-                    }
+                    },
+                    onDragStateChange = { isDraggingHandle = it }
                 )
             }
         }
 
-        // Floating Action Bar overlay yang selalu terlihat di atas viewport terminal
-        AnimatedVisibility(
-            visible = selectionStart != null && selectionEnd != null,
-            enter = fadeIn() + expandVertically(),
-            exit = fadeOut() + shrinkVertically(),
-            modifier = Modifier
-                .align(Alignment.TopCenter)
-                .padding(top = 8.dp)
-        ) {
-            Surface(
-                color = Color(0xFF1E222D).copy(alpha = 0.95f),
-                border = BorderStroke(1.dp, DevPrimary),
-                shape = RoundedCornerShape(20.dp),
-                shadowElevation = 8.dp
+        // 1. Menu Kontekstual Seleksi Teks (Tampil tepat di atas teks terpilih)
+        if (hasSelection && selMin != null && !isDraggingHandle) {
+            val scrollX = horizontalScrollState.value
+            val scrollY = if (!isAltBuffer) verticalScrollState.value else 0
+            val screenX = (selMin.col * charWidth - scrollX).toInt()
+            val screenY = (selMin.line * charHeight - scrollY).toInt()
+
+            val menuX = screenX.coerceIn(12, (totalWidthPx - 260).coerceAtLeast(12))
+            val menuY = if (screenY >= 56) (screenY - 50) else (screenY + charHeight.toInt() + 12)
+
+            Popup(
+                alignment = Alignment.TopStart,
+                offset = IntOffset(menuX, menuY),
+                onDismissRequest = {
+                    selectionStart = null
+                    selectionEnd = null
+                },
+                properties = PopupProperties(focusable = false)
             ) {
-                Row(
-                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
-                    verticalAlignment = Alignment.CenterVertically
+                Surface(
+                    shape = RoundedCornerShape(12.dp),
+                    color = Color(0xFF1E222D),
+                    border = BorderStroke(1.dp, DevPrimary.copy(alpha = 0.7f)),
+                    shadowElevation = 8.dp
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        TextButton(
+                            onClick = {
+                                val start = selectionStart
+                                val end = selectionEnd
+                                if (start != null && end != null) {
+                                    val text = getSelectedText(start, end)
+                                    if (text.isNotEmpty()) {
+                                        clipboardManager.setText(AnnotatedString(text))
+                                        Toast.makeText(context, "Teks disalin (${text.length} karakter)", Toast.LENGTH_SHORT).show()
+                                    }
+                                }
+                                selectionStart = null
+                                selectionEnd = null
+                            },
+                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp)
+                        ) {
+                            Icon(Icons.Default.ContentCopy, contentDescription = null, tint = DevPrimary, modifier = Modifier.size(15.dp))
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text("Salin", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                        }
+
+                        val clipText = clipboardManager.getText()?.text
+                        if (!clipText.isNullOrEmpty()) {
+                            TextButton(
+                                onClick = {
+                                    if (clipText.length > 2000 || clipText.count { it == '\n' } > 50) {
+                                        onPasteLarge(clipText)
+                                    } else {
+                                        session.pasteText(clipText)
+                                    }
+                                    selectionStart = null
+                                    selectionEnd = null
+                                },
+                                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp)
+                            ) {
+                                Text("Tempel", color = Color.White, fontSize = 12.sp)
+                            }
+                        }
+
+                        TextButton(
+                            onClick = {
+                                val totalLines = if (isAltBuffer) session.buffer.maxRows else session.buffer.getLineCount()
+                                selectionStart = GridPoint(0, 0)
+                                selectionEnd = GridPoint((totalLines - 1).coerceAtLeast(0), session.buffer.maxCols - 1)
+                            },
+                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp)
+                        ) {
+                            Text("Semua", color = Color.White, fontSize = 12.sp)
+                        }
+
+                        IconButton(
+                            onClick = {
+                                val start = selectionStart
+                                val end = selectionEnd
+                                if (start != null && end != null) {
+                                    val text = getSelectedText(start, end)
+                                    if (text.isNotEmpty()) {
+                                        try {
+                                            val sendIntent = Intent().apply {
+                                                action = Intent.ACTION_SEND
+                                                putExtra(Intent.EXTRA_TEXT, text)
+                                                type = "text/plain"
+                                            }
+                                            context.startActivity(Intent.createChooser(sendIntent, "Bagikan Teks"))
+                                        } catch (e: Exception) {
+                                            Toast.makeText(context, "Gagal membagikan: ${e.message}", Toast.LENGTH_SHORT).show()
+                                        }
+                                    }
+                                }
+                                selectionStart = null
+                                selectionEnd = null
+                            },
+                            modifier = Modifier.size(32.dp)
+                        ) {
+                            Icon(Icons.Default.Share, contentDescription = "Bagikan", tint = DevPrimary, modifier = Modifier.size(15.dp))
+                        }
+                    }
+                }
+            }
+        }
+
+        // 2. Menu Kontekstual Tempel (saat long-press di area kosong dan clipboard memiliki isi)
+        val pastePos = pasteMenuOffset
+        if (pastePos != null && selectionStart == null) {
+            val scrollX = horizontalScrollState.value
+            val scrollY = if (!isAltBuffer) verticalScrollState.value else 0
+            val screenX = (pastePos.x - scrollX).toInt()
+            val screenY = (pastePos.y - scrollY).toInt()
+
+            val menuX = screenX.coerceIn(12, (totalWidthPx - 130).coerceAtLeast(12))
+            val menuY = if (screenY >= 56) (screenY - 50) else (screenY + 20)
+
+            Popup(
+                alignment = Alignment.TopStart,
+                offset = IntOffset(menuX, menuY),
+                onDismissRequest = {
+                    pasteMenuOffset = null
+                },
+                properties = PopupProperties(focusable = false)
+            ) {
+                Surface(
+                    shape = RoundedCornerShape(12.dp),
+                    color = Color(0xFF1E222D),
+                    border = BorderStroke(1.dp, DevPrimary.copy(alpha = 0.7f)),
+                    shadowElevation = 8.dp
                 ) {
                     TextButton(
                         onClick = {
-                            val start = selectionStart
-                            val end = selectionEnd
-                            if (start != null && end != null) {
-                                val text = getSelectedText(start, end)
-                                if (text.isNotEmpty()) {
-                                    clipboardManager.setText(AnnotatedString(text))
-                                    Toast.makeText(context, "Teks disalin (${text.length} karakter)", Toast.LENGTH_SHORT).show()
+                            val clipText = clipboardManager.getText()?.text
+                            if (!clipText.isNullOrEmpty()) {
+                                if (clipText.length > 2000 || clipText.count { it == '\n' } > 50) {
+                                    onPasteLarge(clipText)
+                                } else {
+                                    session.pasteText(clipText)
                                 }
                             }
-                            selectionStart = null
-                            selectionEnd = null
-                            currentActionMode?.finish()
-                            currentActionMode = null
+                            pasteMenuOffset = null
                         },
-                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp)
+                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp)
                     ) {
-                        Icon(Icons.Default.ContentCopy, contentDescription = null, tint = DevPrimary, modifier = Modifier.size(16.dp))
-                        Spacer(modifier = Modifier.width(4.dp))
-                        Text("Salin", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                    }
-
-                    TextButton(
-                        onClick = {
-                            val lineIdx = selectionStart?.line ?: 0
-                            val line = session.buffer.getLineAt(lineIdx)
-                            val lineText = line?.filter { !it.isWideContinuation }?.map { it.char }?.joinToString("")?.trimEnd() ?: ""
-                            if (lineText.isNotEmpty()) {
-                                clipboardManager.setText(AnnotatedString(lineText))
-                                Toast.makeText(context, "Baris disalin", Toast.LENGTH_SHORT).show()
-                            }
-                            selectionStart = null
-                            selectionEnd = null
-                            currentActionMode?.finish()
-                            currentActionMode = null
-                        },
-                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp)
-                    ) {
-                        Text("Baris", color = Color.White, fontSize = 12.sp)
-                    }
-
-                    TextButton(
-                        onClick = {
-                            val totalLines = if (isAltBuffer) session.buffer.maxRows else session.buffer.getLineCount()
-                            val s = GridPoint(0, 0)
-                            val e = GridPoint((totalLines - 1).coerceAtLeast(0), session.buffer.maxCols - 1)
-                            selectionStart = s
-                            selectionEnd = e
-                            val text = getSelectedText(s, e)
-                            if (text.isNotEmpty()) {
-                                clipboardManager.setText(AnnotatedString(text))
-                                Toast.makeText(context, "Semua teks disalin (${text.length} karakter)", Toast.LENGTH_SHORT).show()
-                            }
-                        },
-                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp)
-                    ) {
-                        Text("Semua", color = Color.White, fontSize = 12.sp)
-                    }
-
-                    IconButton(
-                        onClick = {
-                            val start = selectionStart
-                            val end = selectionEnd
-                            if (start != null && end != null) {
-                                val text = getSelectedText(start, end)
-                                if (text.isNotEmpty()) {
-                                    try {
-                                        val sendIntent = Intent().apply {
-                                            action = Intent.ACTION_SEND
-                                            putExtra(Intent.EXTRA_TEXT, text)
-                                            type = "text/plain"
-                                        }
-                                        context.startActivity(Intent.createChooser(sendIntent, "Bagikan Teks Terminal"))
-                                    } catch (e: Exception) {
-                                        Toast.makeText(context, "Gagal membagikan: ${e.message}", Toast.LENGTH_SHORT).show()
-                                    }
-                                }
-                            }
-                            selectionStart = null
-                            selectionEnd = null
-                            currentActionMode?.finish()
-                            currentActionMode = null
-                        },
-                        modifier = Modifier.size(28.dp)
-                    ) {
-                        Icon(Icons.Default.Share, contentDescription = "Bagikan", tint = DevPrimary, modifier = Modifier.size(15.dp))
-                    }
-
-                    IconButton(
-                        onClick = {
-                            selectionStart = null
-                            selectionEnd = null
-                            currentActionMode?.finish()
-                            currentActionMode = null
-                        },
-                        modifier = Modifier.size(28.dp)
-                    ) {
-                        Icon(Icons.Default.Close, contentDescription = "Tutup", tint = Color.Gray, modifier = Modifier.size(16.dp))
+                        Icon(Icons.Default.ContentPaste, contentDescription = null, tint = DevPrimary, modifier = Modifier.size(16.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text("Tempel", color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Bold)
                     }
                 }
             }
@@ -2596,12 +2418,17 @@ private fun SelectionHandle(
     charHeight: Float,
     maxCols: Int,
     maxRows: Int,
-    onPositionChange: (GridPoint) -> Unit
+    onPositionChange: (GridPoint) -> Unit,
+    onDragStateChange: (Boolean) -> Unit = {}
 ) {
     val density = LocalDensity.current
     val handleTouchSizeDp = 44.dp
     val handleTouchSizePx = with(density) { handleTouchSizeDp.toPx() }
     val visualPinRadius = 6.dp
+
+    val currentPoint by rememberUpdatedState(gridPoint)
+    val currentOnPositionChange by rememberUpdatedState(onPositionChange)
+    val currentOnDragStateChange by rememberUpdatedState(onDragStateChange)
 
     val pinX = if (isStart) gridPoint.col * charWidth else (gridPoint.col + 1) * charWidth
     val pinY = (gridPoint.line + 1) * charHeight
@@ -2621,10 +2448,17 @@ private fun SelectionHandle(
             .pointerInput(isStart) {
                 detectDragGestures(
                     onDragStart = {
-                        dragStartLine = gridPoint.line
-                        dragStartCol = gridPoint.col
+                        currentOnDragStateChange(true)
+                        dragStartLine = currentPoint.line
+                        dragStartCol = currentPoint.col
                         totalDragX = 0f
                         totalDragY = 0f
+                    },
+                    onDragEnd = {
+                        currentOnDragStateChange(false)
+                    },
+                    onDragCancel = {
+                        currentOnDragStateChange(false)
                     },
                     onDrag = { change, dragAmount ->
                         change.consume()
@@ -2637,7 +2471,7 @@ private fun SelectionHandle(
                         val newLine = (dragStartLine + deltaLine).coerceIn(0, (maxRows - 1).coerceAtLeast(0))
                         val newCol = (dragStartCol + deltaCol).coerceIn(0, maxCols - 1)
 
-                        onPositionChange(GridPoint(newLine, newCol))
+                        currentOnPositionChange(GridPoint(newLine, newCol))
                     }
                 )
             },
