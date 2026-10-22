@@ -182,7 +182,10 @@ class TerminalGridBuffer(
                         when {
                             ch == '\u001B' -> parserState = ParserState.ESC
                             ch == '\r' -> cursorCol = 0
-                            ch == '\n' -> newline()
+                            ch == '\n' -> {
+                                cursorCol = 0
+                                newline()
+                            }
                             ch == '\b' || ch == '\u007F' -> {
                                 if (cursorCol > 0) cursorCol--
                             }
