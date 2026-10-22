@@ -148,6 +148,17 @@ class KeepAliveService : Service() {
         startForeground(NOTIFICATION_ID, notification)
         isRunning = true
 
+        // OOM Killer Immunity (-1000) & Swap tuning untuk kestabilan background di CPU Helio G35 / Android 14
+        serviceScope.launch {
+            try {
+                val myPid = android.os.Process.myPid()
+                com.arbdev.devbox.data.RootExecutor.executeSync(
+                    "echo -1000 > /proc/$myPid/oom_score_adj 2>/dev/null; sysctl -w vm.swappiness=60 2>/dev/null",
+                    silent = true
+                )
+            } catch (_: Exception) {}
+        }
+
         return START_NOT_STICKY
     }
 

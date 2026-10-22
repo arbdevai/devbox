@@ -128,31 +128,82 @@ class NativeTerminalSession(
             isRunning = true
             AppLogger.i("NativeTerminal", "Sesi [$name] aktif (PID terhubung, PTY siap, SID: $id)")
 
-            // Pantau proses aktif / agent CLI (agy, python, node, dll) di sesi ini (dithrottle 30s, silent mode agar hemat baterai/CPU & tidak spam su)
+            // Pantau proses aktif, xdg-open URL trigger, dan port web server aktif
             val sessionId = id
             processMonitorJob = sessionScope.launch {
+                var cycle = 0
+                val checkPorts = listOf(
+                    3000 to "0BB8",
+                    5173 to "1435",
+                    8080 to "1F90",
+                    8000 to "1F40",
+                    4200 to "1068",
+                    5000 to "1388",
+                    8081 to "1F91"
+                )
                 while (isActive && isRunning) {
-                    kotlinx.coroutines.delay(30000)
+                    kotlinx.coroutines.delay(2000)
+                    cycle++
+
+                    // 1. Cek permintaan buka URL dari CLI (xdg-open / browser link)
                     try {
-                        val checkCmd = "for p in /proc/[0-9]*; do " +
-                                "if [ \"\$(readlink \$p/root 2>/dev/null)\" = '$targetRootfs' ]; then " +
-                                "if grep -z '^DEVBOX_SESSION_ID=$sessionId' \"\$p/environ\" 2>/dev/null >/dev/null; then " +
-                                "comm=\$(cat \$p/comm 2>/dev/null); " +
-                                "if [ \"\$comm\" != 'script' ] && [ \"\$comm\" != 'bash' ] && [ \"\$comm\" != 'stty' ] && [ \"\$comm\" != 'setpriv' ]; then " +
-                                "echo \"\$comm\"; break; " +
-                                "fi; fi; fi; done"
-                        val res = com.arbdev.devbox.data.RootExecutor.executeSync(checkCmd, silent = true)
-                        val detected = res.getOrNull()?.stdout?.trim().orEmpty()
-                        mainHandler.post {
-                            if (detected.isNotBlank()) {
-                                activeAgentName = detected
-                                isAgentRunning = true
-                            } else {
-                                activeAgentName = null
-                                isAgentRunning = false
+                        val triggerFile = File("$targetRootfs/tmp/.devbox_open_url")
+                        if (triggerFile.exists()) {
+                            val lines = triggerFile.readLines()
+                            triggerFile.delete()
+                            for (u in lines) {
+                                if (u.isNotBlank()) {
+                                    mainHandler.post {
+                                        ChrootManager.openUrlInAndroidBrowser(u.trim())
+                                    }
+                                }
                             }
                         }
                     } catch (_: Exception) {}
+
+                    // 2. Cek port web server lokal aktif via /proc/net/tcp (<1ms) setiap 4 detik
+                    if (cycle % 2 == 0) {
+                        try {
+                            val tcpFile = File("/proc/net/tcp")
+                            if (tcpFile.exists()) {
+                                val lines = tcpFile.readLines()
+                                var foundPort: Int? = null
+                                for ((port, hex) in checkPorts) {
+                                    if (lines.any { it.contains(":$hex ") && it.contains(" 0A ") }) {
+                                        foundPort = port
+                                        break
+                                    }
+                                }
+                                mainHandler.post {
+                                    TerminalSessionManager.detectedWebPort = foundPort
+                                }
+                            }
+                        } catch (_: Exception) {}
+                    }
+
+                    // 3. Cek nama proses / agent aktif (agy, python, node, dll) setiap 20 detik
+                    if (cycle % 10 == 0) {
+                        try {
+                            val checkCmd = "for p in /proc/[0-9]*; do " +
+                                    "if [ \"\$(readlink \$p/root 2>/dev/null)\" = '$targetRootfs' ]; then " +
+                                    "if grep -z '^DEVBOX_SESSION_ID=$sessionId' \"\$p/environ\" 2>/dev/null >/dev/null; then " +
+                                    "comm=\$(cat \$p/comm 2>/dev/null); " +
+                                    "if [ \"\$comm\" != 'script' ] && [ \"\$comm\" != 'bash' ] && [ \"\$comm\" != 'stty' ] && [ \"\$comm\" != 'setpriv' ]; then " +
+                                    "echo \"\$comm\"; break; " +
+                                    "fi; fi; fi; done"
+                            val res = com.arbdev.devbox.data.RootExecutor.executeSync(checkCmd, silent = true)
+                            val detected = res.getOrNull()?.stdout?.trim().orEmpty()
+                            mainHandler.post {
+                                if (detected.isNotBlank()) {
+                                    activeAgentName = detected
+                                    isAgentRunning = true
+                                } else {
+                                    activeAgentName = null
+                                    isAgentRunning = false
+                                }
+                            }
+                        } catch (_: Exception) {}
+                    }
                 }
             }
 
@@ -364,6 +415,7 @@ class NativeTerminalSession(
 object TerminalSessionManager {
     val sessions = mutableStateListOf<NativeTerminalSession>()
     val activeIndex = mutableIntStateOf(0)
+    var detectedWebPort by mutableStateOf<Int?>(null)
 
     init {
         createNewSession("Sesi 1")

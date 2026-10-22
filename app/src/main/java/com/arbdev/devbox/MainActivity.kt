@@ -33,10 +33,17 @@ class MainActivity : ComponentActivity() {
         // Inisialisasi path rootfs persisten dari SharedPreferences
         ChrootManager.init(applicationContext)
 
-        // Otomatis bersihkan sisa APK lama dan lock proses agy usang saat aplikasi dibuka
+        // Otomatis bersihkan sisa APK lama, lock proses agy usang, dan set OOM score -1000
         lifecycleScope.launch(Dispatchers.IO) {
             UpdateManager.cleanupOldApks(applicationContext)
             ChrootManager.cleanStaleAgyLocks()
+            try {
+                val myPid = android.os.Process.myPid()
+                com.arbdev.devbox.data.RootExecutor.executeSync(
+                    "echo -1000 > /proc/$myPid/oom_score_adj 2>/dev/null; sysctl -w vm.swappiness=60 2>/dev/null",
+                    silent = true
+                )
+            } catch (_: Exception) {}
         }
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {

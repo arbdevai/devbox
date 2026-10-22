@@ -1073,6 +1073,46 @@ fun TerminalScreen(
                     }
                 }
             }
+
+            // Floating badge jika ada server web lokal (Vite, Next, Flask, Node, dsb.) aktif
+            val activeWebPort = TerminalSessionManager.detectedWebPort
+            if (activeWebPort != null) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(top = 8.dp, end = 12.dp),
+                    contentAlignment = Alignment.TopEnd
+                ) {
+                    Surface(
+                        onClick = {
+                            val url = "http://localhost:$activeWebPort"
+                            ChrootManager.openUrlInAndroidBrowser(url)
+                        },
+                        color = DevPrimary,
+                        shape = RoundedCornerShape(16.dp),
+                        shadowElevation = 6.dp
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = "🌐 :$activeWebPort",
+                                color = Color.Black,
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text(
+                                text = "Buka",
+                                color = Color(0xFF1E222D),
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                        }
+                    }
+                }
+            }
         }
 
         // Dialog Konfirmasi Tempel Teks Sangat Panjang (Mencegah Shell/CLI Looping akibat accidental log paste)

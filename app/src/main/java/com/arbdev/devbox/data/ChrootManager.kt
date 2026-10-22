@@ -56,6 +56,16 @@ object ChrootManager {
         AppLogger.i("ChrootManager", "Jalur rootfs aktif disimpan secara permanen: $trimmed")
     }
 
+    fun openUrlInAndroidBrowser(url: String) {
+        val ctx = appContext ?: return
+        try {
+            val intent = android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(url.trim())).apply {
+                addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+            ctx.startActivity(intent)
+        } catch (_: Exception) {}
+    }
+
     // State cache agar Dashboard dapat langsung ditampilkan instan tanpa buffering saat switch tab
     @Volatile
     var lastKnownState: ChrootState? = null
@@ -850,7 +860,34 @@ exec "${'$'}@"
 SUDO_EOF
             chmod 755 "${'$'}rf/usr/local/bin/sudo" 2>/dev/null || true
 
-            # 7. Pasang paket sudo resmi di background jika belum terinstal
+            # 7. Wrapper xdg-open di /usr/local/bin/xdg-open (Membuka URL di browser Android secara otomatis)
+            cat << 'XDG_EOF' > "${'$'}rf/usr/local/bin/xdg-open"
+#!/bin/bash
+target="${'$'}1"
+if [ -z "${'$'}target" ]; then
+    echo "Usage: xdg-open <url>"
+    exit 1
+fi
+echo "${'$'}target" >> /tmp/.devbox_open_url
+chmod 666 /tmp/.devbox_open_url 2>/dev/null || true
+if [ -x /system/bin/am ]; then
+    /system/bin/am start -a android.intent.action.VIEW -d "${'$'}target" >/dev/null 2>&1
+fi
+exit 0
+XDG_EOF
+            chmod 755 "${'$'}rf/usr/local/bin/xdg-open" 2>/dev/null || true
+            ln -sf /usr/local/bin/xdg-open "${'$'}rf/usr/local/bin/x-www-browser" 2>/dev/null || true
+            ln -sf /usr/local/bin/xdg-open "${'$'}rf/usr/local/bin/www-browser" 2>/dev/null || true
+            ln -sf /usr/local/bin/xdg-open "${'$'}rf/usr/local/bin/wslview" 2>/dev/null || true
+
+            # 8. Shortcut direktori storage Android (/sdcard)
+            mkdir -p "${'$'}rf/home/coder/storage" 2>/dev/null || true
+            ln -sf /mnt/sdcard/Download "${'$'}rf/home/coder/storage/downloads" 2>/dev/null || true
+            ln -sf /mnt/sdcard "${'$'}rf/home/coder/storage/shared" 2>/dev/null || true
+            chown -h 1000:1000 "${'$'}rf/home/coder/storage"/* 2>/dev/null || true
+            chown 1000:1000 "${'$'}rf/home/coder/storage" 2>/dev/null || true
+
+            # 9. Pasang paket sudo resmi di background jika belum terinstal
             if [ ! -x "${'$'}rf/usr/bin/sudo" ] && [ -x "${'$'}rf/usr/bin/apt-get" ]; then
                 ( chroot "${'$'}rf" /usr/bin/apt-get update -qq && chroot "${'$'}rf" /usr/bin/apt-get install -y -qq sudo ca-certificates ) >/dev/null 2>&1 &
             fi
@@ -897,6 +934,16 @@ parse_git_branch() {
 # DevBox Modern Prompt (PS1)
 # Menampilkan user (hijau), folder aktif (kuning bold), branch git (ungu), dan prompt simbol (cyan)
 PS1='\[\033[01;32m\]sahal arbani\[\033[00m\] in \[\033[01;33m\]\w\[\033[01;35m\]$(parse_git_branch)\[\033[00m\] \[\033[01;36m\]➜\[\033[00m\] '
+
+# Navigasi Cepat DevBox
+alias projects='cd ~/projects'
+alias storage='cd ~/storage'
+alias downloads='cd ~/storage/downloads'
+
+# Paket Perkakas Developer Lengkap Sekali Perintah
+devbox-install-tools() {
+    sudo apt-get update && sudo apt-get install -y build-essential python3 python3-pip nodejs npm curl wget htop neofetch
+}
 
 # Banner Sambutan Ringkas DevBox (Clean, Anti-Emoji, Pixel-Perfect Monospace)
 if [ -z "${'$'}DEVBOX_BANNER_SHOWN" ]; then
