@@ -887,9 +887,11 @@ XDG_EOF
             chown -h 1000:1000 "${'$'}rf/home/coder/storage"/* 2>/dev/null || true
             chown 1000:1000 "${'$'}rf/home/coder/storage" 2>/dev/null || true
 
-            # 9. Pasang paket sudo resmi di background jika belum terinstal
-            if [ ! -x "${'$'}rf/usr/bin/sudo" ] && [ -x "${'$'}rf/usr/bin/apt-get" ]; then
-                ( chroot "${'$'}rf" /usr/bin/apt-get update -qq && chroot "${'$'}rf" /usr/bin/apt-get install -y -qq sudo ca-certificates ) >/dev/null 2>&1 &
+            # 9. Pasang paket sudo & eza resmi di background jika belum terinstal
+            if [ -x "${'$'}rf/usr/bin/apt-get" ]; then
+                if [ ! -x "${'$'}rf/usr/bin/sudo" ] || [ ! -x "${'$'}rf/usr/bin/eza" ]; then
+                    ( chroot "${'$'}rf" /usr/bin/apt-get update -qq && chroot "${'$'}rf" /usr/bin/apt-get install -y -qq sudo ca-certificates eza ) >/dev/null 2>&1 &
+                fi
             fi
 
             # 5. Konfigurasi DNS & Host
@@ -903,11 +905,11 @@ XDG_EOF
             fi
 
             # 6. Konfigurasi .bashrc modern DevBox
-            # Hanya buat jika belum ada atau jika masih menggunakan template lama (DevBox Bash Configuration)
-            if [ ! -f "${'$'}rf/home/coder/.bashrc" ] || grep -q 'DevBox Bash Configuration' "${'$'}rf/home/coder/.bashrc" 2>/dev/null; then
+            # Hanya buat jika belum ada, atau jika masih memakai template lama / template v1 yang ada bug \[\]
+            if [ ! -f "${'$'}rf/home/coder/.bashrc" ] || grep -q 'DevBox Bash Configuration' "${'$'}rf/home/coder/.bashrc" 2>/dev/null || ( grep -q 'DEVBOX | Custom Bash Environment' "${'$'}rf/home/coder/.bashrc" 2>/dev/null && ! grep -q 'Environment v2' "${'$'}rf/home/coder/.bashrc" 2>/dev/null ); then
                 cat << 'BASHRC_EOF' > "${'$'}rf/home/coder/.bashrc"
 # ============================================================
-# DEVBOX | Custom Bash Environment
+# DEVBOX | Custom Bash Environment v2
 # Ubuntu 24.04 LTS ARM64
 # ============================================================
 
@@ -926,8 +928,23 @@ if [ ! -f ~/.bashrc.backup ] && [ -f ~/.bashrc ]; then
     cp ~/.bashrc ~/.bashrc.backup 2>/dev/null || true
 fi
 
-# Colors
+# Clean directory colors (No blinding green/blue background on other-writable dirs)
+export LS_COLORS='rs=0:di=01;34:ln=01;36:mh=00:pi=40;33:so=01;35:do=01;35:bd=40;33;01:cd=40;33;01:or=40;31;01:mi=00:su=37;41:sg=30;43:ca=30;41:tw=01;34:ow=01;34:st=01;34:ex=01;32:*.tar=01;31:*.tgz=01;31:*.zip=01;31:*.z=01;31:*.gz=01;31:*.bz2=01;31:*.deb=01;31:'
+
+# ANSI Raw Colors (for echo / printf / system banner)
 if [[ -t 1 ]]; then
+    CLR_RESET=$'\033[0m'
+    CLR_BOLD=$'\033[1m'
+    CLR_BLUE=$'\033[38;5;75m'
+    CLR_CYAN=$'\033[38;5;81m'
+    CLR_GREEN=$'\033[38;5;114m'
+    CLR_YELLOW=$'\033[38;5;221m'
+    CLR_PURPLE=$'\033[38;5;183m'
+    CLR_WHITE=$'\033[38;5;255m'
+    CLR_GRAY=$'\033[38;5;245m'
+    CLR_PANEL=$'\033[38;5;39m'
+
+    # Readline-escaped colors (strictly for PS1 prompt)
     C_RESET='\[\033[0m\]'
     C_BOLD='\[\033[1m\]'
     C_BLUE='\[\033[38;5;75m\]'
@@ -937,18 +954,29 @@ if [[ -t 1 ]]; then
     C_PURPLE='\[\033[38;5;183m\]'
     C_WHITE='\[\033[38;5;255m\]'
     C_GRAY='\[\033[38;5;245m\]'
-    C_PANEL='\[\033[38;5;39m\]'
 else
+    CLR_RESET='' CLR_BOLD='' CLR_BLUE='' CLR_CYAN=''
+    CLR_GREEN='' CLR_YELLOW='' CLR_PURPLE=''
+    CLR_WHITE='' CLR_GRAY='' CLR_PANEL=''
+
     C_RESET='' C_BOLD='' C_BLUE='' C_CYAN=''
     C_GREEN='' C_YELLOW='' C_PURPLE=''
     C_WHITE='' C_GRAY='' C_PANEL=''
 fi
 
-# Navigation and file aliases
-alias ls='ls --color=auto -F'
-alias ll='ls -lah -F --color=auto'
-alias la='ls -A -F --color=auto'
-alias l='ls -CF --color=auto'
+# Modern Navigation and file aliases (with Nerd Font icons support via eza)
+if command -v eza >/dev/null 2>&1; then
+    alias ls='eza --icons=auto --group-directories-first'
+    alias ll='eza -lh --icons=auto --group-directories-first --git'
+    alias la='eza -a --icons=auto --group-directories-first'
+    alias l='eza -F --icons=auto'
+    alias tree='eza --tree --level=2 --icons=auto'
+else
+    alias ls='ls --color=auto -F'
+    alias ll='ls -lah -F --color=auto'
+    alias la='ls -A -F --color=auto'
+    alias l='ls -CF --color=auto'
+fi
 alias grep='grep --color=auto'
 alias diff='diff --color=auto'
 
@@ -981,7 +1009,7 @@ devbox_prompt() {
     if git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
         branch="${'$'}(git symbolic-ref --quiet --short HEAD 2>/dev/null)"
         [[ -n "${'$'}branch" ]] || branch='DETACHED'
-        branch=" ${'$'}{branch}"
+        branch="  ${'$'}{branch}"
     fi
 
     PS1="${'$'}{C_BLUE}┌─${'$'}{C_RESET}"
@@ -1001,12 +1029,12 @@ PROMPT_COMMAND='devbox_prompt'
 # Developer tools installer
 devbox-install-tools() {
     printf '\n%bDEVBOX%b Installing developer tools...\n' \
-        "${'$'}C_CYAN" "${'$'}C_RESET"
+        "${'$'}CLR_CYAN" "${'$'}CLR_RESET"
 
     sudo apt-get update &&
         sudo apt-get install -y \
             build-essential python3 python3-pip \
-            nodejs npm curl wget htop neofetch
+            nodejs npm curl wget htop neofetch eza
 }
 
 # DevBox system panel
@@ -1028,17 +1056,17 @@ devbox_banner() {
     fi
 
     printf '\n'
-    printf '  %b┌──────────────────────────────────────────┐%b\n' "${'$'}C_PANEL" "${'$'}C_RESET"
-    printf '  %b│%b  %bDEVBOX%b  %b/ DEVELOPER ENVIRONMENT%b      %b│%b\n' "${'$'}C_PANEL" "${'$'}C_RESET" "${'$'}C_WHITE" "${'$'}C_RESET" "${'$'}C_GRAY" "${'$'}C_RESET" "${'$'}C_PANEL" "${'$'}C_RESET"
-    printf '  %b├──────────────────────────────────────────┤%b\n' "${'$'}C_PANEL" "${'$'}C_RESET"
-    printf '  %b│%b  %-12s %b%-27.27s%b %b│%b\n' "${'$'}C_PANEL" "${'$'}C_RESET" 'SYSTEM' "${'$'}C_CYAN" "${'$'}os_name" "${'$'}C_RESET" "${'$'}C_PANEL" "${'$'}C_RESET"
-    printf '  %b│%b  %-12s %b%-27.27s%b %b│%b\n' "${'$'}C_PANEL" "${'$'}C_RESET" 'ARCH' "${'$'}C_GREEN" "${'$'}arch" "${'$'}C_RESET" "${'$'}C_PANEL" "${'$'}C_RESET"
-    printf '  %b│%b  %-12s %b%-27.27s%b %b│%b\n' "${'$'}C_PANEL" "${'$'}C_RESET" 'USER' "${'$'}C_YELLOW" "${'$'}host_user" "${'$'}C_RESET" "${'$'}C_PANEL" "${'$'}C_RESET"
-    printf '  %b│%b  %-12s %b%-27.27s%b %b│%b\n' "${'$'}C_PANEL" "${'$'}C_RESET" 'KERNEL' "${'$'}C_GRAY" "${'$'}kernel" "${'$'}C_RESET" "${'$'}C_PANEL" "${'$'}C_RESET"
-    printf '  %b│%b  %-12s %b%-27.27s%b %b│%b\n' "${'$'}C_PANEL" "${'$'}C_RESET" 'WORKSPACE' "${'$'}C_CYAN" '~/projects' "${'$'}C_RESET" "${'$'}C_PANEL" "${'$'}C_RESET"
-    printf '  %b├──────────────────────────────────────────┤%b\n' "${'$'}C_PANEL" "${'$'}C_RESET"
-    printf '  %b│%b  %bll%b files  %b|%b  %bprojects%b  %b|%b  %bstorage%b  %b│%b\n' "${'$'}C_PANEL" "${'$'}C_RESET" "${'$'}C_YELLOW" "${'$'}C_RESET" "${'$'}C_GRAY" "${'$'}C_RESET" "${'$'}C_YELLOW" "${'$'}C_RESET" "${'$'}C_GRAY" "${'$'}C_RESET" "${'$'}C_YELLOW" "${'$'}C_RESET" "${'$'}C_PANEL" "${'$'}C_RESET"
-    printf '  %b└──────────────────────────────────────────┘%b\n\n' "${'$'}C_PANEL" "${'$'}C_RESET"
+    printf '  %b┌──────────────────────────────────────────┐%b\n' "${'$'}CLR_PANEL" "${'$'}CLR_RESET"
+    printf '  %b│%b  %bDEVBOX%b  %b/ DEVELOPER ENVIRONMENT%b      %b│%b\n' "${'$'}CLR_PANEL" "${'$'}CLR_RESET" "${'$'}CLR_WHITE" "${'$'}CLR_RESET" "${'$'}CLR_GRAY" "${'$'}CLR_RESET" "${'$'}CLR_PANEL" "${'$'}CLR_RESET"
+    printf '  %b├──────────────────────────────────────────┤%b\n' "${'$'}CLR_PANEL" "${'$'}CLR_RESET"
+    printf '  %b│%b  %-12s %b%-27.27s%b %b│%b\n' "${'$'}CLR_PANEL" "${'$'}CLR_RESET" 'SYSTEM' "${'$'}CLR_CYAN" "${'$'}os_name" "${'$'}CLR_RESET" "${'$'}CLR_PANEL" "${'$'}CLR_RESET"
+    printf '  %b│%b  %-12s %b%-27.27s%b %b│%b\n' "${'$'}CLR_PANEL" "${'$'}CLR_RESET" 'ARCH' "${'$'}CLR_GREEN" "${'$'}arch" "${'$'}CLR_RESET" "${'$'}CLR_PANEL" "${'$'}CLR_RESET"
+    printf '  %b│%b  %-12s %b%-27.27s%b %b│%b\n' "${'$'}CLR_PANEL" "${'$'}CLR_RESET" 'USER' "${'$'}CLR_YELLOW" "${'$'}host_user" "${'$'}CLR_RESET" "${'$'}CLR_PANEL" "${'$'}CLR_RESET"
+    printf '  %b│%b  %-12s %b%-27.27s%b %b│%b\n' "${'$'}CLR_PANEL" "${'$'}CLR_RESET" 'KERNEL' "${'$'}CLR_GRAY" "${'$'}kernel" "${'$'}CLR_RESET" "${'$'}CLR_PANEL" "${'$'}CLR_RESET"
+    printf '  %b│%b  %-12s %b%-27.27s%b %b│%b\n' "${'$'}CLR_PANEL" "${'$'}CLR_RESET" 'WORKSPACE' "${'$'}CLR_CYAN" '~/projects' "${'$'}CLR_RESET" "${'$'}CLR_PANEL" "${'$'}CLR_RESET"
+    printf '  %b├──────────────────────────────────────────┤%b\n' "${'$'}CLR_PANEL" "${'$'}CLR_RESET"
+    printf '  %b│%b  %bll%b files  %b|%b  %bprojects%b  %b|%b  %bstorage%b  %b│%b\n' "${'$'}CLR_PANEL" "${'$'}CLR_RESET" "${'$'}CLR_YELLOW" "${'$'}CLR_RESET" "${'$'}CLR_GRAY" "${'$'}CLR_RESET" "${'$'}CLR_YELLOW" "${'$'}CLR_RESET" "${'$'}CLR_GRAY" "${'$'}CLR_RESET" "${'$'}CLR_YELLOW" "${'$'}CLR_RESET" "${'$'}CLR_PANEL" "${'$'}CLR_RESET"
+    printf '  %b└──────────────────────────────────────────┘%b\n\n' "${'$'}CLR_PANEL" "${'$'}CLR_RESET"
 }
 
 devbox_banner

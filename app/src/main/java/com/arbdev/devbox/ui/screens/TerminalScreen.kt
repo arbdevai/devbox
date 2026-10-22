@@ -1922,10 +1922,18 @@ fun TerminalCanvas(
 
     val fontSizePx = with(density) { fontSizeSp.sp.toPx() }
 
-    val textPaint = remember(fontSizeSp, density) {
+    val terminalTypeface = remember(context) {
+        try {
+            android.graphics.Typeface.createFromAsset(context.assets, "fonts/jetbrains_mono_nerd_font.ttf")
+        } catch (_: Exception) {
+            android.graphics.Typeface.MONOSPACE
+        }
+    }
+
+    val textPaint = remember(fontSizeSp, density, terminalTypeface) {
         android.graphics.Paint().apply {
             isAntiAlias = true
-            typeface = android.graphics.Typeface.MONOSPACE
+            typeface = terminalTypeface
             textSize = fontSizePx
         }
     }
