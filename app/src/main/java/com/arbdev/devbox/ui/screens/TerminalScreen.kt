@@ -869,6 +869,7 @@ fun TerminalScreen(
             factory = { ctx ->
                 TerminalInputView(ctx).apply {
                     onCommitText = { text ->
+                        autoScrollEnabled = true
                         val targetSession = TerminalSessionManager.getActiveSession()
                         if (isCtrlActive) {
                             val bytes = mutableListOf<Byte>()
@@ -896,6 +897,7 @@ fun TerminalScreen(
                         }
                     }
                     onBackspace = {
+                        autoScrollEnabled = true
                         TerminalSessionManager.getActiveSession().sendBytes(byteArrayOf(127))
                     }
                     onSendKey = { keyCode ->
@@ -1653,6 +1655,7 @@ fun TerminalScreen(
 
                 // Quick Ctrl+C (Interrupt/Hentikan proses yang looping/hang)
                 TerminalModifierKey(label = "Ctrl+C", isSignal = true) {
+                    autoScrollEnabled = true
                     TerminalSessionManager.getActiveSession().cancelActiveProcess()
                 }
 
@@ -1668,6 +1671,7 @@ fun TerminalScreen(
 
                 // Dedicated ENTER
                 TerminalModifierKey(label = "ENTER", highlight = true) {
+                    autoScrollEnabled = true
                     TerminalSessionManager.getActiveSession().sendText("\r")
                 }
 

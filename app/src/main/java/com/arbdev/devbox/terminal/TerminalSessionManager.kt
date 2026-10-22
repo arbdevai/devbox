@@ -241,19 +241,22 @@ class NativeTerminalSession(
         lastCols = cols
         lastRows = rows
         buffer.resize(cols, rows)
-        val pid = getProcessPid() ?: return
+        val targetRootfs = ChrootManager.activeRootfs
+        val sessionId = id
 
         // Debounce: batalkan pemanggilan stty sebelumnya jika ukuran berubah cepat (anti-fork explosion Magisk)
         resizeJob?.cancel()
         resizeJob = sessionScope.launch(Dispatchers.IO) {
-            delay(150)
+            delay(100)
             try {
-                val cmd = "for p in \$(pgrep -P $pid 2>/dev/null); do " +
-                        "for fd in /proc/\$p/fd/*; do " +
+                val cmd = "for p in /proc/[0-9]*; do " +
+                        "if [ \"\$(readlink \$p/root 2>/dev/null)\" = '$targetRootfs' ]; then " +
+                        "if grep -z '^DEVBOX_SESSION_ID=$sessionId' \"\$p/environ\" 2>/dev/null >/dev/null; then " +
+                        "for fd in \$p/fd/*; do " +
                         "target=\$(readlink \$fd 2>/dev/null); " +
                         "if [[ \$target == /dev/pts/* ]]; then " +
-                        "stty -F \"\$target\" rows $rows cols $cols 2>/dev/null; " +
-                        "fi; done; done"
+                        "chroot '$targetRootfs' /usr/bin/stty -F \"\$target\" rows $rows cols $cols 2>/dev/null; " +
+                        "fi; done; break; fi; fi; done"
                 com.arbdev.devbox.data.RootExecutor.executeSync(cmd, silent = true)
             } catch (_: Exception) {}
         }
