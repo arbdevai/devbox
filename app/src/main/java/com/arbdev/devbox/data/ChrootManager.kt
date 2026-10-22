@@ -875,6 +875,7 @@ export LC_ALL=C.UTF-8
 export HOME=/home/coder
 export USER=coder
 export LOGNAME=sahal
+export GH_NO_KEYRING=1
 umask 022
 
 # Alias navigasi & classify file vs folder (tanpa butuh Nerd Font icon)

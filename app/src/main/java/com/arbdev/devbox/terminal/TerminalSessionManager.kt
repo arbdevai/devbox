@@ -107,7 +107,7 @@ class NativeTerminalSession(
                     "mountpoint -q '$targetRootfs/mnt/sdcard' || { mount --bind /sdcard '$targetRootfs/mnt/sdcard' 2>/dev/null && mount --make-private '$targetRootfs/mnt/sdcard'; }; " +
                     "mount --make-rprivate '$targetRootfs' 2>/dev/null; " +
                     "chown -R 1000:1000 '$targetRootfs/home/coder' 2>/dev/null; chmod -R 777 '$targetRootfs/home/coder' 2>/dev/null; " +
-                    "cd '$targetRootfs' && exec chroot '$targetRootfs' /usr/bin/env -i HOME=/home/coder USER=coder LOGNAME=sahal SHELL=/bin/bash TERM=xterm-256color COLORTERM=truecolor DEVBOX=1 DEVBOX_SESSION_ID='$id' PATH=/home/coder/.local/bin:/home/coder/.cargo/bin:/home/coder/go/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin /bin/bash -c 'cd /home/coder 2>/dev/null || cd /; if [ -x /usr/bin/script ]; then exec /usr/bin/script -qefc \"stty rows 30 cols 80 2>/dev/null; exec /bin/bash -l\" /dev/null; else exec /bin/bash -l; fi'"
+                    "cd '$targetRootfs' && exec chroot '$targetRootfs' /usr/bin/env -i HOME=/home/coder USER=coder LOGNAME=sahal SHELL=/bin/bash TERM=xterm-256color COLORTERM=truecolor DEVBOX=1 DEVBOX_SESSION_ID='$id' GH_NO_KEYRING=1 PATH=/home/coder/.local/bin:/home/coder/.cargo/bin:/home/coder/go/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin /bin/bash -c 'cd /home/coder 2>/dev/null || cd /; if [ -x /usr/bin/script ]; then exec /usr/bin/script -qefc \"stty rows 30 cols 80 2>/dev/null; exec /bin/bash -l\" /dev/null; else exec /bin/bash -l; fi'"
 
             val pb = ProcessBuilder(suBinary, "-c", chrootCmd)
             pb.redirectErrorStream(true) // Gabungkan stderr ke stdout stream
@@ -274,7 +274,23 @@ class NativeTerminalSession(
     }
 
     fun cancelActiveProcess() {
-        sendBytes(byteArrayOf(3)) // Send Ctrl+C (0x03)
+        sendBytes(byteArrayOf(3)) // Send Ctrl+C (0x03) ke stream PTY
+        val pid = getProcessPid() ?: return
+        sessionScope.launch(Dispatchers.IO) {
+            try {
+                // Kirim juga sinyal kernel SIGINT (kill -2) langsung ke foreground child process di sesi ini
+                val targetRootfs = ChrootManager.activeRootfs
+                val sessionId = id
+                val cmd = "for p in /proc/[0-9]*; do " +
+                        "if [ \"\$(readlink \$p/root 2>/dev/null)\" = '$targetRootfs' ]; then " +
+                        "if grep -z '^DEVBOX_SESSION_ID=$sessionId' \"\$p/environ\" 2>/dev/null >/dev/null; then " +
+                        "comm=\$(cat \$p/comm 2>/dev/null); " +
+                        "if [ \"\$comm\" != 'script' ] && [ \"\$comm\" != 'bash' ] && [ \"\$comm\" != 'stty' ] && [ \"\$comm\" != 'su' ]; then " +
+                        "kill -2 \${p##*/} 2>/dev/null || true; " +
+                        "fi; fi; fi; done"
+                com.arbdev.devbox.data.RootExecutor.executeSync(cmd, silent = true)
+            } catch (_: Exception) {}
+        }
     }
 
     fun runCommand(cmd: String) {

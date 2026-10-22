@@ -796,10 +796,12 @@ class TerminalGridBuffer(
             lastNotifyTime = now
             hasPendingUpdate = false
             notifyHandler.removeCallbacks(notifyRunnable)
-            version.intValue++
-            try {
-                Snapshot.sendApplyNotifications()
-            } catch (_: Exception) {}
+            notifyHandler.post {
+                version.intValue++
+                try {
+                    Snapshot.sendApplyNotifications()
+                } catch (_: Exception) {}
+            }
         } else {
             if (!hasPendingUpdate) {
                 hasPendingUpdate = true
