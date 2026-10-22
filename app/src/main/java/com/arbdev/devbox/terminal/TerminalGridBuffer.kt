@@ -108,6 +108,7 @@ class TerminalGridBuffer(
     var onTitleChanged: ((String) -> Unit)? = null
     var onClipboardCopy: ((String) -> Unit)? = null
     var onBell: (() -> Unit)? = null
+    var onSendResponse: ((String) -> Unit)? = null
 
     // Current Drawing Style (Clean High-Contrast Terminal)
     private val defaultFg = Color(0xFFC9D1D9)
@@ -619,6 +620,24 @@ class TerminalGridBuffer(
             'u' -> {
                 cursorRow = savedCursorRow.coerceIn(0, maxRows - 1)
                 cursorCol = savedCursorCol.coerceIn(0, maxCols - 1)
+            }
+
+            // Device Status Report (DSR) & Cursor Position Report (CPR): [6n / [5n
+            // Vital untuk program CLI Go/Rust/Python (gh, bubbletea, survey, fzf) yang mendeteksi ukuran layar
+            'n' -> {
+                val mode = if (params.isNotEmpty()) params[0] else 0
+                if (mode == 6) {
+                    val r = (cursorRow + 1).coerceIn(1, maxRows)
+                    val c = (cursorCol + 1).coerceIn(1, maxCols)
+                    onSendResponse?.invoke("\u001B[$r;${c}R")
+                } else if (mode == 5) {
+                    onSendResponse?.invoke("\u001B[0n")
+                }
+            }
+
+            // Device Attributes (DA): [c
+            'c' -> {
+                onSendResponse?.invoke("\u001B[?1;2c")
             }
         }
     }

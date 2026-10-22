@@ -68,6 +68,15 @@ class NativeTerminalSession(
                 onBell?.invoke()
             }
         }
+        buffer.onSendResponse = { responseText ->
+            sessionScope.launch(Dispatchers.IO) {
+                try {
+                    val out = outputStream ?: return@launch
+                    out.write(responseText.toByteArray(Charsets.UTF_8))
+                    out.flush()
+                } catch (_: Exception) {}
+            }
+        }
         initializeProcess()
     }
 
