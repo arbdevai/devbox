@@ -1844,6 +1844,7 @@ fun TerminalCanvas(
 
     var selectionStart by remember { mutableStateOf<GridPoint?>(null) }
     var selectionEnd by remember { mutableStateOf<GridPoint?>(null) }
+    var showSelectionMenu by remember { mutableStateOf(false) }
     var pasteMenuOffset by remember { mutableStateOf<Offset?>(null) }
     var isDraggingHandle by remember { mutableStateOf(false) }
 
@@ -1975,6 +1976,7 @@ fun TerminalCanvas(
                                             pasteMenuOffset = null
                                             selectionStart = GridPoint(line, wordBounds.first)
                                             selectionEnd = GridPoint(line, wordBounds.second)
+                                            showSelectionMenu = true
                                         } else {
                                             // Long-press di sel kosong / kursor: Tampilkan menu Tempel jika ada isi clipboard
                                             val clip = clipboardManager.getText()?.text
@@ -1982,6 +1984,7 @@ fun TerminalCanvas(
                                                 haptic.performHapticFeedback(HapticFeedbackType.LongPress)
                                                 selectionStart = null
                                                 selectionEnd = null
+                                                showSelectionMenu = false
                                                 pasteMenuOffset = offset
                                             }
                                         }
@@ -1992,6 +1995,7 @@ fun TerminalCanvas(
                                 if (selectionStart != null || pasteMenuOffset != null) {
                                     selectionStart = null
                                     selectionEnd = null
+                                    showSelectionMenu = false
                                     pasteMenuOffset = null
                                 } else {
                                     if (charWidth > 0 && charHeight > 0) {
@@ -2218,7 +2222,10 @@ fun TerminalCanvas(
                             selectionStart = newPoint
                         }
                     },
-                    onDragStateChange = { isDraggingHandle = it }
+                    onDragStateChange = { isDragging ->
+                        isDraggingHandle = isDragging
+                        showSelectionMenu = !isDragging
+                    }
                 )
 
                 // Pin Selesai (End Handle)
@@ -2240,164 +2247,200 @@ fun TerminalCanvas(
                             selectionEnd = newPoint
                         }
                     },
-                    onDragStateChange = { isDraggingHandle = it }
+                    onDragStateChange = { isDragging ->
+                        isDraggingHandle = isDragging
+                        showSelectionMenu = !isDragging
+                    }
                 )
             }
         }
 
-        // 1. Menu Kontekstual Seleksi Teks (Tampil tepat di atas teks terpilih)
-        if (hasSelection && selMin != null && !isDraggingHandle) {
+        // 1. Menu Kontekstual Seleksi Teks (In-Tree Overlay Surface)
+        if (hasSelection && selMin != null && selMax != null && showSelectionMenu && !isDraggingHandle) {
             val scrollX = horizontalScrollState.value
             val scrollY = if (!isAltBuffer) verticalScrollState.value else 0
-            val screenX = (selMin.col * charWidth - scrollX).toInt()
-            val screenY = (selMin.line * charHeight - scrollY).toInt()
 
-            val menuX = screenX.coerceIn(12, (totalWidthPx - 260).coerceAtLeast(12))
-            val menuY = if (screenY >= 56) (screenY - 50) else (screenY + charHeight.toInt() + 12)
+            val topTextScreenY = selMin.line * charHeight - scrollY
+            val bottomTextScreenY = (selMax.line + 1) * charHeight - scrollY
+            val startScreenX = selMin.col * charWidth - scrollX
 
-            Popup(
-                alignment = Alignment.TopStart,
-                offset = IntOffset(menuX, menuY),
-                onDismissRequest = {
-                    selectionStart = null
-                    selectionEnd = null
-                },
-                properties = PopupProperties(focusable = false)
-            ) {
-                Surface(
-                    shape = RoundedCornerShape(12.dp),
-                    color = Color(0xFF1E222D),
-                    border = BorderStroke(1.dp, DevPrimary.copy(alpha = 0.7f)),
-                    shadowElevation = 8.dp
-                ) {
-                    Row(
-                        modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        TextButton(
-                            onClick = {
-                                val start = selectionStart
-                                val end = selectionEnd
-                                if (start != null && end != null) {
-                                    val text = getSelectedText(start, end)
-                                    if (text.isNotEmpty()) {
-                                        clipboardManager.setText(AnnotatedString(text))
-                                        Toast.makeText(context, "Teks disalin (${text.length} karakter)", Toast.LENGTH_SHORT).show()
-                                    }
-                                }
-                                selectionStart = null
-                                selectionEnd = null
-                            },
-                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp)
-                        ) {
-                            Icon(Icons.Default.ContentCopy, contentDescription = null, tint = DevPrimary, modifier = Modifier.size(15.dp))
-                            Spacer(modifier = Modifier.width(4.dp))
-                            Text("Salin", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                        }
+            val handleTouchSizePx = with(density) { 44.dp.toPx() }
+            val menuHeightPx = with(density) { 40.dp.toPx() }
+            val menuWidthPx = with(density) { 260.dp.toPx() }
+            val marginPx = with(density) { 8.dp.toPx() }
 
-                        val clipText = clipboardManager.getText()?.text
-                        if (!clipText.isNullOrEmpty()) {
-                            TextButton(
-                                onClick = {
-                                    if (clipText.length > 2000 || clipText.count { it == '\n' } > 50) {
-                                        onPasteLarge(clipText)
-                                    } else {
-                                        session.pasteText(clipText)
-                                    }
-                                    selectionStart = null
-                                    selectionEnd = null
-                                },
-                                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp)
-                            ) {
-                                Text("Tempel", color = Color.White, fontSize = 12.sp)
-                            }
-                        }
-
-                        TextButton(
-                            onClick = {
-                                val totalLines = if (isAltBuffer) session.buffer.maxRows else session.buffer.getLineCount()
-                                selectionStart = GridPoint(0, 0)
-                                selectionEnd = GridPoint((totalLines - 1).coerceAtLeast(0), session.buffer.maxCols - 1)
-                            },
-                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp)
-                        ) {
-                            Text("Semua", color = Color.White, fontSize = 12.sp)
-                        }
-
-                        IconButton(
-                            onClick = {
-                                val start = selectionStart
-                                val end = selectionEnd
-                                if (start != null && end != null) {
-                                    val text = getSelectedText(start, end)
-                                    if (text.isNotEmpty()) {
-                                        try {
-                                            val sendIntent = Intent().apply {
-                                                action = Intent.ACTION_SEND
-                                                putExtra(Intent.EXTRA_TEXT, text)
-                                                type = "text/plain"
-                                            }
-                                            context.startActivity(Intent.createChooser(sendIntent, "Bagikan Teks"))
-                                        } catch (e: Exception) {
-                                            Toast.makeText(context, "Gagal membagikan: ${e.message}", Toast.LENGTH_SHORT).show()
-                                        }
-                                    }
-                                }
-                                selectionStart = null
-                                selectionEnd = null
-                            },
-                            modifier = Modifier.size(32.dp)
-                        ) {
-                            Icon(Icons.Default.Share, contentDescription = "Bagikan", tint = DevPrimary, modifier = Modifier.size(15.dp))
-                        }
-                    }
-                }
+            // Hitung posisi Y: Letakkan di atas teks jika ada ruang.
+            // Jika teks di baris 0 (dekat tepi atas layar), letakkan di bawah kedua pin (di bawah 44dp touch area pin).
+            val menuY = if (topTextScreenY >= menuHeightPx + marginPx) {
+                (topTextScreenY - menuHeightPx - marginPx).toInt()
+            } else {
+                (bottomTextScreenY + handleTouchSizePx + marginPx).toInt()
             }
-        }
 
-        // 2. Menu Kontekstual Tempel (saat long-press di area kosong dan clipboard memiliki isi)
-        val pastePos = pasteMenuOffset
-        if (pastePos != null && selectionStart == null) {
-            val scrollX = horizontalScrollState.value
-            val scrollY = if (!isAltBuffer) verticalScrollState.value else 0
-            val screenX = (pastePos.x - scrollX).toInt()
-            val screenY = (pastePos.y - scrollY).toInt()
+            val maxMenuX = (totalWidthPx - menuWidthPx - marginPx).toInt().coerceAtLeast(marginPx.toInt())
+            val menuX = startScreenX.toInt().coerceIn(marginPx.toInt(), maxMenuX)
 
-            val menuX = screenX.coerceIn(12, (totalWidthPx - 130).coerceAtLeast(12))
-            val menuY = if (screenY >= 56) (screenY - 50) else (screenY + 20)
-
-            Popup(
-                alignment = Alignment.TopStart,
-                offset = IntOffset(menuX, menuY),
-                onDismissRequest = {
-                    pasteMenuOffset = null
-                },
-                properties = PopupProperties(focusable = false)
+            Surface(
+                modifier = Modifier
+                    .offset { IntOffset(menuX, menuY) }
+                    .clickable(
+                        interactionSource = remember { MutableInteractionSource() },
+                        indication = null,
+                        onClick = {} // Konsumsi sentuhan agar tidak memicu tap deselect di Canvas
+                    ),
+                shape = RoundedCornerShape(12.dp),
+                color = Color(0xFF1E222D),
+                border = BorderStroke(1.dp, DevPrimary.copy(alpha = 0.8f)),
+                shadowElevation = 8.dp
             ) {
-                Surface(
-                    shape = RoundedCornerShape(12.dp),
-                    color = Color(0xFF1E222D),
-                    border = BorderStroke(1.dp, DevPrimary.copy(alpha = 0.7f)),
-                    shadowElevation = 8.dp
+                Row(
+                    modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp),
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
                     TextButton(
                         onClick = {
-                            val clipText = clipboardManager.getText()?.text
-                            if (!clipText.isNullOrEmpty()) {
+                            val start = selectionStart
+                            val end = selectionEnd
+                            if (start != null && end != null) {
+                                val text = getSelectedText(start, end)
+                                if (text.isNotEmpty()) {
+                                    clipboardManager.setText(AnnotatedString(text))
+                                    Toast.makeText(context, "Teks disalin (${text.length} karakter)", Toast.LENGTH_SHORT).show()
+                                }
+                            }
+                            selectionStart = null
+                            selectionEnd = null
+                            showSelectionMenu = false
+                        },
+                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp)
+                    ) {
+                        Icon(Icons.Default.ContentCopy, contentDescription = null, tint = DevPrimary, modifier = Modifier.size(15.dp))
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text("Salin", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                    }
+
+                    val clipText = clipboardManager.getText()?.text
+                    if (!clipText.isNullOrEmpty()) {
+                        TextButton(
+                            onClick = {
                                 if (clipText.length > 2000 || clipText.count { it == '\n' } > 50) {
                                     onPasteLarge(clipText)
                                 } else {
                                     session.pasteText(clipText)
                                 }
-                            }
-                            pasteMenuOffset = null
-                        },
-                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp)
-                    ) {
-                        Icon(Icons.Default.ContentPaste, contentDescription = null, tint = DevPrimary, modifier = Modifier.size(16.dp))
-                        Spacer(modifier = Modifier.width(6.dp))
-                        Text("Tempel", color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                                selectionStart = null
+                                selectionEnd = null
+                                showSelectionMenu = false
+                            },
+                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp)
+                        ) {
+                            Text("Tempel", color = Color.White, fontSize = 12.sp)
+                        }
                     }
+
+                    TextButton(
+                        onClick = {
+                            val totalLines = if (isAltBuffer) session.buffer.maxRows else session.buffer.getLineCount()
+                            selectionStart = GridPoint(0, 0)
+                            selectionEnd = GridPoint((totalLines - 1).coerceAtLeast(0), session.buffer.maxCols - 1)
+                            showSelectionMenu = true
+                        },
+                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp)
+                    ) {
+                        Text("Semua", color = Color.White, fontSize = 12.sp)
+                    }
+
+                    IconButton(
+                        onClick = {
+                            val start = selectionStart
+                            val end = selectionEnd
+                            if (start != null && end != null) {
+                                val text = getSelectedText(start, end)
+                                if (text.isNotEmpty()) {
+                                    try {
+                                        val sendIntent = Intent().apply {
+                                            action = Intent.ACTION_SEND
+                                            putExtra(Intent.EXTRA_TEXT, text)
+                                            type = "text/plain"
+                                        }
+                                        context.startActivity(Intent.createChooser(sendIntent, "Bagikan Teks"))
+                                    } catch (e: Exception) {
+                                        Toast.makeText(context, "Gagal membagikan: ${e.message}", Toast.LENGTH_SHORT).show()
+                                    }
+                                }
+                            }
+                            selectionStart = null
+                            selectionEnd = null
+                            showSelectionMenu = false
+                        },
+                        modifier = Modifier.size(32.dp)
+                    ) {
+                        Icon(Icons.Default.Share, contentDescription = "Bagikan", tint = DevPrimary, modifier = Modifier.size(15.dp))
+                    }
+
+                    IconButton(
+                        onClick = {
+                            // Menutup menu saja tanpa menghapus highlight seleksi atau posisi pin
+                            showSelectionMenu = false
+                        },
+                        modifier = Modifier.size(28.dp)
+                    ) {
+                        Icon(Icons.Default.Close, contentDescription = "Tutup Menu", tint = Color.Gray, modifier = Modifier.size(14.dp))
+                    }
+                }
+            }
+        }
+
+        // 2. Menu Kontekstual Tempel (In-Tree Overlay Surface)
+        val pastePos = pasteMenuOffset
+        if (pastePos != null && selectionStart == null) {
+            val scrollX = horizontalScrollState.value
+            val scrollY = if (!isAltBuffer) verticalScrollState.value else 0
+            val screenX = pastePos.x - scrollX
+            val screenY = pastePos.y - scrollY
+
+            val pasteMenuHeightPx = with(density) { 40.dp.toPx() }
+            val pasteMenuWidthPx = with(density) { 130.dp.toPx() }
+            val marginPx = with(density) { 8.dp.toPx() }
+
+            val pasteMenuY = if (screenY >= pasteMenuHeightPx + marginPx) {
+                (screenY - pasteMenuHeightPx - marginPx).toInt()
+            } else {
+                (screenY + marginPx + 16f).toInt()
+            }
+            val maxPasteX = (totalWidthPx - pasteMenuWidthPx - marginPx).toInt().coerceAtLeast(marginPx.toInt())
+            val pasteMenuX = screenX.toInt().coerceIn(marginPx.toInt(), maxPasteX)
+
+            Surface(
+                modifier = Modifier
+                    .offset { IntOffset(pasteMenuX, pasteMenuY) }
+                    .clickable(
+                        interactionSource = remember { MutableInteractionSource() },
+                        indication = null,
+                        onClick = {}
+                    ),
+                shape = RoundedCornerShape(12.dp),
+                color = Color(0xFF1E222D),
+                border = BorderStroke(1.dp, DevPrimary.copy(alpha = 0.8f)),
+                shadowElevation = 8.dp
+            ) {
+                TextButton(
+                    onClick = {
+                        val clipText = clipboardManager.getText()?.text
+                        if (!clipText.isNullOrEmpty()) {
+                            if (clipText.length > 2000 || clipText.count { it == '\n' } > 50) {
+                                onPasteLarge(clipText)
+                            } else {
+                                session.pasteText(clipText)
+                            }
+                        }
+                        pasteMenuOffset = null
+                    },
+                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp)
+                ) {
+                    Icon(Icons.Default.ContentPaste, contentDescription = null, tint = DevPrimary, modifier = Modifier.size(16.dp))
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text("Tempel", color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Bold)
                 }
             }
         }
