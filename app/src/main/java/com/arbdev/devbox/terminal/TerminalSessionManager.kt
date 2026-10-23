@@ -272,9 +272,17 @@ class NativeTerminalSession(
     }
 
     fun pasteText(text: String) {
-        // Normalisasi karakter baris baru dan kirim teks murni langsung ke PTY (persis seperti Termux).
-        val sanitized = text.replace("\r\n", "\r").replace("\n", "\r")
-        sendText(sanitized)
+        if (text.isEmpty()) return
+        // Normalisasikan CRLF (\r\n) dan standalone CR (\r) menjadi Unix newline (\n) tanpa mengubah karakter lain
+        val normalized = text.replace("\r\n", "\n").replace('\r', '\n')
+
+        // Jika DECSET 2004 (Bracketed Paste Mode) aktif di terminal (misal di bash, zsh, nano, vim),
+        // bungkus dengan escape sequence \u001B[200~ dan \u001B[201~.
+        if (buffer.isBracketedPasteMode) {
+            sendText("\u001B[200~$normalized\u001B[201~")
+        } else {
+            sendText(normalized)
+        }
     }
 
     fun sendMouseEvent(button: Int, col: Int, row: Int, isPress: Boolean) {

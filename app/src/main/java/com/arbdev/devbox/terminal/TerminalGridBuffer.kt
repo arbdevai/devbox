@@ -91,6 +91,7 @@ class TerminalGridBuffer(
         private set
 
     // TUI Extension Modes
+    @Volatile
     var isBracketedPasteMode: Boolean = false
         private set
     var isMouseTrackingEnabled: Boolean = false
@@ -708,6 +709,7 @@ class TerminalGridBuffer(
         scrollTop = 0
         scrollBottom = maxRows - 1
         currentHyperlinkUrl = null
+        isBracketedPasteMode = false
         resetSgr()
     }
 
