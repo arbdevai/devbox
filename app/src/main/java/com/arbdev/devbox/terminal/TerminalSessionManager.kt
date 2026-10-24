@@ -300,7 +300,7 @@ class NativeTerminalSession(
     private var cachedPtsDev: String? = null
     private var resizeJob: Job? = null
 
-    fun updateWindowSize(cols: Int, rows: Int) {
+    fun updateWindowSize(cols: Int, rows: Int, isImmediate: Boolean = false) {
         if (cols == lastCols && rows == lastRows) return
         lastCols = cols
         lastRows = rows
@@ -308,10 +308,13 @@ class NativeTerminalSession(
         val targetRootfs = ChrootManager.activeRootfs
         val sessionId = id
 
-        // Debounce: batalkan pemanggilan stty sebelumnya jika ukuran berubah cepat (180ms saat pinch zoom)
+        // Debounce: 180ms saat pinch zoom agar Magisk tidak spam notif, atau 15ms saat keyboard buka/tutup agar TUI instan
         resizeJob?.cancel()
+        val debounceMs = if (isImmediate) 15L else 180L
         resizeJob = sessionScope.launch(Dispatchers.IO) {
-            delay(180)
+            if (debounceMs > 0) {
+                delay(debounceMs)
+            }
             try {
                 val currentPts = cachedPtsDev
                 if (currentPts != null) {

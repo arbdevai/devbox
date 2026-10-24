@@ -38,6 +38,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -45,7 +46,9 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.isImeVisible
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -156,6 +159,7 @@ import com.arbdev.devbox.ui.theme.TerminalCyan
 import com.arbdev.devbox.ui.theme.TerminalGreen
 import com.arbdev.devbox.ui.theme.TerminalText
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun TerminalScreen(
     initialCommand: String? = null
@@ -269,6 +273,7 @@ fun TerminalScreen(
 
     // View input terminal berbasis BaseInputConnection (gaya Termux, tanpa Compose TextField delay)
     var terminalInputView by remember { mutableStateOf<TerminalInputView?>(null) }
+    val isImeVisible = WindowInsets.isImeVisible
 
     // Scroll state terisolasi per sesi (mencegah desinkronisasi viewport saat switch antar sesi)
     val verticalScrollState = remember(activeSession.id) { ScrollState(0) }
@@ -771,9 +776,9 @@ fun TerminalScreen(
             }
         }
 
-        // Banner Peringatan Sesi Latar Belakang Usang (Orphan Processes)
+        // Banner Peringatan Sesi Latar Belakang Usang (Orphan Processes) - disembunyikan saat keyboard aktif untuk hemat ruang
         AnimatedVisibility(
-            visible = orphanProcesses.isNotEmpty(),
+            visible = orphanProcesses.isNotEmpty() && !isImeVisible,
             enter = expandVertically() + fadeIn(),
             exit = shrinkVertically() + fadeOut()
         ) {
@@ -991,15 +996,27 @@ fun TerminalScreen(
                 ((fm.descent - fm.ascent) * 1.25f).coerceAtLeast(1f)
             }
 
+            var lastCharWidth by remember { mutableFloatStateOf(0f) }
+            var lastCharHeight by remember { mutableFloatStateOf(0f) }
+
             LaunchedEffect(activeSession, maxWidth, maxHeight, charWidthPx, charHeightPx) {
-                delay(80)
+                val isFontZoom = lastCharWidth > 0f && (lastCharWidth != charWidthPx || lastCharHeight != charHeightPx)
+                lastCharWidth = charWidthPx
+                lastCharHeight = charHeightPx
+
+                if (isFontZoom) {
+                    delay(150) // Debounce pinch-zoom font resize untuk mencegah Magisk toast spam
+                } else {
+                    delay(35) // Keyboard buka/tutup atau resize layout: settle singkat agar PTY update instan
+                }
+
                 with(density) {
                     val hPaddingPx = 8.dp.toPx() // 4.dp horizontal margin di setiap sisi
                     val vPaddingPx = 4.dp.toPx() // 2.dp vertical margin di setiap sisi
                     if (charWidthPx > 0 && charHeightPx > 0) {
                         val cols = ((maxWidth.toPx() - hPaddingPx).coerceAtLeast(1f) / charWidthPx).toInt().coerceIn(20, 300)
                         val rows = ((maxHeight.toPx() - vPaddingPx).coerceAtLeast(1f) / charHeightPx).toInt().coerceIn(4, 200)
-                        activeSession.updateWindowSize(cols, rows)
+                        activeSession.updateWindowSize(cols, rows, isImmediate = !isFontZoom)
                     }
                 }
             }
@@ -1750,45 +1767,47 @@ fun TerminalScreen(
                 }
             }
 
-            // Row 2: Tombol Fungsi F1 - F12 & Simbol Shell Pemrograman
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .horizontalScroll(rememberScrollState())
-                    .padding(horizontal = 6.dp),
-                horizontalArrangement = Arrangement.spacedBy(4.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                // Tombol Fungsi F1 - F12 (Standar VT100/XTerm untuk mc, htop, nano, dsb.)
-                val functionKeys = listOf(
-                    "F1" to "\u001BOP",
-                    "F2" to "\u001BOQ",
-                    "F3" to "\u001BOR",
-                    "F4" to "\u001BOS",
-                    "F5" to "\u001B[15~",
-                    "F6" to "\u001B[17~",
-                    "F7" to "\u001B[18~",
-                    "F8" to "\u001B[19~",
-                    "F9" to "\u001B[20~",
-                    "F10" to "\u001B[21~",
-                    "F11" to "\u001B[23~",
-                    "F12" to "\u001B[24~"
-                )
-                functionKeys.forEach { (label, seq) ->
-                    TerminalModifierKey(label = label) {
-                        TerminalSessionManager.getActiveSession().sendText(seq)
+            // Row 2: Tombol Fungsi F1 - F12 & Simbol Shell Pemrograman (Hanya tampil saat keyboard tertutup untuk hemat ruang layar)
+            if (!isImeVisible) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .horizontalScroll(rememberScrollState())
+                        .padding(horizontal = 6.dp),
+                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    // Tombol Fungsi F1 - F12 (Standar VT100/XTerm untuk mc, htop, nano, dsb.)
+                    val functionKeys = listOf(
+                        "F1" to "\u001BOP",
+                        "F2" to "\u001BOQ",
+                        "F3" to "\u001BOR",
+                        "F4" to "\u001BOS",
+                        "F5" to "\u001B[15~",
+                        "F6" to "\u001B[17~",
+                        "F7" to "\u001B[18~",
+                        "F8" to "\u001B[19~",
+                        "F9" to "\u001B[20~",
+                        "F10" to "\u001B[21~",
+                        "F11" to "\u001B[23~",
+                        "F12" to "\u001B[24~"
+                    )
+                    functionKeys.forEach { (label, seq) ->
+                        TerminalModifierKey(label = label) {
+                            TerminalSessionManager.getActiveSession().sendText(seq)
+                        }
                     }
-                }
 
-                // Shell & Programming Symbols
-                val symbols = listOf(
-                    "~", "/", "-", "_", "|", "$", "=", ":", ";",
-                    "&", "*", "\\", "\"", "'", "`", "<", ">", "!",
-                    "?", "(", ")", "[", "]", "{", "}"
-                )
-                symbols.forEach { sym ->
-                    TerminalModifierKey(label = sym) {
-                        TerminalSessionManager.getActiveSession().sendText(sym)
+                    // Shell & Programming Symbols
+                    val symbols = listOf(
+                        "~", "/", "-", "_", "|", "$", "=", ":", ";",
+                        "&", "*", "\\", "\"", "'", "`", "<", ">", "!",
+                        "?", "(", ")", "[", "]", "{", "}"
+                    )
+                    symbols.forEach { sym ->
+                        TerminalModifierKey(label = sym) {
+                            TerminalSessionManager.getActiveSession().sendText(sym)
+                        }
                     }
                 }
             }
