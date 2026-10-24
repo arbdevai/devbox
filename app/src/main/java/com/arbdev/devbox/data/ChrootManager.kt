@@ -982,8 +982,14 @@ if [ -z "${'$'}target" ]; then
     echo "Usage: xdg-open <url>"
     exit 1
 fi
-echo "${'$'}target" >> /tmp/.devbox_open_url 2>/dev/null || true
-chmod 666 /tmp/.devbox_open_url 2>/dev/null || true
+pts_dev=${'$'}(cat "/tmp/.devbox_pts_${'$'}{DEVBOX_SESSION_ID:-}" 2>/dev/null || true)
+if [ -n "${'$'}pts_dev" ] && [ -w "${'$'}pts_dev" ]; then
+    printf '\033]777;open;%s\007' "${'$'}target" > "${'$'}pts_dev" 2>/dev/null || true
+elif [ -w /dev/tty ]; then
+    printf '\033]777;open;%s\007' "${'$'}target" > /dev/tty 2>/dev/null || true
+else
+    printf '\033]777;open;%s\007' "${'$'}target" 2>/dev/null || true
+fi
 echo "${'$'}target" > /tmp/devbox_latest_url 2>/dev/null || true
 if [ -x /system/bin/am ]; then
     /system/bin/am start -a android.intent.action.VIEW -d "${'$'}target" >/dev/null 2>&1
@@ -1003,6 +1009,17 @@ XDG_EOF
 BRIDGE_DIR="/tmp/devbox-bridge"
 mkdir -p "${'$'}BRIDGE_DIR" 2>/dev/null || true
 chmod 777 "${'$'}BRIDGE_DIR" 2>/dev/null || true
+PTS_DEV=${'$'}(cat "/tmp/.devbox_pts_${'$'}{DEVBOX_SESSION_ID:-}" 2>/dev/null || true)
+
+emit_osc() {
+    if [ -n "${'$'}PTS_DEV" ] && [ -w "${'$'}PTS_DEV" ]; then
+        printf "%b" "${'$'}1" > "${'$'}PTS_DEV" 2>/dev/null || true
+    elif [ -w /dev/tty ]; then
+        printf "%b" "${'$'}1" > /dev/tty 2>/dev/null || true
+    else
+        printf "%b" "${'$'}1" 2>/dev/null || true
+    fi
+}
 
 CMD="${'$'}1"
 case "${'$'}CMD" in
@@ -1013,7 +1030,8 @@ case "${'$'}CMD" in
             TEXT=${'$'}(cat)
         fi
         printf "%s" "${'$'}TEXT" > "${'$'}BRIDGE_DIR/clipboard.txt" 2>/dev/null || true
-        printf "\033]52;c;%s\a" "${'$'}(printf "%s" "${'$'}TEXT" | base64 | tr -d '\r\n')" 2>/dev/null || true
+        B64=${'$'}(printf "%s" "${'$'}TEXT" | base64 | tr -d '\r\n')
+        emit_osc "\033]52;c;${'$'}{B64}\007"
         echo "DevBox Bridge: Teks disalin ke clipboard."
         ;;
     notify)
@@ -1021,17 +1039,13 @@ case "${'$'}CMD" in
         TITLE="${'$'}{1:-DevBox Agent}"
         shift
         MSG="${'$'}*"
-        printf "%s|%s\n" "${'$'}TITLE" "${'$'}MSG" >> "${'$'}BRIDGE_DIR/notify.txt" 2>/dev/null || true
-        chmod 666 "${'$'}BRIDGE_DIR/notify.txt" 2>/dev/null || true
+        emit_osc "\033]777;notify;${'$'}{TITLE};${'$'}{MSG}\007"
         echo "DevBox Bridge: Notifikasi dikirim: ${'$'}TITLE - ${'$'}MSG"
         ;;
     open|url)
         shift
         URL="${'$'}1"
         if [ -n "${'$'}URL" ]; then
-            printf "%s\n" "${'$'}URL" > "${'$'}BRIDGE_DIR/url.txt" 2>/dev/null || true
-            printf "%s\n" "${'$'}URL" >> /tmp/.devbox_open_url 2>/dev/null || true
-            chmod 666 /tmp/.devbox_open_url 2>/dev/null || true
             /usr/local/bin/xdg-open "${'$'}URL" 2>/dev/null || true
         fi
         ;;
@@ -1046,7 +1060,7 @@ case "${'$'}CMD" in
         fi
         ;;
     *)
-        echo "DevBox Bridge v1.0.80"
+        echo "DevBox Bridge v1.0.81"
         echo "Usage: devbox-bridge <copy|notify|open|transcript> [args...]"
         ;;
 esac
@@ -1080,11 +1094,11 @@ BRIDGE_EOF
             fi
 
             # 6. Konfigurasi .bashrc modern DevBox
-            # Hanya buat jika belum ada, atau jika masih memakai template lama / template v1-v2
-            if [ ! -f "${'$'}rf/home/coder/.bashrc" ] || grep -q 'DevBox Bash Configuration' "${'$'}rf/home/coder/.bashrc" 2>/dev/null || ( grep -q 'DEVBOX | Custom Bash Environment' "${'$'}rf/home/coder/.bashrc" 2>/dev/null && ! grep -q 'Environment v3' "${'$'}rf/home/coder/.bashrc" 2>/dev/null ); then
+            # Hanya buat jika belum ada, atau jika masih memakai template lama / template v1-v3
+            if [ ! -f "${'$'}rf/home/coder/.bashrc" ] || grep -q 'DevBox Bash Configuration' "${'$'}rf/home/coder/.bashrc" 2>/dev/null || ( grep -q 'DEVBOX | Custom Bash Environment' "${'$'}rf/home/coder/.bashrc" 2>/dev/null && ! grep -q 'Environment v4' "${'$'}rf/home/coder/.bashrc" 2>/dev/null ); then
                 cat << 'BASHRC_EOF' > "${'$'}rf/home/coder/.bashrc"
 # ============================================================
-# DEVBOX | Custom Bash Environment v3
+# DEVBOX | Custom Bash Environment v4
 # Ubuntu 24.04 LTS ARM64
 # ============================================================
 
@@ -1167,16 +1181,19 @@ alias downloads='cd ~/storage/downloads'
 agy() {
     if [[ -n "${'$'}{DEVBOX_SESSION_ID:-}" ]]; then
         printf 'agy' > "/tmp/.devbox_active_agent_${'$'}{DEVBOX_SESSION_ID}" 2>/dev/null || true
-        printf 'agy' > "/tmp/.devbox_active_agent" 2>/dev/null || true
     fi
+    printf '\033]777;agent;agy\007'
     command agy "${'$'}@"
     local ret=${'$'}?
+    printf '\033]777;agent;\007'
     if [[ -n "${'$'}{DEVBOX_SESSION_ID:-}" ]]; then
         rm -f "/tmp/.devbox_active_agent_${'$'}{DEVBOX_SESSION_ID}" "/tmp/.devbox_active_agent" 2>/dev/null || true
         for p in /proc/[0-9]*; do
             [[ -d "${'$'}p" ]] || continue
             if [[ "${'$'}(cat "${'$'}p/comm" 2>/dev/null)" == "agy" ]]; then
-                if grep -s -a -q "DEVBOX_SESSION_ID=${'$'}{DEVBOX_SESSION_ID}" "${'$'}p/environ" 2>/dev/null; then
+                local ppid
+                ppid=${'$'}(awk '/^PPid:/{print ${'$'}2}' "${'$'}p/status" 2>/dev/null || echo 0)
+                if [[ "${'$'}ppid" -le 1 ]] && grep -s -a -q "DEVBOX_SESSION_ID=${'$'}{DEVBOX_SESSION_ID}" "${'$'}p/environ" 2>/dev/null; then
                     kill -9 "${'$'}{p##*/}" 2>/dev/null || true
                 fi
             fi
@@ -1188,10 +1205,11 @@ agy() {
 claude() {
     if [[ -n "${'$'}{DEVBOX_SESSION_ID:-}" ]]; then
         printf 'claude' > "/tmp/.devbox_active_agent_${'$'}{DEVBOX_SESSION_ID}" 2>/dev/null || true
-        printf 'claude' > "/tmp/.devbox_active_agent" 2>/dev/null || true
     fi
+    printf '\033]777;agent;claude\007'
     command claude "${'$'}@"
     local ret=${'$'}?
+    printf '\033]777;agent;\007'
     if [[ -n "${'$'}{DEVBOX_SESSION_ID:-}" ]]; then
         rm -f "/tmp/.devbox_active_agent_${'$'}{DEVBOX_SESSION_ID}" "/tmp/.devbox_active_agent" 2>/dev/null || true
     fi
@@ -1204,25 +1222,13 @@ parse_git_branch() {
         sed 's/^/ /'
 }
 
-# Powerline prompt + CWD & Orphan Sync
+# Powerline prompt + Zero-SELinux OSC 777 CWD & Agent Sync
 devbox_prompt() {
     local exit_code=${'$'}?
     local branch=''
     local status_color
 
-    if [[ -n "${'$'}{DEVBOX_SESSION_ID:-}" ]]; then
-        printf '%s' "${'$'}PWD" > "/tmp/.devbox_cwd_${'$'}{DEVBOX_SESSION_ID}" 2>/dev/null || true
-        if [[ -f "/tmp/.devbox_active_agent_${'$'}{DEVBOX_SESSION_ID}" ]]; then
-            rm -f "/tmp/.devbox_active_agent_${'$'}{DEVBOX_SESSION_ID}" "/tmp/.devbox_active_agent" 2>/dev/null || true
-            for p in /proc/[0-9]*; do
-                [[ -d "${'$'}p" ]] || continue
-                if [[ "${'$'}(cat "${'$'}p/comm" 2>/dev/null)" == "agy" ]] && grep -s -a -q "DEVBOX_SESSION_ID=${'$'}{DEVBOX_SESSION_ID}" "${'$'}p/environ" 2>/dev/null; then
-                    kill -9 "${'$'}{p##*/}" 2>/dev/null || true
-                fi
-            done
-        fi
-    fi
-    printf '\033]0;coder@devbox:%s\007' "${'$'}PWD"
+    printf '\033]0;coder@devbox:%s\007\033]777;cwd;%s\007\033]777;agent;\007' "${'$'}PWD" "${'$'}PWD"
 
     if [[ ${'$'}exit_code -eq 0 ]]; then
         status_color='\[\033[38;5;114m\]'

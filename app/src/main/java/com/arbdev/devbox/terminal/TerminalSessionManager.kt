@@ -38,8 +38,13 @@ class NativeTerminalSession(
     val buffer = TerminalGridBuffer(maxCols = 80, maxRows = 30)
 
     private var process: Process? = null
+    @Volatile
     private var outputStream: OutputStream? = null
+    @Volatile
     private var inputStream: InputStream? = null
+    @Volatile
+    private var isInitializing: Boolean = false
+    private val initLock = Any()
     private var readerJob: Job? = null
     private var processMonitorJob: Job? = null
 
@@ -64,6 +69,32 @@ class NativeTerminalSession(
                 if (!isCustomName && title.isNotBlank()) {
                     name = cleanSessionTitle(title)
                 }
+            }
+        }
+        buffer.onCwdChanged = { path ->
+            mainHandler.post {
+                currentDir = path
+            }
+        }
+        buffer.onAgentChanged = { agent ->
+            mainHandler.post {
+                if (!agent.isNullOrBlank()) {
+                    activeAgentName = agent
+                    isAgentRunning = true
+                } else {
+                    activeAgentName = null
+                    isAgentRunning = false
+                }
+            }
+        }
+        buffer.onOpenUrl = { url ->
+            mainHandler.post {
+                ChrootManager.openUrlInAndroidBrowser(url)
+            }
+        }
+        buffer.onNotify = { title, msg ->
+            mainHandler.post {
+                ChrootManager.postBridgeNotification(title, msg)
             }
         }
         buffer.onClipboardCopy = { text ->
@@ -105,167 +136,132 @@ class NativeTerminalSession(
     }
 
     fun initializeProcess() {
-        try {
-            val targetRootfs = ChrootManager.activeRootfs
-            val suBinary = findSuPath()
-
-            AppLogger.i("NativeTerminal", "Meluncurkan sesi terminal [$name] di $targetRootfs via $suBinary")
-
-            // Pastikan lingkungan user coder, passwordless sudo, direktori ~/projects, dan .bashrc modern siap
-            ChrootManager.ensureEnvironmentReadySync(targetRootfs)
-
-            // Menggunakan /usr/bin/script untuk mengalokasikan PTY sejati tanpa JNI,
-            // dan menjalankan login shell interaktif dengan privilege root dan environment user coder.
-            val initRows = if (lastRows > 0) lastRows else 30
-            val initCols = if (lastCols > 0) lastCols else 80
-
-            val chrootCmd = "mkdir -p '$targetRootfs/dev' '$targetRootfs/dev/pts' '$targetRootfs/proc' '$targetRootfs/sys' '$targetRootfs/mnt/sdcard' '$targetRootfs/tmp' 2>/dev/null; " +
-                    "chmod 1777 '$targetRootfs/tmp' 2>/dev/null; " +
-                    "mountpoint -q '$targetRootfs/dev' || { mount --bind /dev '$targetRootfs/dev' 2>/dev/null && mount --make-private '$targetRootfs/dev' 2>/dev/null; }; " +
-                    "mountpoint -q '$targetRootfs/dev/pts' || mount --bind /dev/pts '$targetRootfs/dev/pts' 2>/dev/null || mount -t devpts devpts '$targetRootfs/dev/pts' 2>/dev/null; " +
-                    "mountpoint -q '$targetRootfs/proc' || mount -t proc proc '$targetRootfs/proc' 2>/dev/null; " +
-                    "mountpoint -q '$targetRootfs/sys' || mount -t sysfs sysfs '$targetRootfs/sys' 2>/dev/null; " +
-                    "mountpoint -q '$targetRootfs/mnt/sdcard' || { mount --bind /sdcard '$targetRootfs/mnt/sdcard' 2>/dev/null && mount --make-private '$targetRootfs/mnt/sdcard' 2>/dev/null; }; " +
-                    "chown 1000:1000 '$targetRootfs/home/coder' 2>/dev/null; " +
-                    "cd '$targetRootfs' && exec chroot '$targetRootfs' /usr/bin/env -i HOME=/home/coder USER=coder LOGNAME=sahal SHELL=/bin/bash TERM=xterm-256color COLORTERM=truecolor DEVBOX=1 DEVBOX_SESSION_ID='$id' GH_NO_KEYRING=1 PATH=/home/coder/.local/bin:/home/coder/.cargo/bin:/home/coder/go/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin /bin/bash -c 'cd /home/coder 2>/dev/null || cd /; if [ -x /usr/bin/script ]; then exec /usr/bin/script -qefc \"shopt -s checkwinsize 2>/dev/null; echo \\\$\\\$ > /tmp/.devbox_pid_$id 2>/dev/null; tty > /tmp/.devbox_pts_$id 2>/dev/null; echo \\\$(tty) > /home/coder/.devbox_pts_$id 2>/dev/null; ws=\\\$(cat /tmp/.devbox_ws_$id 2>/dev/null); if [ -n \\\"\\\$ws\\\" ]; then stty \\\$ws opost onlcr 2>/dev/null; else stty rows $initRows cols $initCols opost onlcr 2>/dev/null; fi; exec /bin/bash -l\" /dev/null; else exec /bin/bash -l; fi'"
-
-            val pb = ProcessBuilder(suBinary, "-c", chrootCmd)
-            pb.redirectErrorStream(true) // Gabungkan stderr ke stdout stream
-            val proc = pb.start()
-            process = proc
-            outputStream = proc.outputStream
-            inputStream = proc.inputStream
-
+        synchronized(initLock) {
+            if (isInitializing || (isRunning && outputStream != null)) return
+            isInitializing = true
+        }
+        if (Looper.myLooper() == Looper.getMainLooper()) {
             isRunning = true
-            AppLogger.i("NativeTerminal", "Sesi [$name] aktif (PID terhubung, PTY siap, SID: $id)")
+            activeAgentName = null
+            isAgentRunning = false
+        } else {
+            mainHandler.post {
+                isRunning = true
+                activeAgentName = null
+                isAgentRunning = false
+            }
+        }
+        buffer.resetForNewProcess()
 
-            // Pantau proses aktif, xdg-open URL trigger, dan port web server aktif
-            val sessionId = id
-            processMonitorJob = sessionScope.launch {
-                var cycle = 0
-                val checkPorts = listOf(
-                    3000 to "0BB8",
-                    5173 to "1435",
-                    8080 to "1F90",
-                    8000 to "1F40",
-                    4200 to "1068",
-                    5000 to "1388",
-                    8081 to "1F91"
-                )
-                while (isActive && isRunning) {
-                    kotlinx.coroutines.delay(2000)
-                    cycle++
+        sessionScope.launch(Dispatchers.IO) {
+            try {
+                val targetRootfs = ChrootManager.activeRootfs
+                val suBinary = findSuPath()
 
-                    // 1. Cek permintaan buka URL & notifikasi dari CLI (xdg-open / devbox-bridge)
-                    try {
-                        for (path in listOf("$targetRootfs/tmp/.devbox_open_url", "$targetRootfs/tmp/devbox-bridge/url.txt")) {
-                            val triggerFile = File(path)
-                            if (triggerFile.exists()) {
-                                val lines = triggerFile.readLines()
-                                triggerFile.delete()
-                                for (u in lines) {
-                                    if (u.isNotBlank()) {
-                                        mainHandler.post {
-                                            ChrootManager.openUrlInAndroidBrowser(u.trim())
-                                        }
-                                    }
-                                }
-                            }
-                        }
+                AppLogger.i("NativeTerminal", "Meluncurkan sesi terminal [$name] di $targetRootfs via $suBinary")
 
-                        val notifyFile = File("$targetRootfs/tmp/devbox-bridge/notify.txt")
-                        if (notifyFile.exists()) {
-                            val lines = notifyFile.readLines()
-                            notifyFile.delete()
-                            for (line in lines) {
-                                if (line.isNotBlank()) {
-                                    val title = line.substringBefore("|", "DevBox Agent").trim()
-                                    val msg = line.substringAfter("|", line).trim()
-                                    mainHandler.post {
-                                        ChrootManager.postBridgeNotification(title, msg)
-                                    }
-                                }
-                            }
-                        }
-                    } catch (_: Exception) {}
+                // Pastikan lingkungan user coder, passwordless sudo, direktori ~/projects, dan .bashrc modern siap
+                ChrootManager.ensureEnvironmentReadySync(targetRootfs)
 
-                    // 2. Cek port web server lokal aktif via /proc/net/tcp (<1ms) setiap 4 detik
-                    if (cycle % 2 == 0) {
+                // Menggunakan /usr/bin/script untuk mengalokasikan PTY sejati tanpa JNI,
+                // dan menjalankan login shell interaktif dengan privilege root dan environment user coder.
+                val initRows = if (lastRows > 0) lastRows else buffer.maxRows
+                val initCols = if (lastCols > 0) lastCols else buffer.maxCols
+
+                val chrootCmd = "mkdir -p '$targetRootfs/dev' '$targetRootfs/dev/pts' '$targetRootfs/proc' '$targetRootfs/sys' '$targetRootfs/mnt/sdcard' '$targetRootfs/tmp' 2>/dev/null; " +
+                        "chmod 1777 '$targetRootfs/tmp' 2>/dev/null; " +
+                        "mountpoint -q '$targetRootfs/dev' || { mount --bind /dev '$targetRootfs/dev' 2>/dev/null && mount --make-private '$targetRootfs/dev' 2>/dev/null; }; " +
+                        "mountpoint -q '$targetRootfs/dev/pts' || mount --bind /dev/pts '$targetRootfs/dev/pts' 2>/dev/null || mount -t devpts devpts '$targetRootfs/dev/pts' 2>/dev/null; " +
+                        "mountpoint -q '$targetRootfs/proc' || mount -t proc proc '$targetRootfs/proc' 2>/dev/null; " +
+                        "mountpoint -q '$targetRootfs/sys' || mount -t sysfs sysfs '$targetRootfs/sys' 2>/dev/null; " +
+                        "mountpoint -q '$targetRootfs/mnt/sdcard' || { mount --bind /sdcard '$targetRootfs/mnt/sdcard' 2>/dev/null && mount --make-private '$targetRootfs/mnt/sdcard' 2>/dev/null; }; " +
+                        "chown 1000:1000 '$targetRootfs/home/coder' 2>/dev/null; " +
+                        "cd '$targetRootfs' && exec chroot '$targetRootfs' /usr/bin/env -i HOME=/home/coder USER=coder LOGNAME=sahal SHELL=/bin/bash TERM=xterm-256color COLORTERM=truecolor DEVBOX=1 DEVBOX_SESSION_ID='$id' GH_NO_KEYRING=1 PATH=/home/coder/.local/bin:/home/coder/.cargo/bin:/home/coder/go/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin /bin/bash -c 'cd /home/coder 2>/dev/null || cd /; if [ -x /usr/bin/script ]; then exec /usr/bin/script -qefc \"shopt -s checkwinsize 2>/dev/null; echo \\\$\\\$ > /tmp/.devbox_pid_$id 2>/dev/null; tty > /tmp/.devbox_pts_$id 2>/dev/null; echo \\\$(tty) > /home/coder/.devbox_pts_$id 2>/dev/null; ws=\\\$(cat /tmp/.devbox_ws_$id 2>/dev/null); if [ -n \\\"\\\$ws\\\" ]; then stty \\\$ws opost onlcr 2>/dev/null; else stty rows $initRows cols $initCols opost onlcr 2>/dev/null; fi; exec /bin/bash -l\" /dev/null; else exec /bin/bash -l; fi'"
+
+                val pb = ProcessBuilder(suBinary, "-c", chrootCmd)
+                pb.redirectErrorStream(true) // Gabungkan stderr ke stdout stream
+                val proc = pb.start()
+                process = proc
+                outputStream = proc.outputStream
+                inputStream = proc.inputStream
+                synchronized(initLock) {
+                    isInitializing = false
+                }
+
+                AppLogger.i("NativeTerminal", "Sesi [$name] aktif (PID terhubung, PTY siap, SID: $id)")
+
+                // Pantau port web server lokal aktif secara ringan tanpa SELinux denial (/proc/net/tcp & /data/local/... tidak diakses dari untrusted_app)
+                processMonitorJob?.cancel()
+                processMonitorJob = sessionScope.launch {
+                    val checkPorts = listOf(3000, 5173, 8080, 8000, 4200, 5000, 8081)
+                    while (isActive && isRunning) {
+                        delay(5000)
                         try {
-                            val tcpFile = File("/proc/net/tcp")
-                            if (tcpFile.exists()) {
-                                val lines = tcpFile.readLines()
-                                var foundPort: Int? = null
-                                for ((port, hex) in checkPorts) {
-                                    if (lines.any { it.contains(":$hex ") && it.contains(" 0A ") }) {
-                                        foundPort = port
-                                        break
+                            var foundPort: Int? = null
+                            for (port in checkPorts) {
+                                val open = try {
+                                    java.net.Socket().use { sock ->
+                                        sock.connect(java.net.InetSocketAddress("127.0.0.1", port), 15)
+                                        true
                                     }
+                                } catch (_: Exception) {
+                                    false
                                 }
-                                mainHandler.post {
-                                    TerminalSessionManager.detectedWebPort = foundPort
+                                if (open) {
+                                    foundPort = port
+                                    break
                                 }
+                            }
+                            mainHandler.post {
+                                TerminalSessionManager.detectedWebPort = foundPort
                             }
                         } catch (_: Exception) {}
                     }
+                }
 
-                    // 3. Cek working directory (CWD) & nama agent aktif per sesi secara pasif via trigger file tanpa memanggil su berkala
+                // Mulai membaca output secara asynchronous di background IO thread
+                readerJob?.cancel()
+                readerJob = sessionScope.launch {
+                    val byteBuffer = ByteArray(8192)
+                    val stream = inputStream ?: return@launch
                     try {
-                        val cwdFile = File("$targetRootfs/tmp/.devbox_cwd_$sessionId")
-                        if (cwdFile.exists()) {
-                            val cwd = cwdFile.readText().trim()
-                            if (cwd.isNotBlank()) {
-                                mainHandler.post {
-                                    currentDir = cwd
+                        while (isActive && isRunning) {
+                            val count = stream.read(byteBuffer)
+                            if (count == -1) break
+                            if (count > 0) {
+                                try {
+                                    buffer.write(byteBuffer, 0, count)
+                                } catch (t: Throwable) {
+                                    AppLogger.e("NativeTerminal", "Error parser ANSI pada sesi [$name]: ${t.message}", t)
                                 }
                             }
                         }
-
-                        val sessionAgentFile = File("$targetRootfs/tmp/.devbox_active_agent_$sessionId")
-                        val globalAgentFile = File("$targetRootfs/tmp/.devbox_active_agent")
-                        val detected = when {
-                            sessionAgentFile.exists() -> sessionAgentFile.readText().trim()
-                            globalAgentFile.exists() -> globalAgentFile.readText().trim()
-                            else -> ""
+                    } catch (e: Exception) {
+                        AppLogger.w("NativeTerminal", "Stream pembaca sesi [$name] terputus: ${e.message}")
+                    } finally {
+                        synchronized(initLock) {
+                            isInitializing = false
+                            outputStream = null
+                            inputStream = null
                         }
                         mainHandler.post {
-                            if (detected.isNotBlank()) {
-                                activeAgentName = detected
-                                isAgentRunning = true
-                            } else {
-                                activeAgentName = null
-                                isAgentRunning = false
-                            }
-                        }
-                    } catch (_: Exception) {}
-                }
-            }
-
-            // Mulai membaca output secara asynchronous di background IO thread
-            readerJob = sessionScope.launch {
-                val byteBuffer = ByteArray(4096)
-                val stream = inputStream ?: return@launch
-                try {
-                    while (isActive && isRunning) {
-                        val count = stream.read(byteBuffer)
-                        if (count == -1) break
-                        if (count > 0) {
-                            buffer.write(byteBuffer, 0, count)
+                            isRunning = false
+                            activeAgentName = null
+                            isAgentRunning = false
+                            val exitCode = try { proc.exitValue() } catch (_: Exception) { -1 }
+                            AppLogger.i("NativeTerminal", "Sesi [$name] telah selesai (exit code: $exitCode)")
                         }
                     }
-                } catch (e: Exception) {
-                    AppLogger.w("NativeTerminal", "Stream pembaca sesi [$name] terputus: ${e.message}")
-                } finally {
-                    mainHandler.post {
-                        isRunning = false
-                        val exitCode = try { proc.exitValue() } catch (_: Exception) { -1 }
-                        AppLogger.i("NativeTerminal", "Sesi [$name] telah selesai (exit code: $exitCode)")
-                    }
+                }
+            } catch (e: Exception) {
+                synchronized(initLock) {
+                    isInitializing = false
+                }
+                AppLogger.e("NativeTerminal", "Gagal memulai sesi PTY [$name]: ${e.message}", e)
+                mainHandler.post {
+                    isRunning = false
                 }
             }
-        } catch (e: Exception) {
-            AppLogger.e("NativeTerminal", "Gagal memulai sesi PTY [$name]: ${e.message}", e)
-            isRunning = false
         }
     }
 
@@ -273,11 +269,16 @@ class NativeTerminalSession(
     private var lastRows = 0
 
     fun sendText(text: String) {
-        if (!isRunning || outputStream == null) {
+        if (!isRunning && !isInitializing) {
             AppLogger.w("NativeTerminal", "Sesi [$name] mati/terputus. Meluncurkan ulang sesi...")
             initializeProcess()
         }
         sessionScope.launch(Dispatchers.IO) {
+            var waitCycles = 0
+            while (isInitializing && outputStream == null && waitCycles < 50) {
+                delay(40)
+                waitCycles++
+            }
             val out = outputStream ?: return@launch
             try {
                 val bytes = text.toByteArray(Charsets.UTF_8)
@@ -290,11 +291,16 @@ class NativeTerminalSession(
     }
 
     fun sendBytes(bytes: ByteArray) {
-        if (!isRunning || outputStream == null) {
+        if (!isRunning && !isInitializing) {
             AppLogger.w("NativeTerminal", "Sesi [$name] mati/terputus. Meluncurkan ulang sesi...")
             initializeProcess()
         }
         sessionScope.launch(Dispatchers.IO) {
+            var waitCycles = 0
+            while (isInitializing && outputStream == null && waitCycles < 50) {
+                delay(40)
+                waitCycles++
+            }
             val out = outputStream ?: return@launch
             try {
                 out.write(bytes)
@@ -498,10 +504,6 @@ object TerminalSessionManager {
     val sessions = mutableStateListOf<NativeTerminalSession>()
     val activeIndex = mutableIntStateOf(0)
     var detectedWebPort by mutableStateOf<Int?>(null)
-
-    init {
-        createNewSession("Sesi 1")
-    }
 
     fun getActiveSession(): NativeTerminalSession {
         if (sessions.isEmpty()) {

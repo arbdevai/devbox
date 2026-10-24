@@ -1,5 +1,8 @@
 package com.arbdev.devbox.util
 
+import android.os.Handler
+import android.os.Looper
+import android.util.Log
 import androidx.compose.runtime.mutableStateListOf
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -22,20 +25,36 @@ data class LogEntry(
 
 object AppLogger {
     private val timeFormat = SimpleDateFormat("HH:mm:ss.SSS", Locale.getDefault())
+    private val mainHandler = Handler(Looper.getMainLooper())
     val logs = mutableStateListOf<LogEntry>()
     private const val MAX_LOGS = 1500
 
     @Synchronized
     fun log(level: LogLevel, tag: String, message: String) {
+        val timestamp = synchronized(timeFormat) { timeFormat.format(Date()) }
         val entry = LogEntry(
-            timestamp = timeFormat.format(Date()),
+            timestamp = timestamp,
             level = level,
             tag = tag,
             message = message
         )
-        logs.add(entry)
-        if (logs.size > MAX_LOGS) {
-            logs.removeRange(0, logs.size - MAX_LOGS)
+        when (level) {
+            LogLevel.WARN -> Log.w("DevBox:$tag", message)
+            LogLevel.ERROR -> Log.e("DevBox:$tag", message)
+            else -> Log.i("DevBox:$tag", message)
+        }
+        if (Looper.myLooper() == Looper.getMainLooper()) {
+            logs.add(entry)
+            if (logs.size > MAX_LOGS) {
+                logs.removeRange(0, logs.size - MAX_LOGS)
+            }
+        } else {
+            mainHandler.post {
+                logs.add(entry)
+                if (logs.size > MAX_LOGS) {
+                    logs.removeRange(0, logs.size - MAX_LOGS)
+                }
+            }
         }
     }
 

@@ -105,7 +105,7 @@ class TerminalGridBuffer(
     private var wrapPending: Boolean = false
     private var utf8Remainder = ByteArray(0)
 
-    // Modern Protocols (OSC 0/1/2, OSC 52, OSC 8)
+    // Modern Protocols (OSC 0/1/2, OSC 52, OSC 8, OSC 777 DevBox Bridge)
     var windowTitle: String = "coder@devbox:~"
         private set
     var currentHyperlinkUrl: String? = null
@@ -114,6 +114,10 @@ class TerminalGridBuffer(
     var onClipboardCopy: ((String) -> Unit)? = null
     var onBell: (() -> Unit)? = null
     var onSendResponse: ((String) -> Unit)? = null
+    var onCwdChanged: ((String) -> Unit)? = null
+    var onAgentChanged: ((String?) -> Unit)? = null
+    var onOpenUrl: ((String) -> Unit)? = null
+    var onNotify: ((String, String) -> Unit)? = null
 
     // Current Drawing Style (Clean High-Contrast Terminal)
     private val defaultFg = Color(0xFFC9D1D9)
@@ -147,72 +151,109 @@ class TerminalGridBuffer(
     private val activeGrid: Array<Array<TerminalCell>>
         get() = if (isAltBuffer) altGrid else grid
 
+    fun resetForNewProcess() {
+        synchronized(lock) {
+            isAltBuffer = false
+            parserState = ParserState.NORMAL
+            csiParams.setLength(0)
+            oscBuffer.setLength(0)
+            utf8Remainder = ByteArray(0)
+            isCursorVisible = true
+            isBracketedPasteMode = false
+            isMouseTrackingEnabled = false
+            isSgrMouseMode = false
+            isApplicationCursorKeys = false
+            isAutoWrap = true
+            wrapPending = false
+            scrollTop = 0
+            scrollBottom = (maxRows - 1).coerceAtLeast(0)
+            cursorRow = cursorRow.coerceIn(0, (maxRows - 1).coerceAtLeast(0))
+            cursorCol = cursorCol.coerceIn(0, (maxCols - 1).coerceAtLeast(0))
+            resetSgr()
+            notifyUpdate()
+        }
+    }
+
     fun resize(newCols: Int, newRows: Int) {
         synchronized(lock) {
             val c = newCols.coerceIn(20, 300)
             val r = newRows.coerceIn(18, 200)
-            if (c == maxCols && r == maxRows) return
+            if (c == maxCols && r == maxRows &&
+                grid.size == r && (grid.isEmpty() || grid[0].size == c) &&
+                altGrid.size == r && (altGrid.isEmpty() || altGrid[0].size == c)
+            ) return
 
-            val oldCols = maxCols
-            val oldRows = maxRows
+            val oldGridRows = grid.size
+            val oldGridCols = if (grid.isNotEmpty()) grid[0].size else maxCols
+            val oldAltRows = altGrid.size
+            val oldAltCols = if (altGrid.isNotEmpty()) altGrid[0].size else maxCols
+
             maxCols = c
             maxRows = r
 
-            if (!isAltBuffer) {
-                val newGrid = Array(maxRows) { Array(maxCols) { TerminalCell() } }
-                if (r < oldRows) {
-                    // Layar mengecil (misal keyboard virtual terbuka):
-                    // Geser baris di atas kursor ke scrollback agar kursor dan prompt tetap berada di layar aktif
-                    val shift = (cursorRow - (r - 1)).coerceIn(0, oldRows - r)
-                    for (row in 0 until shift) {
-                        val savedLine = Array(oldCols) { col ->
-                            TerminalCell().apply { copyFrom(grid[row][col]) }
-                        }
-                        scrollback.add(savedLine)
-                        if (scrollback.size > maxScrollback) {
-                            scrollback.removeAt(0)
-                        }
+            // 1. Selalu resize main grid (agar saat keluar dari altScreen ukuran grid selalu sinkron)
+            val newGrid = Array(maxRows) { Array(maxCols) { TerminalCell() } }
+            val refCursorRow = if (!isAltBuffer) cursorRow.coerceIn(0, (oldGridRows - 1).coerceAtLeast(0)) else savedCursorRow.coerceIn(0, (oldGridRows - 1).coerceAtLeast(0))
+            val newMainCursorRow: Int
+            if (r < oldGridRows) {
+                // Layar mengecil (misal keyboard virtual terbuka):
+                // Geser baris di atas kursor ke scrollback agar kursor dan prompt tetap berada di layar aktif
+                val shift = (refCursorRow - (r - 1)).coerceIn(0, oldGridRows - r)
+                for (row in 0 until shift) {
+                    val savedLine = Array(oldGridCols) { col ->
+                        TerminalCell().apply { copyFrom(grid[row][col]) }
                     }
-                    for (row in 0 until r) {
-                        val srcRow = row + shift
-                        if (srcRow < oldRows) {
-                            for (col in 0 until maxCols.coerceAtMost(oldCols)) {
-                                newGrid[row][col].copyFrom(grid[srcRow][col])
-                            }
-                        }
+                    scrollback.add(savedLine)
+                    if (scrollback.size > maxScrollback) {
+                        scrollback.removeAt(0)
                     }
-                    cursorRow = (cursorRow - shift).coerceIn(0, maxRows - 1)
-                } else {
-                    // Layar membesar (misal keyboard virtual ditutup):
-                    // Tarik kembali baris dari scrollback untuk mengisi ruang baris atas yang bertambah
-                    val unwind = (r - oldRows).coerceAtMost(scrollback.size)
-                    for (row in 0 until unwind) {
-                        val pulledLine = scrollback.removeAt(scrollback.size - (unwind - row))
-                        for (col in 0 until maxCols.coerceAtMost(pulledLine.size)) {
-                            newGrid[row][col].copyFrom(pulledLine[col])
-                        }
-                    }
-                    for (row in 0 until oldRows) {
-                        for (col in 0 until maxCols.coerceAtMost(oldCols)) {
-                            newGrid[row + unwind][col].copyFrom(grid[row][col])
-                        }
-                    }
-                    cursorRow = (cursorRow + unwind).coerceIn(0, maxRows - 1)
                 }
-                grid = newGrid
+                for (row in 0 until r) {
+                    val srcRow = row + shift
+                    if (srcRow < oldGridRows) {
+                        for (col in 0 until maxCols.coerceAtMost(oldGridCols)) {
+                            newGrid[row][col].copyFrom(grid[srcRow][col])
+                        }
+                    }
+                }
+                newMainCursorRow = (refCursorRow - shift).coerceIn(0, maxRows - 1)
             } else {
-                // Alternate buffer (nano, vim, htop): buffer independen tanpa scrollback
-                val newAltGrid = Array(maxRows) { Array(maxCols) { TerminalCell() } }
-                for (row in 0 until maxRows.coerceAtMost(altGrid.size)) {
-                    for (col in 0 until maxCols.coerceAtMost(altGrid[0].size)) {
-                        newAltGrid[row][col].copyFrom(altGrid[row][col])
+                // Layar membesar (misal keyboard virtual ditutup):
+                // Tarik kembali baris dari scrollback untuk mengisi ruang baris atas yang bertambah
+                val unwind = if (!isAltBuffer) (r - oldGridRows).coerceAtMost(scrollback.size) else 0
+                for (row in 0 until unwind) {
+                    val pulledLine = scrollback.removeAt(scrollback.size - (unwind - row))
+                    for (col in 0 until maxCols.coerceAtMost(pulledLine.size)) {
+                        newGrid[row][col].copyFrom(pulledLine[col])
                     }
                 }
-                altGrid = newAltGrid
+                for (row in 0 until oldGridRows.coerceAtMost(maxRows - unwind)) {
+                    for (col in 0 until maxCols.coerceAtMost(oldGridCols)) {
+                        newGrid[row + unwind][col].copyFrom(grid[row][col])
+                    }
+                }
+                newMainCursorRow = (refCursorRow + unwind).coerceIn(0, maxRows - 1)
+            }
+            grid = newGrid
+
+            // 2. Selalu resize alternate grid (agar saat masuk \x1b[?1049h di agy/vim/htop tidak pernah ArrayIndexOutOfBoundsException!)
+            val newAltGrid = Array(maxRows) { Array(maxCols) { TerminalCell() } }
+            for (row in 0 until maxRows.coerceAtMost(oldAltRows)) {
+                for (col in 0 until maxCols.coerceAtMost(oldAltCols)) {
+                    newAltGrid[row][col].copyFrom(altGrid[row][col])
+                }
+            }
+            altGrid = newAltGrid
+
+            if (!isAltBuffer) {
+                cursorRow = newMainCursorRow
+            } else {
+                savedCursorRow = newMainCursorRow
                 cursorRow = cursorRow.coerceIn(0, maxRows - 1)
             }
 
             cursorCol = cursorCol.coerceIn(0, maxCols - 1)
+            savedCursorCol = savedCursorCol.coerceIn(0, maxCols - 1)
             wrapPending = false
             scrollTop = 0
             scrollBottom = maxRows - 1
@@ -394,8 +435,10 @@ class TerminalGridBuffer(
                             } else {
                                 oscBuffer.toString()
                             }
-                            handleOscCommand(rawOsc)
                             parserState = ParserState.NORMAL
+                            try {
+                                handleOscCommand(rawOsc)
+                            } catch (_: Exception) {}
                         } else {
                             oscBuffer.append(ch)
                         }
@@ -419,8 +462,10 @@ class TerminalGridBuffer(
                             }
                             ch.code in 0x40..0x7E -> {
                                 // Karakter akhir perintah CSI (0x40 - 0x7E)
-                                handleCsiCommand(ch)
                                 parserState = ParserState.NORMAL
+                                try {
+                                    handleCsiCommand(ch)
+                                } catch (_: Exception) {}
                             }
                         }
                     }
@@ -472,20 +517,30 @@ class TerminalGridBuffer(
     }
 
     private fun putChar(ch: Char, extra: Char? = null, isWide: Boolean = false) {
-        if (cursorCol >= maxCols) {
+        val target = activeGrid
+        if (target.isEmpty() || target[0].isEmpty()) return
+        val rowsLimit = target.size
+        val colsLimit = target[0].size
+
+        cursorRow = cursorRow.coerceIn(0, rowsLimit - 1)
+        if (cursorCol >= colsLimit) {
             if (isAutoWrap) {
                 cursorCol = 0
                 newline()
+                cursorRow = cursorRow.coerceIn(0, rowsLimit - 1)
             } else {
-                cursorCol = maxCols - 1
+                cursorCol = colsLimit - 1
             }
         }
-        if (isWide && cursorCol == maxCols - 1 && isAutoWrap) {
-            activeGrid[cursorRow][cursorCol].reset()
+        if (isWide && cursorCol == colsLimit - 1 && isAutoWrap) {
+            target[cursorRow][cursorCol].reset()
             cursorCol = 0
             newline()
+            cursorRow = cursorRow.coerceIn(0, rowsLimit - 1)
         }
-        val cell = activeGrid[cursorRow][cursorCol]
+        val safeRow = cursorRow.coerceIn(0, rowsLimit - 1)
+        val safeCol = cursorCol.coerceIn(0, colsLimit - 1)
+        val cell = target[safeRow][safeCol]
         cell.char = ch
         cell.extraChar = extra
         cell.fgColor = currentFg
@@ -496,11 +551,11 @@ class TerminalGridBuffer(
         cell.isWide = isWide
         cell.isWideContinuation = false
         cell.hyperlinkUrl = currentHyperlinkUrl
-        cursorCol++
+        cursorCol = safeCol + 1
 
         // Jika karakter lebar (2 sel di layar), tandai sel berikutnya sebagai continuation
-        if (isWide && cursorCol < maxCols) {
-            val contCell = activeGrid[cursorRow][cursorCol]
+        if (isWide && cursorCol < colsLimit) {
+            val contCell = target[safeRow][cursorCol]
             contCell.reset()
             contCell.isWideContinuation = true
             cursorCol++
@@ -508,18 +563,23 @@ class TerminalGridBuffer(
     }
 
     private fun newline() {
-        cursorRow++
-        if (cursorRow > scrollBottom) {
-            cursorRow = scrollBottom
+        val bottom = scrollBottom.coerceIn(0, maxRows - 1)
+        if (cursorRow == bottom) {
             scrollUp()
+        } else if (cursorRow < maxRows - 1) {
+            cursorRow++
         }
     }
 
     private fun scrollUp() {
-        val top = scrollTop
-        val bottom = scrollBottom
-        if (!isAltBuffer && top == 0 && bottom == maxRows - 1) {
-            val savedLine = Array(maxCols) { col ->
+        val target = activeGrid
+        if (target.isEmpty()) return
+        val rowsLimit = target.size
+        val colsLimit = target[0].size
+        val top = scrollTop.coerceIn(0, rowsLimit - 1)
+        val bottom = scrollBottom.coerceIn(top, rowsLimit - 1)
+        if (!isAltBuffer && top == 0 && bottom == rowsLimit - 1) {
+            val savedLine = Array(colsLimit) { col ->
                 TerminalCell().apply { copyFrom(grid[0][col]) }
             }
             scrollback.add(savedLine)
@@ -527,27 +587,29 @@ class TerminalGridBuffer(
                 scrollback.removeAt(0)
             }
         }
-        val target = activeGrid
         for (r in top until bottom) {
-            for (c in 0 until maxCols) {
+            for (c in 0 until colsLimit) {
                 target[r][c].copyFrom(target[r + 1][c])
             }
         }
-        for (c in 0 until maxCols) {
+        for (c in 0 until colsLimit) {
             target[bottom][c].reset()
         }
     }
 
     private fun scrollDown() {
-        val top = scrollTop
-        val bottom = scrollBottom
         val target = activeGrid
+        if (target.isEmpty()) return
+        val rowsLimit = target.size
+        val colsLimit = target[0].size
+        val top = scrollTop.coerceIn(0, rowsLimit - 1)
+        val bottom = scrollBottom.coerceIn(top, rowsLimit - 1)
         for (r in bottom downTo top + 1) {
-            for (c in 0 until maxCols) {
+            for (c in 0 until colsLimit) {
                 target[r][c].copyFrom(target[r - 1][c])
             }
         }
-        for (c in 0 until maxCols) {
+        for (c in 0 until colsLimit) {
             target[top][c].reset()
         }
     }
@@ -755,8 +817,13 @@ class TerminalGridBuffer(
                                     savedCursorCol = cursorCol
                                 }
                                 isAltBuffer = true
-                                for (r in 0 until maxRows) {
-                                    for (c in 0 until maxCols) altGrid[r][c].reset()
+                                if (altGrid.size != maxRows || (altGrid.isNotEmpty() && altGrid[0].size != maxCols)) {
+                                    altGrid = Array(maxRows) { Array(maxCols) { TerminalCell() } }
+                                } else {
+                                    for (r in 0 until altGrid.size) {
+                                        val rowArr = altGrid[r]
+                                        for (c in 0 until rowArr.size) rowArr[c].reset()
+                                    }
                                 }
                                 cursorRow = 0
                                 cursorCol = 0
@@ -780,6 +847,15 @@ class TerminalGridBuffer(
                             7 -> isAutoWrap = false // Nonaktifkan Auto-Wrap (penting saat TUI menggambar border tabel)
                             47, 1047, 1049 -> { // Keluar dari Alternate Screen Buffer
                                 isAltBuffer = false
+                                if (grid.size != maxRows || (grid.isNotEmpty() && grid[0].size != maxCols)) {
+                                    val newGrid = Array(maxRows) { Array(maxCols) { TerminalCell() } }
+                                    for (r in 0 until maxRows.coerceAtMost(grid.size)) {
+                                        for (c in 0 until maxCols.coerceAtMost(grid[r].size)) {
+                                            newGrid[r][c].copyFrom(grid[r][c])
+                                        }
+                                    }
+                                    grid = newGrid
+                                }
                                 scrollTop = 0
                                 scrollBottom = maxRows - 1
                                 if (p == 1049) {
@@ -898,9 +974,13 @@ class TerminalGridBuffer(
     }
 
     private fun resetScreen() {
-        for (r in 0 until maxRows) {
-            for (c in 0 until maxCols) {
+        for (r in 0 until grid.size) {
+            for (c in 0 until grid[r].size) {
                 grid[r][c].reset()
+            }
+        }
+        for (r in 0 until altGrid.size) {
+            for (c in 0 until altGrid[r].size) {
                 altGrid[r][c].reset()
             }
         }
@@ -960,6 +1040,41 @@ class TerminalGridBuffer(
                     currentHyperlinkUrl = if (url.isNotEmpty()) url else null
                 } else {
                     currentHyperlinkUrl = null
+                }
+            }
+            777 -> {
+                // DevBox Bridge OSC Protocol (Zero-SELinux, Zero-Polling, Zero-su)
+                // Format: 777;cwd;/path | 777;agent;agy | 777;open;https://... | 777;notify;Title;Message
+                val subIdx = payload.indexOf(';')
+                if (subIdx != -1) {
+                    val subCmd = payload.substring(0, subIdx).trim()
+                    val subArg = payload.substring(subIdx + 1)
+                    when (subCmd) {
+                        "cwd" -> {
+                            val cleanPath = subArg.trim()
+                            if (cleanPath.isNotEmpty()) {
+                                onCwdChanged?.invoke(cleanPath)
+                            }
+                        }
+                        "agent" -> {
+                            val agent = subArg.trim().takeIf { it.isNotEmpty() }
+                            onAgentChanged?.invoke(agent)
+                        }
+                        "open" -> {
+                            val url = subArg.trim()
+                            if (url.isNotEmpty()) {
+                                onOpenUrl?.invoke(url)
+                            }
+                        }
+                        "notify" -> {
+                            val msgIdx = subArg.indexOf(';')
+                            val title = if (msgIdx != -1) subArg.substring(0, msgIdx).trim() else "DevBox Agent"
+                            val msg = if (msgIdx != -1) subArg.substring(msgIdx + 1).trim() else subArg.trim()
+                            if (msg.isNotEmpty()) {
+                                onNotify?.invoke(title.ifEmpty { "DevBox Agent" }, msg)
+                            }
+                        }
+                    }
                 }
             }
         }
