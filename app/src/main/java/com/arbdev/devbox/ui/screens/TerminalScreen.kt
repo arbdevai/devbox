@@ -984,6 +984,8 @@ fun TerminalScreen(
                 val p = android.graphics.Paint().apply {
                     typeface = terminalTypeface
                     textSize = with(density) { terminalFontSize.sp.toPx() }
+                    isSubpixelText = true
+                    isLinearText = true
                 }
                 p.measureText("M").coerceAtLeast(1f)
             }
@@ -991,6 +993,8 @@ fun TerminalScreen(
                 val p = android.graphics.Paint().apply {
                     typeface = terminalTypeface
                     textSize = with(density) { terminalFontSize.sp.toPx() }
+                    isSubpixelText = true
+                    isLinearText = true
                 }
                 val fm = p.fontMetrics
                 ((fm.descent - fm.ascent) * 1.25f).coerceAtLeast(1f)
@@ -1935,6 +1939,8 @@ fun TerminalCanvas(
     val textPaint = remember(fontSizeSp, density, terminalTypeface) {
         android.graphics.Paint().apply {
             isAntiAlias = true
+            isSubpixelText = true
+            isLinearText = true
             typeface = terminalTypeface
             textSize = fontSizePx
         }
@@ -2079,12 +2085,13 @@ fun TerminalCanvas(
                                         if (detectedUrl != null) {
                                             haptic.performHapticFeedback(HapticFeedbackType.LongPress)
                                             onTapUrl(detectedUrl)
-                                        } else if (session.buffer.isMouseTrackingEnabled && selectionStart == null) {
-                                            if (activeRow in 0 until session.buffer.maxRows) {
-                                                session.sendMouseEvent(0, col, activeRow, true)
-                                                session.sendMouseEvent(0, col, activeRow, false)
-                                            }
                                         } else {
+                                            if (session.buffer.isMouseTrackingEnabled && selectionStart == null) {
+                                                if (activeRow in 0 until session.buffer.maxRows) {
+                                                    session.sendMouseEvent(0, col, activeRow, true)
+                                                    session.sendMouseEvent(0, col, activeRow, false)
+                                                }
+                                            }
                                             onFocusRequest()
                                         }
                                     }
@@ -2123,7 +2130,7 @@ fun TerminalCanvas(
                         ((scrollY + viewportHeight + charHeight) / charHeight).toInt().coerceIn(0, lineCount - 1)
                     } else lineCount - 1
 
-                    val textBatch = StringBuilder()
+                    val singleChar = CharArray(1)
 
                     for (lineIdx in firstVisibleLine..lastVisibleLine) {
                         val line = session.buffer.getLineAt(lineIdx) ?: continue
@@ -2178,7 +2185,7 @@ fun TerminalCanvas(
                             }
                         }
 
-                        // 2. Gambar karakter teks (Batched text runs per style untuk 60 FPS di CPU low-end)
+                        // 2. Gambar karakter teks di posisi matriks kolom monospaced yang presisi (anti-drift tabel & anti-jitter kursor)
                         var col = 0
                         while (col < lineCols) {
                             val cell = line.getOrNull(col) ?: break
@@ -2198,63 +2205,33 @@ fun TerminalCanvas(
                             val isBold = cell.isBold || isSelected
                             val isUnderline = cell.isUnderline || cell.hyperlinkUrl != null
 
+                            textPaint.color = fg.toArgb()
+                            textPaint.isFakeBoldText = isBold
+                            textPaint.isUnderlineText = isUnderline
+
+                            val cellX = col * charWidth
+
                             // Karakter dengan extra combining mark
                             if (cell.extraChar != null) {
-                                textPaint.color = fg.toArgb()
-                                textPaint.isFakeBoldText = isBold
-                                textPaint.isUnderlineText = isUnderline
-                                nativeCanvas.drawText("${cell.char}${cell.extraChar}", col * charWidth, yText, textPaint)
+                                nativeCanvas.drawText("${cell.char}${cell.extraChar}", cellX, yText, textPaint)
                                 col++
                                 continue
                             }
 
-                            // Karakter wide (CJK / wide symbol)
+                            // Karakter wide (CJK / wide symbol 2 sel)
                             if (cell.isWide) {
-                                textPaint.color = fg.toArgb()
-                                textPaint.isFakeBoldText = isBold
-                                textPaint.isUnderlineText = isUnderline
-                                nativeCanvas.drawText(cell.char.toString(), col * charWidth, yText, textPaint)
+                                singleChar[0] = cell.char
+                                nativeCanvas.drawText(singleChar, 0, 1, cellX, yText, textPaint)
                                 col++
                                 continue
                             }
 
-                            // Kumpulkan rentetan karakter normal dengan style dan warna yang persis sama
-                            val startCol = col
-                            textBatch.setLength(0)
-
-                            while (col < lineCols) {
-                                val curCell = line.getOrNull(col) ?: break
-                                if (curCell.isWideContinuation || curCell.isWide || curCell.extraChar != null) {
-                                    break
-                                }
-                                val curPt = GridPoint(lineIdx, col)
-                                val curIsSelected = hasSelection && selMin != null && selMax != null && curPt >= selMin && curPt <= selMax
-                                val curIsCursor = (isCursorVisible && (lineIdx - historyCount) == cursorRow && col == cursorCol)
-                                val curFg = when {
-                                    curIsSelected -> Color.White
-                                    curIsCursor -> Color.Black
-                                    else -> curCell.fgColor
-                                }
-                                val curBold = curCell.isBold || curIsSelected
-                                val curUnderline = curCell.isUnderline || curCell.hyperlinkUrl != null
-
-                                if (curFg == fg && curBold == isBold && curUnderline == isUnderline) {
-                                    textBatch.append(curCell.char)
-                                    col++
-                                } else {
-                                    break
-                                }
+                            // Karakter normal (1 sel): lewati spasi kosong agar GPU tidak kerja sia-sia
+                            if (cell.char != ' ') {
+                                singleChar[0] = cell.char
+                                nativeCanvas.drawText(singleChar, 0, 1, cellX, yText, textPaint)
                             }
-
-                            if (textBatch.isNotEmpty()) {
-                                val runStr = textBatch.toString()
-                                if (runStr.isNotBlank()) {
-                                    textPaint.color = fg.toArgb()
-                                    textPaint.isFakeBoldText = isBold
-                                    textPaint.isUnderlineText = isUnderline
-                                    nativeCanvas.drawText(runStr, startCol * charWidth, yText, textPaint)
-                                }
-                            }
+                            col++
                         }
 
                         // Kursor di luar batas kolom karakter

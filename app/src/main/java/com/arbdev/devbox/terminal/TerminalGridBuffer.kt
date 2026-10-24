@@ -306,10 +306,25 @@ class TerminalGridBuffer(
                (code in 0xF900..0xFAFF) || // CJK Compatibility Ideographs
                (code in 0xFE10..0xFE19) || // Vertical forms
                (code in 0xFE30..0xFE6F) || // CJK Compatibility Forms
-               (code in 0xFF00..0xFF60) || // Fullwidth Forms
-               (code in 0xFFE0..0xFFE6) ||
-               (code in 0x2600..0x27BF) || // Miscellaneous Symbols & Dingbats
-               (code in 0x1F300..0x1FAFF)   // Emojis & Symbols Extended
+               (code in 0xFF01..0xFF60) || // Fullwidth Forms
+               (code in 0xFFE0..0xFFE6) || // Fullwidth Symbols
+               (code in 0x20000..0x2FFFD) || // CJK Ext B..F
+               (code in 0x30000..0x3FFFD) || // CJK Ext G..
+               (code in 0x1F300..0x1F64F) || // Emojis & Pictographs
+               (code in 0x1F900..0x1FAFF) || // Supplemental Symbols & Emojis
+               isWideMiscSymbol(code)
+    }
+
+    private fun isWideMiscSymbol(code: Int): Boolean {
+        return code == 0x2614 || code == 0x2615 || (code in 0x2648..0x2653) ||
+               code == 0x267F || code == 0x2693 || code == 0x26A1 ||
+               (code in 0x26AA..0x26AB) || (code in 0x26BD..0x26BE) ||
+               (code in 0x26C4..0x26C5) || code == 0x26CE || code == 0x26D4 ||
+               code == 0x26EA || (code in 0x26F2..0x26F3) || code == 0x26F5 ||
+               code == 0x26FA || code == 0x26FD || code == 0x2702 || code == 0x2705 ||
+               (code in 0x270A..0x270B) || code == 0x2728 || code == 0x274C ||
+               code == 0x274E || (code in 0x2753..0x2755) || code == 0x2757 ||
+               (code in 0x2795..0x2797) || code == 0x27B0 || code == 0x27BF
     }
 
     private fun putChar(ch: Char, extra: Char? = null, isWide: Boolean = false) {
