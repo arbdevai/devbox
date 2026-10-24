@@ -873,9 +873,9 @@ fun TerminalScreen(
                             }
                             targetSession.sendBytes(bytes.toByteArray())
                             isCtrlActive = false
-                        } else if (text == "\r") {
+                        } else if (text == "\r" || text == "\n" || text == "\r\n") {
                             targetSession.sendText("\r")
-                        } else if (text.contains('\n') || text.contains('\r')) {
+                        } else if (text.length > 1 && (text.contains('\n') || text.contains('\r'))) {
                             targetSession.pasteText(text)
                         } else {
                             targetSession.sendText(text)

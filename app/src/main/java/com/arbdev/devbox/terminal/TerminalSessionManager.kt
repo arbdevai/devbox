@@ -322,8 +322,9 @@ class NativeTerminalSession(
                         "if grep -z '^DEVBOX_SESSION_ID=$sessionId' \"\$p/environ\" 2>/dev/null >/dev/null; then " +
                         "for fd in \$p/fd/*; do " +
                         "target=\$(readlink \$fd 2>/dev/null); " +
-                        "if [[ \$target == /dev/pts/* ]]; then " +
-                        "chroot '$targetRootfs' /usr/bin/stty -F \"\$target\" rows $rows cols $cols 2>/dev/null; " +
+                        "if [[ \$target == */dev/pts/* ]]; then " +
+                        "pts_dev=\"/dev/pts/\${target##*/}\"; " +
+                        "chroot '$targetRootfs' /usr/bin/stty -F \"\$pts_dev\" rows $rows cols $cols 2>/dev/null || stty -F \"\$target\" rows $rows cols $cols 2>/dev/null; " +
                         "break 2; " +
                         "fi; done; fi; fi; done"
                 com.arbdev.devbox.data.RootExecutor.executeSync(cmd, silent = true)
