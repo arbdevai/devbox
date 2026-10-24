@@ -167,18 +167,20 @@ fun TerminalScreen(
     val activeSession = TerminalSessionManager.getActiveSession()
     val activeIndex = TerminalSessionManager.activeIndex.intValue
 
-    // Persistensi ukuran font terminal via SharedPreferences (default 12sp, rentang 8sp - 28sp)
+    // Persistensi ukuran font terminal via SharedPreferences (default 12sp, rentang 2.5sp - 28sp)
     val prefs = remember { context.getSharedPreferences("devbox_terminal_prefs", Context.MODE_PRIVATE) }
     var terminalFontSize by remember { mutableFloatStateOf(prefs.getFloat("terminal_font_size", 12f)) }
     var fontToast by remember { mutableStateOf<android.widget.Toast?>(null) }
 
-    // Helper untuk mengubah dan menyimpan ukuran font secara smooth (step 0.5f)
+    // Helper untuk mengubah dan menyimpan ukuran font secara smooth (step 0.5f, min 2.5f)
     val updateFontSize: (Float) -> Unit = { newSize ->
-        val clamped = (Math.round(newSize * 2f) / 2f).coerceIn(8f, 28f)
-        terminalFontSize = clamped
-        prefs.edit().putFloat("terminal_font_size", clamped).apply()
-        fontToast?.cancel()
-        fontToast = android.widget.Toast.makeText(context, "Ukuran font: ${String.format(java.util.Locale.US, "%.1f", clamped)} sp", android.widget.Toast.LENGTH_SHORT).apply { show() }
+        val clamped = (Math.round(newSize * 2f) / 2f).coerceIn(2.5f, 28f)
+        if (clamped != terminalFontSize) {
+            terminalFontSize = clamped
+            prefs.edit().putFloat("terminal_font_size", clamped).apply()
+            fontToast?.cancel()
+            fontToast = android.widget.Toast.makeText(context, "Ukuran font: ${String.format(java.util.Locale.US, "%.1f", clamped)} sp", android.widget.Toast.LENGTH_SHORT).apply { show() }
+        }
     }
 
     val hapticFeedback = LocalHapticFeedback.current
@@ -931,12 +933,39 @@ fun TerminalScreen(
                 .alpha(0.01f)
         )
 
-        // Native 2D VT100 Matrix Canvas / Terminal Text Area with Direct Glyph Drawing
+        // Native 2D VT100 Matrix Canvas / Terminal Text Area with Direct Glyph Drawing & Pinch-to-Zoom
         BoxWithConstraints(
             modifier = Modifier
                 .weight(1f)
                 .fillMaxWidth()
                 .background(TerminalBackground)
+                .pointerInput(Unit) {
+                    awaitEachGesture {
+                        awaitFirstDown(requireUnconsumed = false)
+                        do {
+                            val event = awaitPointerEvent()
+                            val activePointers = event.changes.filter { it.pressed }
+                            if (activePointers.size >= 2) {
+                                val p1 = activePointers[0].position
+                                val p2 = activePointers[1].position
+                                val prevP1 = activePointers[0].previousPosition
+                                val prevP2 = activePointers[1].previousPosition
+
+                                val currentDist = kotlin.math.hypot(p1.x - p2.x, p1.y - p2.y)
+                                val prevDist = kotlin.math.hypot(prevP1.x - prevP2.x, prevP1.y - prevP2.y)
+
+                                if (prevDist > 0f) {
+                                    val scale = currentDist / prevDist
+                                    if (scale in 0.5f..2.0f && kotlin.math.abs(scale - 1f) > 0.005f) {
+                                        val delta = (scale - 1f) * (terminalFontSize * 1.5f)
+                                        updateFontSize(terminalFontSize + delta)
+                                        activePointers.forEach { it.consume() }
+                                    }
+                                }
+                            }
+                        } while (event.changes.any { it.pressed })
+                    }
+                }
         ) {
             val density = LocalDensity.current
             LaunchedEffect(maxWidth, maxHeight, terminalFontSize) {
@@ -944,9 +973,11 @@ fun TerminalScreen(
                 with(density) {
                     val charWidth = (terminalFontSize * 0.6f).sp.toPx()
                     val charHeight = (terminalFontSize * 1.25f).sp.toPx()
+                    val hPaddingPx = 8.dp.toPx() // 4.dp horizontal margin di setiap sisi
+                    val vPaddingPx = 4.dp.toPx() // 2.dp vertical margin di setiap sisi
                     if (charWidth > 0 && charHeight > 0) {
-                        val cols = (maxWidth.toPx() / charWidth).toInt().coerceIn(20, 200)
-                        val rows = (maxHeight.toPx() / charHeight).toInt().coerceIn(4, 100)
+                        val cols = ((maxWidth.toPx() - hPaddingPx).coerceAtLeast(1f) / charWidth).toInt().coerceIn(20, 300)
+                        val rows = ((maxHeight.toPx() - vPaddingPx).coerceAtLeast(1f) / charHeight).toInt().coerceIn(4, 200)
                         activeSession.updateWindowSize(cols, rows)
                     }
                 }
@@ -1951,11 +1982,7 @@ fun TerminalCanvas(
                     )
                     else Modifier
                 )
-                .horizontalScroll(
-                    horizontalScrollState,
-                    enabled = !isDraggingHandle
-                )
-                .padding(horizontal = 6.dp, vertical = 4.dp)
+                .padding(horizontal = 4.dp, vertical = 2.dp)
         ) {
             Canvas(
                 modifier = Modifier
@@ -2260,7 +2287,7 @@ fun TerminalCanvas(
 
         // 1. Menu Kontekstual Seleksi Teks (In-Tree Overlay Surface)
         if (hasSelection && selMin != null && selMax != null && showSelectionMenu && !isDraggingHandle) {
-            val scrollX = horizontalScrollState.value
+            val scrollX = 0f
             val scrollY = if (!isAltBuffer) verticalScrollState.value else 0
 
             val topTextScreenY = selMin.line * charHeight - scrollY
@@ -2397,7 +2424,7 @@ fun TerminalCanvas(
         // 2. Menu Kontekstual Tempel (In-Tree Overlay Surface)
         val pastePos = pasteMenuOffset
         if (pastePos != null && selectionStart == null) {
-            val scrollX = horizontalScrollState.value
+            val scrollX = 0f
             val scrollY = if (!isAltBuffer) verticalScrollState.value else 0
             val screenX = pastePos.x - scrollX
             val screenY = pastePos.y - scrollY

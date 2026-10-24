@@ -116,7 +116,7 @@ class NativeTerminalSession(
                     "mountpoint -q '$targetRootfs/mnt/sdcard' || { mount --bind /sdcard '$targetRootfs/mnt/sdcard' 2>/dev/null && mount --make-private '$targetRootfs/mnt/sdcard' 2>/dev/null; }; " +
                     "mount --make-rprivate '$targetRootfs' 2>/dev/null; " +
                     "chown -R 1000:1000 '$targetRootfs/home/coder' 2>/dev/null; chmod -R 777 '$targetRootfs/home/coder' 2>/dev/null; " +
-                    "cd '$targetRootfs' && exec chroot '$targetRootfs' /usr/bin/env -i HOME=/home/coder USER=coder LOGNAME=sahal SHELL=/bin/bash TERM=xterm-256color COLORTERM=truecolor DEVBOX=1 DEVBOX_SESSION_ID='$id' GH_NO_KEYRING=1 PATH=/home/coder/.local/bin:/home/coder/.cargo/bin:/home/coder/go/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin /bin/bash -c 'cd /home/coder 2>/dev/null || cd /; if [ -x /usr/bin/script ]; then exec /usr/bin/script -qefc \"stty rows 30 cols 80 opost onlcr 2>/dev/null; exec /bin/bash -l\" /dev/null; else exec /bin/bash -l; fi'"
+                    "cd '$targetRootfs' && exec chroot '$targetRootfs' /usr/bin/env -i HOME=/home/coder USER=coder LOGNAME=sahal SHELL=/bin/bash TERM=xterm-256color COLORTERM=truecolor DEVBOX=1 DEVBOX_SESSION_ID='$id' GH_NO_KEYRING=1 PATH=/home/coder/.local/bin:/home/coder/.cargo/bin:/home/coder/go/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin /bin/bash -c 'cd /home/coder 2>/dev/null || cd /; if [ -x /usr/bin/script ]; then exec /usr/bin/script -qefc \"tty > /tmp/.devbox_pts_$id 2>/dev/null; stty rows 30 cols 80 opost onlcr 2>/dev/null; exec /bin/bash -l\" /dev/null; else exec /bin/bash -l; fi'"
 
             val pb = ProcessBuilder(suBinary, "-c", chrootCmd)
             pb.redirectErrorStream(true) // Gabungkan stderr ke stdout stream
@@ -181,18 +181,20 @@ class NativeTerminalSession(
                         } catch (_: Exception) {}
                     }
 
-                    // 3. Cek nama proses / agent aktif (agy, python, node, dll) setiap 20 detik
+                    // 3. Cek nama proses / agent aktif (agy, python, node, dll) setiap 20 detik secara instan
                     if (cycle % 10 == 0) {
                         try {
-                            val checkCmd = "for p in /proc/[0-9]*; do " +
-                                    "if [ \"\$(readlink \$p/root 2>/dev/null)\" = '$targetRootfs' ]; then " +
-                                    "if grep -z '^DEVBOX_SESSION_ID=$sessionId' \"\$p/environ\" 2>/dev/null >/dev/null; then " +
-                                    "comm=\$(cat \$p/comm 2>/dev/null); " +
-                                    "if [ \"\$comm\" != 'script' ] && [ \"\$comm\" != 'bash' ] && [ \"\$comm\" != 'stty' ] && [ \"\$comm\" != 'setpriv' ]; then " +
-                                    "echo \"\$comm\"; break; " +
-                                    "fi; fi; fi; done"
-                            val res = com.arbdev.devbox.data.RootExecutor.executeSync(checkCmd, silent = true)
-                            val detected = res.getOrNull()?.stdout?.trim().orEmpty()
+                            val suPid = getProcessPid()
+                            val checkCmd = if (suPid != null) {
+                                "for c in \$(pgrep -P $suPid 2>/dev/null || true); do " +
+                                        "for g in \$c \$(pgrep -P \$c 2>/dev/null || true); do " +
+                                        "comm=\$(cat /proc/\$g/comm 2>/dev/null); " +
+                                        "if [ -n \"\$comm\" ] && [ \"\$comm\" != 'script' ] && [ \"\$comm\" != 'bash' ] && [ \"\$comm\" != 'stty' ] && [ \"\$comm\" != 'su' ]; then " +
+                                        "echo \"\$comm\"; break 2; " +
+                                        "fi; done; done"
+                            } else null
+                            val res = if (checkCmd != null) com.arbdev.devbox.data.RootExecutor.executeSync(checkCmd, silent = true) else null
+                            val detected = res?.getOrNull()?.stdout?.trim().orEmpty()
                             mainHandler.post {
                                 if (detected.isNotBlank()) {
                                     activeAgentName = detected
@@ -315,19 +317,39 @@ class NativeTerminalSession(
         // Debounce: batalkan pemanggilan stty sebelumnya jika ukuran berubah cepat (anti-fork explosion Magisk)
         resizeJob?.cancel()
         resizeJob = sessionScope.launch(Dispatchers.IO) {
-            delay(100)
+            delay(50)
             try {
-                val cmd = "for p in /proc/[0-9]*; do " +
-                        "if [ \"\$(readlink \$p/root 2>/dev/null)\" = '$targetRootfs' ]; then " +
-                        "if grep -z '^DEVBOX_SESSION_ID=$sessionId' \"\$p/environ\" 2>/dev/null >/dev/null; then " +
-                        "for fd in \$p/fd/*; do " +
-                        "target=\$(readlink \$fd 2>/dev/null); " +
-                        "if [[ \$target == */dev/pts/* ]]; then " +
-                        "pts_dev=\"/dev/pts/\${target##*/}\"; " +
-                        "chroot '$targetRootfs' /usr/bin/stty -F \"\$pts_dev\" rows $rows cols $cols 2>/dev/null || stty -F \"\$target\" rows $rows cols $cols 2>/dev/null; " +
-                        "break 2; " +
-                        "fi; done; fi; fi; done"
-                com.arbdev.devbox.data.RootExecutor.executeSync(cmd, silent = true)
+                var ptsDev: String? = null
+                val ptsFile = File("$targetRootfs/tmp/.devbox_pts_$sessionId")
+                if (ptsFile.exists()) {
+                    val content = ptsFile.readText().trim()
+                    if (content.startsWith("/dev/pts/")) {
+                        ptsDev = content
+                    }
+                }
+
+                if (ptsDev != null) {
+                    val sttyCmd = "chroot '$targetRootfs' /usr/bin/stty -F '$ptsDev' rows $rows cols $cols 2>/dev/null || stty -F '$ptsDev' rows $rows cols $cols 2>/dev/null"
+                    com.arbdev.devbox.data.RootExecutor.executeSync(sttyCmd, silent = true)
+                } else {
+                    // Fallback cepat: cari PTS via PID proses sesi tanpa memindai seluruh /proc (<50ms)
+                    val suPid = getProcessPid()
+                    val pgrepCmd = if (suPid != null) {
+                        "for cpid in \$(pgrep -P $suPid 2>/dev/null || true); do " +
+                                "for gpid in \$cpid \$(pgrep -P \$cpid 2>/dev/null || true); do " +
+                                "for fd in /proc/\$gpid/fd/*; do " +
+                                "t=\$(readlink \$fd 2>/dev/null); " +
+                                "if [[ \$t == */dev/pts/* ]]; then " +
+                                "dev=\"/dev/pts/\${t##*/}\"; " +
+                                "echo \"\$dev\" > '$targetRootfs/tmp/.devbox_pts_$sessionId' 2>/dev/null; " +
+                                "chroot '$targetRootfs' /usr/bin/stty -F \"\$dev\" rows $rows cols $cols 2>/dev/null || stty -F \"\$t\" rows $rows cols $cols 2>/dev/null; " +
+                                "break 3; " +
+                                "fi; done; done; done"
+                    } else null
+                    if (pgrepCmd != null) {
+                        com.arbdev.devbox.data.RootExecutor.executeSync(pgrepCmd, silent = true)
+                    }
+                }
             } catch (_: Exception) {}
         }
     }
@@ -404,6 +426,7 @@ class NativeTerminalSession(
             outputStream?.close()
             inputStream?.close()
             process?.destroy()
+            File("$targetRootfs/tmp/.devbox_pts_$sessionId").delete()
         } catch (_: Exception) {}
     }
 

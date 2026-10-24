@@ -142,8 +142,8 @@ class TerminalGridBuffer(
 
     fun resize(newCols: Int, newRows: Int) {
         synchronized(lock) {
-            val c = newCols.coerceIn(20, 200)
-            val r = newRows.coerceIn(4, 100)
+            val c = newCols.coerceIn(20, 300)
+            val r = newRows.coerceIn(4, 200)
             if (c == maxCols && r == maxRows) return
 
             maxCols = c
