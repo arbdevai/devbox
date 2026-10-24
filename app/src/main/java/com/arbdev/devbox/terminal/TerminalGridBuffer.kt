@@ -100,6 +100,10 @@ class TerminalGridBuffer(
         private set
     var isApplicationCursorKeys: Boolean = false
         private set
+    var isAutoWrap: Boolean = true
+        private set
+    private var wrapPending: Boolean = false
+    private var utf8Remainder = ByteArray(0)
 
     // Modern Protocols (OSC 0/1/2, OSC 52, OSC 8)
     var windowTitle: String = "coder@devbox:~"
@@ -126,12 +130,15 @@ class TerminalGridBuffer(
         ESC,
         CSI,
         OSC,
+        DCS_OR_APC,
         CHARSET
     }
 
     private var parserState = ParserState.NORMAL
     private val csiParams = StringBuilder()
     private var isCsiPrivate = false
+    private var csiPrefix: Char = '\u0000'
+    private var csiIntermediate: Char = '\u0000'
     private val oscBuffer = StringBuilder()
 
     // State trigger untuk recompose di Jetpack Compose
@@ -206,15 +213,61 @@ class TerminalGridBuffer(
             }
 
             cursorCol = cursorCol.coerceIn(0, maxCols - 1)
+            wrapPending = false
             scrollTop = 0
             scrollBottom = maxRows - 1
             notifyUpdate()
         }
     }
 
+    private fun decodeUtf8Chunk(bytes: ByteArray, offset: Int, count: Int): String {
+        if (count <= 0) return ""
+        val combined = if (utf8Remainder.isEmpty()) {
+            if (offset == 0 && count == bytes.size) bytes else bytes.copyOfRange(offset, offset + count)
+        } else {
+            val merged = ByteArray(utf8Remainder.size + count)
+            System.arraycopy(utf8Remainder, 0, merged, 0, utf8Remainder.size)
+            System.arraycopy(bytes, offset, merged, utf8Remainder.size, count)
+            utf8Remainder = ByteArray(0)
+            merged
+        }
+
+        val len = combined.size
+        var splitIdx = len
+        val minIdx = (len - 3).coerceAtLeast(0)
+        for (idx in len - 1 downTo minIdx) {
+            val b = combined[idx].toInt() and 0xFF
+            if ((b and 0x80) == 0) {
+                // ASCII byte — semua byte sampai di sini utuh
+                break
+            }
+            if ((b and 0xC0) == 0xC0) {
+                // UTF-8 leading byte
+                val expectedLen = when {
+                    (b and 0xE0) == 0xC0 -> 2
+                    (b and 0xF0) == 0xE0 -> 3
+                    (b and 0xF8) == 0xF0 -> 4
+                    else -> 1
+                }
+                val available = len - idx
+                if (available < expectedLen) {
+                    splitIdx = idx
+                }
+                break
+            }
+        }
+
+        if (splitIdx < len) {
+            utf8Remainder = combined.copyOfRange(splitIdx, len)
+        }
+        if (splitIdx <= 0) return ""
+        return String(combined, 0, splitIdx, StandardCharsets.UTF_8)
+    }
+
     fun write(bytes: ByteArray, offset: Int, count: Int) {
-        val text = String(bytes, offset, count, StandardCharsets.UTF_8)
         synchronized(lock) {
+            val text = decodeUtf8Chunk(bytes, offset, count)
+            if (text.isEmpty()) return
             var i = 0
             while (i < text.length) {
                 val ch = text[i]
@@ -222,20 +275,27 @@ class TerminalGridBuffer(
                     ParserState.NORMAL -> {
                         when {
                             ch == '\u001B' -> parserState = ParserState.ESC
-                            ch == '\r' -> cursorCol = 0
-                            ch == '\n' -> {
+                            ch == '\r' -> {
+                                wrapPending = false
                                 cursorCol = 0
+                            }
+                            ch == '\n' || ch == '\u000B' || ch == '\u000C' -> {
+                                // VT100 / xterm standar: LF (\n) hanya menggeser baris ke bawah TANPA mereset cursorCol ke 0!
+                                // Pada shell cooked-mode (bash/ls), kernel PTY (onlcr) otomatis mengirim \r\n.
+                                // Pada TUI raw-mode (agy / Bubbletea / vim), bare \n dipakai sebagai vertikal kursor murni
+                                // diikuti gerakan horizontal relatif (\x1b[<N>D / \x1b[<N>C).
+                                wrapPending = false
                                 newline()
                             }
                             ch == '\b' || ch == '\u007F' -> {
+                                wrapPending = false
                                 if (cursorCol > 0) cursorCol--
                             }
                             ch == '\t' -> {
+                                // VT100 CHT: majukan posisi kursor ke kelipatan 8 berikutnya tanpa menimpa isi sel yang sudah ada
+                                wrapPending = false
                                 val nextTabStop = ((cursorCol / 8) + 1) * 8
-                                val targetCol = nextTabStop.coerceAtMost(maxCols - 1)
-                                while (cursorCol < targetCol) {
-                                    putChar(' ')
-                                }
+                                cursorCol = nextTabStop.coerceAtMost(maxCols - 1)
                             }
                             ch == '\u0007' -> {
                                 onBell?.invoke()
@@ -260,18 +320,26 @@ class TerminalGridBuffer(
                                 parserState = ParserState.CSI
                                 csiParams.setLength(0)
                                 isCsiPrivate = false
+                                csiPrefix = '\u0000'
+                                csiIntermediate = '\u0000'
                             }
                             ']' -> {
                                 parserState = ParserState.OSC
                                 oscBuffer.setLength(0)
                             }
-                            '(', ')' -> parserState = ParserState.CHARSET
+                            'P', '_', '^', 'X' -> {
+                                // DCS, APC, PM, SOS string sequence (diakhiri ST: ESC \ atau BEL)
+                                parserState = ParserState.DCS_OR_APC
+                                oscBuffer.setLength(0)
+                            }
+                            '(', ')', '*', '+' -> parserState = ParserState.CHARSET
                             '7' -> {
                                 savedCursorRow = cursorRow
                                 savedCursorCol = cursorCol
                                 parserState = ParserState.NORMAL
                             }
                             '8' -> {
+                                wrapPending = false
                                 cursorRow = savedCursorRow.coerceIn(0, maxRows - 1)
                                 cursorCol = savedCursorCol.coerceIn(0, maxCols - 1)
                                 parserState = ParserState.NORMAL
@@ -282,6 +350,7 @@ class TerminalGridBuffer(
                             }
                             'M' -> {
                                 // Reverse Index (RI): pindah kursor ke atas 1 baris, scroll down jika di batas atas margin
+                                wrapPending = false
                                 if (cursorRow > scrollTop) {
                                     cursorRow--
                                 } else {
@@ -291,11 +360,13 @@ class TerminalGridBuffer(
                             }
                             'D' -> {
                                 // Index (IND): pindah kursor ke bawah 1 baris, scroll up jika di akhir
+                                wrapPending = false
                                 newline()
                                 parserState = ParserState.NORMAL
                             }
                             'E' -> {
                                 // Next Line (NEL): kolom 0 + baris baru
+                                wrapPending = false
                                 cursorCol = 0
                                 newline()
                                 parserState = ParserState.NORMAL
@@ -306,6 +377,14 @@ class TerminalGridBuffer(
 
                     ParserState.CHARSET -> {
                         parserState = ParserState.NORMAL
+                    }
+
+                    ParserState.DCS_OR_APC -> {
+                        if (ch == '\u0007' || (ch == '\\' && oscBuffer.endsWith("\u001B"))) {
+                            parserState = ParserState.NORMAL
+                        } else {
+                            oscBuffer.append(ch)
+                        }
                     }
 
                     ParserState.OSC -> {
@@ -323,14 +402,26 @@ class TerminalGridBuffer(
                     }
 
                     ParserState.CSI -> {
-                        if (ch == '?') {
-                            isCsiPrivate = true
-                        } else if (ch in '0'..'9' || ch == ';' || ch == ':') {
-                            csiParams.append(ch)
-                        } else {
-                            // Karakter akhir perintah CSI (0x40 - 0x7E)
-                            handleCsiCommand(ch)
-                            parserState = ParserState.NORMAL
+                        when {
+                            ch == '\u001B' -> {
+                                parserState = ParserState.ESC
+                            }
+                            ch in charArrayOf('?', '>', '<', '=') && csiParams.isEmpty() && csiPrefix == '\u0000' -> {
+                                csiPrefix = ch
+                                if (ch == '?') isCsiPrivate = true
+                            }
+                            ch in '0'..'9' || ch == ';' || ch == ':' -> {
+                                csiParams.append(ch)
+                            }
+                            ch.code in 0x20..0x2F -> {
+                                // Intermediate byte (misal ' ' pada \x1b[0 q atau '$' pada \x1b[?2026$p)
+                                csiIntermediate = ch
+                            }
+                            ch.code in 0x40..0x7E -> {
+                                // Karakter akhir perintah CSI (0x40 - 0x7E)
+                                handleCsiCommand(ch)
+                                parserState = ParserState.NORMAL
+                            }
                         }
                     }
                 }
@@ -382,6 +473,15 @@ class TerminalGridBuffer(
 
     private fun putChar(ch: Char, extra: Char? = null, isWide: Boolean = false) {
         if (cursorCol >= maxCols) {
+            if (isAutoWrap) {
+                cursorCol = 0
+                newline()
+            } else {
+                cursorCol = maxCols - 1
+            }
+        }
+        if (isWide && cursorCol == maxCols - 1 && isAutoWrap) {
+            activeGrid[cursorRow][cursorCol].reset()
             cursorCol = 0
             newline()
         }
@@ -453,11 +553,21 @@ class TerminalGridBuffer(
     }
 
     private fun handleCsiCommand(command: Char) {
+        // Abaikan sequence CSI dengan intermediate byte (misal \x1b[0 q, \x1b[?2026$p)
+        // atau prefix ekstensi modern ('>', '<', '=' seperti \x1b[>4;2m, \x1b[>1u, \x1b[<1u)
+        // agar tidak disalahartikan sebagai perintah standar ('m', 'u', 'p', 'q', dll.)
+        if (csiIntermediate != '\u0000' || csiPrefix in charArrayOf('>', '<', '=')) {
+            if (csiPrefix == '>' && csiIntermediate == '\u0000' && command == 'c') {
+                onSendResponse?.invoke("\u001B[>0;10;1c")
+            }
+            return
+        }
+
         val params = parseCsiParams(csiParams.toString())
 
         when (command) {
             // SGR (Select Graphic Rendition - Warna & Gaya)
-            'm' -> handleSgr(params)
+            'm' -> if (!isCsiPrivate) handleSgr(params)
 
             // Cursor Position: [H atau [f (1-indexed)
             'H', 'f' -> {
@@ -521,9 +631,10 @@ class TerminalGridBuffer(
             'J' -> {
                 val mode = if (params.isNotEmpty()) params[0] else 0
                 val target = activeGrid
+                val safeCol = cursorCol.coerceIn(0, maxCols - 1)
                 when (mode) {
                     0 -> { // Dari kursor sampai akhir layar
-                        for (c in cursorCol until maxCols) target[cursorRow][c].reset()
+                        for (c in safeCol until maxCols) target[cursorRow][c].reset()
                         for (r in cursorRow + 1 until maxRows) {
                             for (c in 0 until maxCols) target[r][c].reset()
                         }
@@ -532,7 +643,7 @@ class TerminalGridBuffer(
                         for (r in 0 until cursorRow) {
                             for (c in 0 until maxCols) target[r][c].reset()
                         }
-                        for (c in 0..cursorCol) target[cursorRow][c].reset()
+                        for (c in 0..safeCol) target[cursorRow][c].reset()
                     }
                     2, 3 -> { // Hapus seluruh layar
                         for (r in 0 until maxRows) {
@@ -546,9 +657,10 @@ class TerminalGridBuffer(
             'K' -> {
                 val mode = if (params.isNotEmpty()) params[0] else 0
                 val target = activeGrid
+                val safeCol = cursorCol.coerceIn(0, maxCols - 1)
                 when (mode) {
-                    0 -> for (c in cursorCol until maxCols) target[cursorRow][c].reset()
-                    1 -> for (c in 0..cursorCol) target[cursorRow][c].reset()
+                    0 -> for (c in safeCol until maxCols) target[cursorRow][c].reset()
+                    1 -> for (c in 0..safeCol) target[cursorRow][c].reset()
                     2 -> for (c in 0 until maxCols) target[cursorRow][c].reset()
                 }
             }
@@ -557,8 +669,9 @@ class TerminalGridBuffer(
             'X' -> {
                 val count = if (params.isNotEmpty() && params[0] > 0) params[0] else 1
                 val target = activeGrid
-                val limit = (cursorCol + count).coerceAtMost(maxCols)
-                for (c in cursorCol until limit) {
+                val safeCol = cursorCol.coerceIn(0, maxCols - 1)
+                val limit = (safeCol + count).coerceAtMost(maxCols)
+                for (c in safeCol until limit) {
                     target[cursorRow][c].reset()
                 }
             }
@@ -567,8 +680,9 @@ class TerminalGridBuffer(
             'P' -> {
                 val count = if (params.isNotEmpty() && params[0] > 0) params[0] else 1
                 val target = activeGrid
-                val safeCount = count.coerceAtMost(maxCols - cursorCol)
-                for (c in cursorCol until maxCols - safeCount) {
+                val safeCol = cursorCol.coerceIn(0, maxCols - 1)
+                val safeCount = count.coerceAtMost(maxCols - safeCol)
+                for (c in safeCol until maxCols - safeCount) {
                     target[cursorRow][c].copyFrom(target[cursorRow][c + safeCount])
                 }
                 for (c in (maxCols - safeCount) until maxCols) {
@@ -580,11 +694,12 @@ class TerminalGridBuffer(
             '@' -> {
                 val count = if (params.isNotEmpty() && params[0] > 0) params[0] else 1
                 val target = activeGrid
-                val safeCount = count.coerceAtMost(maxCols - cursorCol)
-                for (c in maxCols - 1 downTo cursorCol + safeCount) {
+                val safeCol = cursorCol.coerceIn(0, maxCols - 1)
+                val safeCount = count.coerceAtMost(maxCols - safeCol)
+                for (c in maxCols - 1 downTo safeCol + safeCount) {
                     target[cursorRow][c].copyFrom(target[cursorRow][c - safeCount])
                 }
-                for (c in cursorCol until cursorCol + safeCount) {
+                for (c in safeCol until safeCol + safeCount) {
                     target[cursorRow][c].reset()
                 }
             }
@@ -633,7 +748,12 @@ class TerminalGridBuffer(
                     for (p in params) {
                         when (p) {
                             1 -> isApplicationCursorKeys = true // DECCKM Mode
-                            1049 -> { // Masuk ke Alternate Screen Buffer (nano, agy, htop)
+                            7 -> isAutoWrap = true // DECAWM Auto-Wrap Mode
+                            47, 1047, 1049 -> { // Masuk ke Alternate Screen Buffer (nano, agy, htop)
+                                if (p == 1049) {
+                                    savedCursorRow = cursorRow
+                                    savedCursorCol = cursorCol
+                                }
                                 isAltBuffer = true
                                 for (r in 0 until maxRows) {
                                     for (c in 0 until maxCols) altGrid[r][c].reset()
@@ -657,10 +777,15 @@ class TerminalGridBuffer(
                     for (p in params) {
                         when (p) {
                             1 -> isApplicationCursorKeys = false // Reset ke normal cursor keys
-                            1049 -> { // Keluar dari Alternate Screen Buffer
+                            7 -> isAutoWrap = false // Nonaktifkan Auto-Wrap (penting saat TUI menggambar border tabel)
+                            47, 1047, 1049 -> { // Keluar dari Alternate Screen Buffer
                                 isAltBuffer = false
                                 scrollTop = 0
                                 scrollBottom = maxRows - 1
+                                if (p == 1049) {
+                                    cursorRow = savedCursorRow.coerceIn(0, maxRows - 1)
+                                    cursorCol = savedCursorCol.coerceIn(0, maxCols - 1)
+                                }
                             }
                             25 -> isCursorVisible = false
                             1000, 1002 -> isMouseTrackingEnabled = false
@@ -673,22 +798,29 @@ class TerminalGridBuffer(
 
             // Scroll Region Margins: [top;bottom r (DECSTBM untuk tmux, vim split, htop)
             'r' -> {
-                val top = if (params.isNotEmpty() && params[0] > 0) params[0] - 1 else 0
-                val bottom = if (params.size > 1 && params[1] > 0) params[1] - 1 else maxRows - 1
-                scrollTop = top.coerceIn(0, maxRows - 1)
-                scrollBottom = bottom.coerceIn(scrollTop, maxRows - 1)
-                cursorRow = 0
-                cursorCol = 0
+                if (!isCsiPrivate) {
+                    val top = if (params.isNotEmpty() && params[0] > 0) params[0] - 1 else 0
+                    val bottom = if (params.size > 1 && params[1] > 0) params[1] - 1 else maxRows - 1
+                    scrollTop = top.coerceIn(0, maxRows - 1)
+                    scrollBottom = bottom.coerceIn(scrollTop, maxRows - 1)
+                    cursorRow = 0
+                    cursorCol = 0
+                }
             }
 
             's' -> {
-                savedCursorRow = cursorRow
-                savedCursorCol = cursorCol
+                if (!isCsiPrivate) {
+                    savedCursorRow = cursorRow
+                    savedCursorCol = cursorCol
+                }
             }
 
             'u' -> {
-                cursorRow = savedCursorRow.coerceIn(0, maxRows - 1)
-                cursorCol = savedCursorCol.coerceIn(0, maxCols - 1)
+                // Jangan jalankan SCORC jika ada prefix '?' (misal \x1b[?u dari Kitty keyboard query di agy)
+                if (!isCsiPrivate) {
+                    cursorRow = savedCursorRow.coerceIn(0, maxRows - 1)
+                    cursorCol = savedCursorCol.coerceIn(0, maxCols - 1)
+                }
             }
 
             // Device Status Report (DSR) & Cursor Position Report (CPR): [6n / [5n
@@ -778,6 +910,8 @@ class TerminalGridBuffer(
         scrollBottom = maxRows - 1
         currentHyperlinkUrl = null
         isBracketedPasteMode = false
+        isAutoWrap = true
+        wrapPending = false
         resetSgr()
     }
 
@@ -793,6 +927,18 @@ class TerminalGridBuffer(
                 // Window Title / Tab Title (OSC 0, 1, 2)
                 windowTitle = payload
                 onTitleChanged?.invoke(payload)
+            }
+            10 -> {
+                // Query Foreground Color (OSC 10;?) -> dibutuhkan TUI Go/Bubbletea/Lipgloss
+                if (payload == "?") {
+                    onSendResponse?.invoke("\u001B]10;rgb:c9c9/d1d1/d9d9\u0007")
+                }
+            }
+            11 -> {
+                // Query Background Color (OSC 11;?) -> dibutuhkan agy / Bubbletea agar tidak timeout 2 detik saat start
+                if (payload == "?") {
+                    onSendResponse?.invoke("\u001B]11;rgb:0d0d/1111/1717\u0007")
+                }
             }
             52 -> {
                 // Clipboard Protocol (OSC 52)

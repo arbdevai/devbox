@@ -114,13 +114,12 @@ class NativeTerminalSession(
             val chrootCmd = "mkdir -p '$targetRootfs/dev' '$targetRootfs/dev/pts' '$targetRootfs/proc' '$targetRootfs/sys' '$targetRootfs/mnt/sdcard' '$targetRootfs/tmp' 2>/dev/null; " +
                     "chmod 1777 '$targetRootfs/tmp' 2>/dev/null; " +
                     "mountpoint -q '$targetRootfs/dev' || { mount --bind /dev '$targetRootfs/dev' 2>/dev/null && mount --make-private '$targetRootfs/dev' 2>/dev/null; }; " +
-                    "mountpoint -q '$targetRootfs/dev/pts' || mount -t devpts devpts '$targetRootfs/dev/pts' 2>/dev/null || mount --bind /dev/pts '$targetRootfs/dev/pts' 2>/dev/null; " +
+                    "mountpoint -q '$targetRootfs/dev/pts' || mount --bind /dev/pts '$targetRootfs/dev/pts' 2>/dev/null || mount -t devpts devpts '$targetRootfs/dev/pts' 2>/dev/null; " +
                     "mountpoint -q '$targetRootfs/proc' || mount -t proc proc '$targetRootfs/proc' 2>/dev/null; " +
                     "mountpoint -q '$targetRootfs/sys' || mount -t sysfs sysfs '$targetRootfs/sys' 2>/dev/null; " +
                     "mountpoint -q '$targetRootfs/mnt/sdcard' || { mount --bind /sdcard '$targetRootfs/mnt/sdcard' 2>/dev/null && mount --make-private '$targetRootfs/mnt/sdcard' 2>/dev/null; }; " +
-                    "mount --make-rprivate '$targetRootfs' 2>/dev/null; " +
-                    "chown -R 1000:1000 '$targetRootfs/home/coder' 2>/dev/null; chmod -R 777 '$targetRootfs/home/coder' 2>/dev/null; " +
-                    "cd '$targetRootfs' && exec chroot '$targetRootfs' /usr/bin/env -i HOME=/home/coder USER=coder LOGNAME=sahal SHELL=/bin/bash TERM=xterm-256color COLORTERM=truecolor DEVBOX=1 DEVBOX_SESSION_ID='$id' GH_NO_KEYRING=1 PATH=/home/coder/.local/bin:/home/coder/.cargo/bin:/home/coder/go/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin /bin/bash -c 'cd /home/coder 2>/dev/null || cd /; if [ -x /usr/bin/script ]; then exec /usr/bin/script -qefc \"shopt -s checkwinsize 2>/dev/null; tty > /tmp/.devbox_pts_$id 2>/dev/null; echo \\\$(tty) > /home/coder/.devbox_pts_$id 2>/dev/null; stty rows $initRows cols $initCols opost onlcr 2>/dev/null; exec /bin/bash -l\" /dev/null; else exec /bin/bash -l; fi'"
+                    "chown 1000:1000 '$targetRootfs/home/coder' 2>/dev/null; " +
+                    "cd '$targetRootfs' && exec chroot '$targetRootfs' /usr/bin/env -i HOME=/home/coder USER=coder LOGNAME=sahal SHELL=/bin/bash TERM=xterm-256color COLORTERM=truecolor DEVBOX=1 DEVBOX_SESSION_ID='$id' GH_NO_KEYRING=1 PATH=/home/coder/.local/bin:/home/coder/.cargo/bin:/home/coder/go/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin /bin/bash -c 'cd /home/coder 2>/dev/null || cd /; if [ -x /usr/bin/script ]; then exec /usr/bin/script -qefc \"shopt -s checkwinsize 2>/dev/null; echo \\\$\\\$ > /tmp/.devbox_pid_$id 2>/dev/null; tty > /tmp/.devbox_pts_$id 2>/dev/null; echo \\\$(tty) > /home/coder/.devbox_pts_$id 2>/dev/null; ws=\\\$(cat /tmp/.devbox_ws_$id 2>/dev/null); if [ -n \\\"\\\$ws\\\" ]; then stty \\\$ws opost onlcr 2>/dev/null; else stty rows $initRows cols $initCols opost onlcr 2>/dev/null; fi; exec /bin/bash -l\" /dev/null; else exec /bin/bash -l; fi'"
 
             val pb = ProcessBuilder(suBinary, "-c", chrootCmd)
             pb.redirectErrorStream(true) // Gabungkan stderr ke stdout stream
@@ -316,35 +315,45 @@ class NativeTerminalSession(
                 delay(debounceMs)
             }
             try {
-                val currentPts = cachedPtsDev
-                if (currentPts != null) {
-                    val directCmd = "chroot '$targetRootfs' /usr/bin/stty -F '$currentPts' rows $rows cols $cols 2>/dev/null || stty -F '$targetRootfs$currentPts' rows $rows cols $cols 2>/dev/null || stty -F '$currentPts' rows $rows cols $cols 2>/dev/null"
+                val currentPtsFd = cachedPtsDev
+                if (currentPtsFd != null) {
+                    val directCmd = "echo 'rows $rows cols $cols' > '$targetRootfs/tmp/.devbox_ws_$sessionId' 2>/dev/null; " +
+                            "if [ -e '$currentPtsFd' ]; then " +
+                            "stty -F '$currentPtsFd' rows $rows cols $cols 2>/dev/null || chroot '$targetRootfs' /usr/bin/stty -F '$currentPtsFd' rows $rows cols $cols 2>/dev/null; " +
+                            "else exit 1; fi"
                     val res = com.arbdev.devbox.data.RootExecutor.executeSync(directCmd, silent = true)
                     if (res.isSuccess) return@launch
+                    cachedPtsDev = null
                 }
 
-                // Resolusi PTS slave via root: baca file cache atau grep environ secara instan (<30ms)
-                val resolveAndSetCmd = "pts=\$(cat '$targetRootfs/tmp/.devbox_pts_$sessionId' 2>/dev/null || cat '$targetRootfs/home/coder/.devbox_pts_$sessionId' 2>/dev/null); " +
-                        "if [ -z \"\$pts\" ]; then " +
-                        "env_file=\$(grep -l 'DEVBOX_SESSION_ID=$sessionId' /proc/[0-9]*/environ 2>/dev/null | head -n 1); " +
-                        "if [ -n \"\$env_file\" ]; then " +
-                        "pid=\$(echo \"\$env_file\" | cut -d/ -f3); " +
-                        "for fd in /proc/\$pid/fd/*; do " +
+                // Resolusi PTY slave via /proc/<pid>/fd/0 sehingga 100% menembus isolasi mount namespace su
+                val resolveAndSetCmd = "echo 'rows $rows cols $cols' > '$targetRootfs/tmp/.devbox_ws_$sessionId' 2>/dev/null; " +
+                        "pts_fd=''; " +
+                        "spid=\$(cat '$targetRootfs/tmp/.devbox_pid_$sessionId' 2>/dev/null); " +
+                        "if [ -n \"\$spid\" ] && [ -e \"/proc/\$spid/fd/0\" ]; then " +
+                        "pts_fd=\"/proc/\$spid/fd/0\"; " +
+                        "else " +
+                        "for env_file in \$(grep -l 'DEVBOX_SESSION_ID=$sessionId' /proc/[0-9]*/environ 2>/dev/null); do " +
+                        "p=\$(echo \"\$env_file\" | cut -d/ -f3); " +
+                        "for fd in /proc/\$p/fd/0 /proc/\$p/fd/1 /proc/\$p/fd/2; do " +
                         "t=\$(readlink \$fd 2>/dev/null); " +
-                        "if [[ \$t == */dev/pts/* ]]; then " +
-                        "pts=\"/dev/pts/\${t##*/}\"; " +
-                        "echo \"\$pts\" > '$targetRootfs/tmp/.devbox_pts_$sessionId' 2>/dev/null; " +
-                        "break; " +
-                        "fi; done; fi; fi; " +
-                        "if [ -n \"\$pts\" ]; then " +
-                        "chroot '$targetRootfs' /usr/bin/stty -F \"\$pts\" rows $rows cols $cols 2>/dev/null || stty -F \"\$targetRootfs\$pts\" rows $rows cols $cols 2>/dev/null || stty -F \"\$pts\" rows $rows cols $cols 2>/dev/null; " +
-                        "echo \"\$pts\"; " +
+                        "if [[ \$t == */dev/pts/* ]]; then pts_fd=\"\$fd\"; break 2; fi; " +
+                        "done; done; fi; " +
+                        "if [ -n \"\$pts_fd\" ]; then " +
+                        "stty -F \"\$pts_fd\" rows $rows cols $cols 2>/dev/null || chroot '$targetRootfs' /usr/bin/stty -F \"\$pts_fd\" rows $rows cols $cols 2>/dev/null; " +
+                        "echo \"\$pts_fd\"; " +
                         "fi"
 
-                val res = com.arbdev.devbox.data.RootExecutor.executeSync(resolveAndSetCmd, silent = true)
-                val resolvedPts = res.getOrNull()?.stdout?.trim()
-                if (!resolvedPts.isNullOrBlank() && resolvedPts.startsWith("/dev/pts/")) {
-                    cachedPtsDev = resolvedPts
+                var res = com.arbdev.devbox.data.RootExecutor.executeSync(resolveAndSetCmd, silent = true)
+                var resolvedFd = res.getOrNull()?.stdout?.trim()
+                if (resolvedFd.isNullOrBlank()) {
+                    // Jika sesi baru saja diluncurkan dan /usr/bin/script belum selesai inisialisasi, tunggu sebentar lalu coba sekali lagi
+                    delay(220)
+                    res = com.arbdev.devbox.data.RootExecutor.executeSync(resolveAndSetCmd, silent = true)
+                    resolvedFd = res.getOrNull()?.stdout?.trim()
+                }
+                if (!resolvedFd.isNullOrBlank() && resolvedFd.startsWith("/proc/")) {
+                    cachedPtsDev = resolvedFd
                 }
             } catch (_: Exception) {}
         }
@@ -424,7 +433,7 @@ class NativeTerminalSession(
             process?.destroy()
             cachedPtsDev = null
             sessionScope.launch(Dispatchers.IO) {
-                val cleanupCmd = "rm -f '$targetRootfs/tmp/.devbox_pts_$sessionId' '$targetRootfs/home/coder/.devbox_pts_$sessionId' 2>/dev/null"
+                val cleanupCmd = "rm -f '$targetRootfs/tmp/.devbox_pts_$sessionId' '$targetRootfs/tmp/.devbox_pid_$sessionId' '$targetRootfs/tmp/.devbox_ws_$sessionId' '$targetRootfs/home/coder/.devbox_pts_$sessionId' 2>/dev/null"
                 com.arbdev.devbox.data.RootExecutor.executeSync(cleanupCmd, silent = true)
             }
         } catch (_: Exception) {}
