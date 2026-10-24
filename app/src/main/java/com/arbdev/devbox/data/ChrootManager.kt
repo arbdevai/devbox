@@ -66,6 +66,42 @@ object ChrootManager {
         } catch (_: Exception) {}
     }
 
+    fun postBridgeNotification(title: String, message: String) {
+        val ctx = appContext ?: return
+        try {
+            val nm = ctx.getSystemService(Context.NOTIFICATION_SERVICE) as? android.app.NotificationManager ?: return
+            val channelId = "devbox_bridge_alerts"
+            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
+                val channel = android.app.NotificationChannel(
+                    channelId,
+                    "DevBox Agent Notifications",
+                    android.app.NotificationManager.IMPORTANCE_HIGH
+                )
+                nm.createNotificationChannel(channel)
+            }
+            val launchIntent = ctx.packageManager.getLaunchIntentForPackage(ctx.packageName)
+            val pi = if (launchIntent != null) {
+                android.app.PendingIntent.getActivity(
+                    ctx,
+                    0,
+                    launchIntent,
+                    android.app.PendingIntent.FLAG_UPDATE_CURRENT or android.app.PendingIntent.FLAG_IMMUTABLE
+                )
+            } else null
+
+            val notif = androidx.core.app.NotificationCompat.Builder(ctx, channelId)
+                .setSmallIcon(android.R.drawable.stat_notify_chat)
+                .setContentTitle(title.ifBlank { "DevBox Agent" })
+                .setContentText(message)
+                .setStyle(androidx.core.app.NotificationCompat.BigTextStyle().bigText(message))
+                .setPriority(androidx.core.app.NotificationCompat.PRIORITY_HIGH)
+                .setAutoCancel(true)
+                .setContentIntent(pi)
+                .build()
+            nm.notify((System.currentTimeMillis() and 0x7FFFFFFF).toInt(), notif)
+        } catch (_: Exception) {}
+    }
+
     // State cache agar Dashboard dapat langsung ditampilkan instan tanpa buffering saat switch tab
     @Volatile
     var lastKnownState: ChrootState? = null
@@ -199,6 +235,8 @@ echo " [DevBox Browser / Open URL]"
 echo " URL: ${'$'}TARGET"
 echo "=================================================="
 echo ""
+echo "${'$'}TARGET" >> /tmp/.devbox_open_url 2>/dev/null || true
+chmod 666 /tmp/.devbox_open_url 2>/dev/null || true
 echo "${'$'}TARGET" > /tmp/devbox_latest_url 2>/dev/null || true
 if [ -x /system/bin/am ]; then
     /system/bin/am start -a android.intent.action.VIEW -d "${'$'}TARGET" >/dev/null 2>&1 || true
@@ -237,7 +275,8 @@ case "${'$'}CMD" in
         TITLE="${'$'}{1:-DevBox Agent}"
         shift
         MSG="${'$'}*"
-        printf "%s|%s\n" "${'$'}TITLE" "${'$'}MSG" > "${'$'}BRIDGE_DIR/notify.txt" 2>/dev/null || true
+        printf "%s|%s\n" "${'$'}TITLE" "${'$'}MSG" >> "${'$'}BRIDGE_DIR/notify.txt" 2>/dev/null || true
+        chmod 666 "${'$'}BRIDGE_DIR/notify.txt" 2>/dev/null || true
         echo "DevBox Bridge: Notifikasi dikirim: ${'$'}TITLE - ${'$'}MSG"
         ;;
     open|url)
@@ -245,6 +284,8 @@ case "${'$'}CMD" in
         URL="${'$'}1"
         if [ -n "${'$'}URL" ]; then
             printf "%s\n" "${'$'}URL" > "${'$'}BRIDGE_DIR/url.txt" 2>/dev/null || true
+            printf "%s\n" "${'$'}URL" >> /tmp/.devbox_open_url 2>/dev/null || true
+            chmod 666 /tmp/.devbox_open_url 2>/dev/null || true
             /usr/local/bin/xdg-open "${'$'}URL" 2>/dev/null || true
         fi
         ;;
@@ -259,7 +300,7 @@ case "${'$'}CMD" in
         fi
         ;;
     *)
-        echo "DevBox Bridge v1.0.48"
+        echo "DevBox Bridge v1.0.80"
         echo "Usage: devbox-bridge <copy|notify|open|transcript> [args...]"
         ;;
 esac
@@ -464,19 +505,57 @@ BRIDGE_EOF
      * HANYA mematikan proses milik DevBox, tidak akan pernah menyentuh antigravity di Termux!
      * Menggunakan grep -sl O(1) cepat (<30ms) tanpa loop lambat /proc.
      */
-    suspend fun cleanStaleAgyLocks(rootfs: String = activeRootfs): Int = withContext(Dispatchers.IO) {
+    suspend fun cleanStaleAgyLocks(
+        activeSessionIds: List<String> = emptyList(),
+        rootfs: String = activeRootfs
+    ): Int = withContext(Dispatchers.IO) {
+        val activeSidsStr = activeSessionIds.joinToString(" ")
         val script = """
             count=0
-            pids=${'$'}(grep -sl "DEVBOX" /proc/[0-9]*/environ 2>/dev/null | tr -d -c '0-9\n')
+            active_sids="$activeSidsStr"
+            pids=${'$'}(grep -sl "DEVBOX" /proc/[0-9]*/environ 2>/dev/null | cut -d/ -f3)
+
+            # Cari sesi yang saat ini masih memiliki foreground TUI agy (PPID > 1)
+            fg_sids=""
             for pid in ${'$'}pids; do
-                if [ -d "/proc/${'$'}pid" ]; then
-                    comm=${'$'}(cat "/proc/${'$'}pid/comm" 2>/dev/null || true)
-                    cmdline=${'$'}(cat "/proc/${'$'}pid/cmdline" 2>/dev/null || true)
-                    if [ "${'$'}comm" = "antigravity" ] || [ "${'$'}{cmdline#*antigravity}" != "${'$'}cmdline" ]; then
-                        kill -9 "${'$'}pid" 2>/dev/null && count=${'$'}((count + 1))
+                [ -d "/proc/${'$'}pid" ] || continue
+                comm=${'$'}(cat "/proc/${'$'}pid/comm" 2>/dev/null || true)
+                if [ "${'$'}comm" = "agy" ] || [ "${'$'}comm" = "antigravity" ]; then
+                    ppid=${'$'}(awk '/^PPid:/{print ${'$'}2}' "/proc/${'$'}pid/status" 2>/dev/null || echo 0)
+                    if [ "${'$'}ppid" -gt 1 ] 2>/dev/null; then
+                        sid=${'$'}(grep -s -a -z '^DEVBOX_SESSION_ID=' "/proc/${'$'}pid/environ" 2>/dev/null | tr -d '\0' | cut -d= -f2)
+                        [ -n "${'$'}sid" ] && fg_sids="${'$'}fg_sids ${'$'}sid"
                     fi
                 fi
             done
+
+            for pid in ${'$'}pids; do
+                if [ -d "/proc/${'$'}pid" ]; then
+                    comm=${'$'}(cat "/proc/${'$'}pid/comm" 2>/dev/null || true)
+                    cmdline=${'$'}(tr '\0' ' ' < "/proc/${'$'}pid/cmdline" 2>/dev/null || true)
+                    if [ "${'$'}comm" = "agy" ] || [ "${'$'}comm" = "antigravity" ] || [ "${'$'}{cmdline#*antigravity}" != "${'$'}cmdline" ]; then
+                        sid=${'$'}(grep -s -a -z '^DEVBOX_SESSION_ID=' "/proc/${'$'}pid/environ" 2>/dev/null | tr -d '\0' | cut -d= -f2)
+                        ppid=${'$'}(awk '/^PPid:/{print ${'$'}2}' "/proc/${'$'}pid/status" 2>/dev/null || echo 0)
+                        should_kill=1
+                        if [ -n "${'$'}active_sids" ] && [ -n "${'$'}sid" ]; then
+                            case " ${'$'}active_sids " in
+                                *" ${'$'}sid "*)
+                                    # Jika sesi masih aktif DAN memiliki foreground agy TUI, jangan matikan kecuali user reset paksa tanpa activeSessionIds
+                                    case " ${'$'}fg_sids " in
+                                        *" ${'$'}sid "*) should_kill=0 ;;
+                                    esac
+                                    ;;
+                            esac
+                        fi
+                        if [ "${'$'}should_kill" -eq 1 ]; then
+                            kill -9 "${'$'}pid" 2>/dev/null && count=${'$'}((count + 1))
+                        fi
+                    fi
+                fi
+            done
+            if [ -z "${'$'}active_sids" ]; then
+                rm -f '$rootfs'/tmp/.devbox_active_agent* 2>/dev/null || true
+            fi
             echo "${'$'}count"
         """.trimIndent()
         val res = RootExecutor.execute(script)
@@ -489,8 +568,9 @@ BRIDGE_EOF
 
     /**
      * Memindai proses di dalam chroot yang tergolong orphan / sesi usang.
-     * Suatu proses dianggap orphan jika root-nya adalah chroot dan DEVBOX_SESSION_ID-nya
-     * tidak terdapat di dalam daftar activeSessionIds saat ini.
+     * Suatu proses dianggap orphan jika root-nya adalah chroot dan:
+     * 1) DEVBOX_SESSION_ID-nya tidak terdapat di dalam daftar activeSessionIds saat ini, ATAU
+     * 2) Merupakan daemon agy yatim (PPID=1) pada sesi aktif yang sudah keluar dari TUI agy.
      */
     suspend fun getOrphanChrootProcesses(
         activeSessionIds: List<String>,
@@ -510,6 +590,22 @@ BRIDGE_EOF
                 done
             done
 
+            # Deteksi sesi mana saja yang masih menjalankan foreground agy (PPID > 1)
+            fg_agy_sids=""
+            for p in /proc/[0-9]*; do
+              [ -d "${'$'}p" ] || continue
+              if [ "$(readlink ${'$'}p/root 2>/dev/null)" = '$rootfs' ]; then
+                comm=${'$'}(cat ${'$'}p/comm 2>/dev/null)
+                if [ "${'$'}comm" = "agy" ] || [ "${'$'}comm" = "antigravity" ]; then
+                  ppid=${'$'}(awk '/^PPid:/{print ${'$'}2}' ${'$'}p/status 2>/dev/null || echo 0)
+                  if [ "${'$'}ppid" -gt 1 ] 2>/dev/null; then
+                    sid=${'$'}(grep -s -a -z '^DEVBOX_SESSION_ID=' ${'$'}p/environ 2>/dev/null | tr -d '\0' | cut -d= -f2)
+                    [ -n "${'$'}sid" ] && fg_agy_sids="${'$'}fg_agy_sids ${'$'}sid"
+                  fi
+                fi
+              fi
+            done
+
             for p in /proc/[0-9]*; do
               [ -d "${'$'}p" ] || continue
               if [ "$(readlink ${'$'}p/root 2>/dev/null)" = '$rootfs' ]; then
@@ -523,7 +619,12 @@ BRIDGE_EOF
                 comm=${'$'}(cat ${'$'}p/comm 2>/dev/null)
                 sid=${'$'}(grep -s -a -z '^DEVBOX_SESSION_ID=' ${'$'}p/environ 2>/dev/null | tr -d '\0' | cut -d= -f2)
                 rss=${'$'}(awk '/VmRSS/{print ${'$'}2}' ${'$'}p/status 2>/dev/null || echo 0)
-                echo "${'$'}pid|${'$'}comm|${'$'}sid|${'$'}rss"
+                ppid=${'$'}(awk '/^PPid:/{print ${'$'}2}' ${'$'}p/status 2>/dev/null || echo 0)
+                has_fg=0
+                case " ${'$'}fg_agy_sids " in
+                    *" ${'$'}sid "*) has_fg=1 ;;
+                esac
+                echo "${'$'}pid|${'$'}comm|${'$'}sid|${'$'}rss|${'$'}ppid|${'$'}has_fg"
               fi
             done
         """.trimIndent()
@@ -539,6 +640,8 @@ BRIDGE_EOF
                 val comm = parts[1].trim()
                 val rawSid = parts[2].trim()
                 val rssKb = parts[3].toLongOrNull() ?: 0L
+                val ppid = parts.getOrNull(4)?.trim()?.toIntOrNull() ?: 0
+                val hasFgAgy = parts.getOrNull(5)?.trim() == "1"
 
                 // Proteksi 2: Jika sid berisi "Binary file" atau error string, jangan anggap orphan
                 if (rawSid.contains("Binary file") || rawSid.contains("matches")) {
@@ -546,10 +649,12 @@ BRIDGE_EOF
                 }
 
                 val sid = rawSid.takeIf { it.isNotEmpty() }
-                // Sesi usang HANYA jika proses ini pernah dibuat oleh DevBox (ada sid), tapi sesinya sudah mati/crash
-                // Jangan anggap proses tanpa sid sebagai orphan, karena bisa merupakan proses eksternal Termux!
-                if (sid != null && !activeSessionIds.contains(sid)) {
-                    orphans.add(ChrootProcessInfo(pid, comm, sid, rssKb))
+                if (sid != null) {
+                    val isDeadSession = !activeSessionIds.contains(sid)
+                    val isDetachedAgyDaemon = (comm == "agy" || comm == "antigravity") && ppid <= 1 && !hasFgAgy
+                    if (isDeadSession || isDetachedAgyDaemon) {
+                        orphans.add(ChrootProcessInfo(pid, comm, sid, rssKb))
+                    }
                 }
             }
         }
@@ -625,10 +730,19 @@ BRIDGE_EOF
             mkdir -p '$targetRootfs'
             cd '$sourceChroot' || exit 1
             echo "Membersihkan direktori target..."
-            rm -rf '$targetRootfs/bin' '$targetRootfs/boot' '$targetRootfs/etc' '$targetRootfs/lib' '$targetRootfs/opt' '$targetRootfs/root' '$targetRootfs/sbin' '$targetRootfs/srv' '$targetRootfs/usr' '$targetRootfs/var'
+            rm -rf '$targetRootfs/bin' '$targetRootfs/boot' '$targetRootfs/etc' '$targetRootfs/lib' '$targetRootfs/lib64' '$targetRootfs/opt' '$targetRootfs/root' '$targetRootfs/sbin' '$targetRootfs/srv' '$targetRootfs/usr' '$targetRootfs/var'
             echo "Menyalin direktori sistem Ubuntu... (ini membutuhkan waktu sekitar 15-20 detik)"
             cp -a bin boot etc lib opt root sbin srv usr var '$targetRootfs/' 2>/dev/null || true
+            [ -e lib64 ] && cp -a lib64 '$targetRootfs/' 2>/dev/null || true
             mkdir -p '$targetRootfs/home/coder' '$targetRootfs/dev' '$targetRootfs/dev/pts' '$targetRootfs/proc' '$targetRootfs/sys' '$targetRootfs/mnt/sdcard' '$targetRootfs/tmp'
+            # Salin tool & konfigurasi CLI penting dari home/coder sumber jika ada
+            for item in .local .gemini .config .cargo .nvm .npm-global; do
+                if [ -e '$sourceChroot/home/coder/'"${'$'}item" ]; then
+                    cp -a '$sourceChroot/home/coder/'"${'$'}item" '$targetRootfs/home/coder/' 2>/dev/null || true
+                elif [ -e '$sourceChroot/root/'"${'$'}item" ]; then
+                    cp -a '$sourceChroot/root/'"${'$'}item" '$targetRootfs/home/coder/' 2>/dev/null || true
+                fi
+            done
             chmod 1777 '$targetRootfs/tmp' 2>/dev/null || true
             chown -R 1000:1000 '$targetRootfs/home/coder' 2>/dev/null || true
             grep -qE '^127\.0\.0\.1[[:space:]]+localhost' '$targetRootfs/etc/hosts' 2>/dev/null || echo '127.0.0.1 localhost' >> '$targetRootfs/etc/hosts' 2>/dev/null || true
@@ -860,7 +974,7 @@ exec "${'$'}@"
 SUDO_EOF
             chmod 755 "${'$'}rf/usr/local/bin/sudo" 2>/dev/null || true
 
-            # 7. Wrapper xdg-open di /usr/local/bin/xdg-open (Membuka URL di browser Android secara otomatis)
+            # 7. Wrapper xdg-open & devbox-bridge di /usr/local/bin
             cat << 'XDG_EOF' > "${'$'}rf/usr/local/bin/xdg-open"
 #!/bin/bash
 target="${'$'}1"
@@ -868,17 +982,78 @@ if [ -z "${'$'}target" ]; then
     echo "Usage: xdg-open <url>"
     exit 1
 fi
-echo "${'$'}target" >> /tmp/.devbox_open_url
+echo "${'$'}target" >> /tmp/.devbox_open_url 2>/dev/null || true
 chmod 666 /tmp/.devbox_open_url 2>/dev/null || true
+echo "${'$'}target" > /tmp/devbox_latest_url 2>/dev/null || true
 if [ -x /system/bin/am ]; then
     /system/bin/am start -a android.intent.action.VIEW -d "${'$'}target" >/dev/null 2>&1
 fi
 exit 0
 XDG_EOF
             chmod 755 "${'$'}rf/usr/local/bin/xdg-open" 2>/dev/null || true
+            ln -sf /usr/local/bin/xdg-open "${'$'}rf/usr/bin/xdg-open" 2>/dev/null || true
             ln -sf /usr/local/bin/xdg-open "${'$'}rf/usr/local/bin/x-www-browser" 2>/dev/null || true
             ln -sf /usr/local/bin/xdg-open "${'$'}rf/usr/local/bin/www-browser" 2>/dev/null || true
             ln -sf /usr/local/bin/xdg-open "${'$'}rf/usr/local/bin/wslview" 2>/dev/null || true
+
+            mkdir -p "${'$'}rf/tmp/devbox-bridge" 2>/dev/null || true
+            chmod 777 "${'$'}rf/tmp/devbox-bridge" 2>/dev/null || true
+            cat << 'BRIDGE_EOF' > "${'$'}rf/usr/local/bin/devbox-bridge"
+#!/bin/sh
+BRIDGE_DIR="/tmp/devbox-bridge"
+mkdir -p "${'$'}BRIDGE_DIR" 2>/dev/null || true
+chmod 777 "${'$'}BRIDGE_DIR" 2>/dev/null || true
+
+CMD="${'$'}1"
+case "${'$'}CMD" in
+    copy|clip)
+        shift
+        TEXT="${'$'}*"
+        if [ -z "${'$'}TEXT" ]; then
+            TEXT=${'$'}(cat)
+        fi
+        printf "%s" "${'$'}TEXT" > "${'$'}BRIDGE_DIR/clipboard.txt" 2>/dev/null || true
+        printf "\033]52;c;%s\a" "${'$'}(printf "%s" "${'$'}TEXT" | base64 | tr -d '\r\n')" 2>/dev/null || true
+        echo "DevBox Bridge: Teks disalin ke clipboard."
+        ;;
+    notify)
+        shift
+        TITLE="${'$'}{1:-DevBox Agent}"
+        shift
+        MSG="${'$'}*"
+        printf "%s|%s\n" "${'$'}TITLE" "${'$'}MSG" >> "${'$'}BRIDGE_DIR/notify.txt" 2>/dev/null || true
+        chmod 666 "${'$'}BRIDGE_DIR/notify.txt" 2>/dev/null || true
+        echo "DevBox Bridge: Notifikasi dikirim: ${'$'}TITLE - ${'$'}MSG"
+        ;;
+    open|url)
+        shift
+        URL="${'$'}1"
+        if [ -n "${'$'}URL" ]; then
+            printf "%s\n" "${'$'}URL" > "${'$'}BRIDGE_DIR/url.txt" 2>/dev/null || true
+            printf "%s\n" "${'$'}URL" >> /tmp/.devbox_open_url 2>/dev/null || true
+            chmod 666 /tmp/.devbox_open_url 2>/dev/null || true
+            /usr/local/bin/xdg-open "${'$'}URL" 2>/dev/null || true
+        fi
+        ;;
+    transcript|last-agent)
+        BRAIN_DIR="${'$'}HOME/.gemini/antigravity-cli/brain"
+        [ -d "${'$'}BRAIN_DIR" ] || BRAIN_DIR="/home/coder/.gemini/antigravity-cli/brain"
+        LATEST_LOG=${'$'}(find "${'$'}BRAIN_DIR" -name "transcript.jsonl" -type f 2>/dev/null | xargs ls -t 2>/dev/null | head -n1)
+        if [ -f "${'$'}LATEST_LOG" ]; then
+            grep '"type":"PLANNER_RESPONSE"' "${'$'}LATEST_LOG" | tail -n1
+        else
+            echo "Belum ada riwayat Antigravity CLI."
+        fi
+        ;;
+    *)
+        echo "DevBox Bridge v1.0.80"
+        echo "Usage: devbox-bridge <copy|notify|open|transcript> [args...]"
+        ;;
+esac
+BRIDGE_EOF
+            chmod 755 "${'$'}rf/usr/local/bin/devbox-bridge" 2>/dev/null || true
+            ln -sf /usr/local/bin/devbox-bridge "${'$'}rf/usr/bin/devbox-bridge" 2>/dev/null || true
+            ln -sf /usr/local/bin/devbox-bridge "${'$'}rf/usr/local/bin/devbox-clip" 2>/dev/null || true
 
             # 8. Shortcut direktori storage Android (/sdcard)
             mkdir -p "${'$'}rf/home/coder/storage" 2>/dev/null || true
@@ -905,11 +1080,11 @@ XDG_EOF
             fi
 
             # 6. Konfigurasi .bashrc modern DevBox
-            # Hanya buat jika belum ada, atau jika masih memakai template lama / template v1 yang ada bug \[\]
-            if [ ! -f "${'$'}rf/home/coder/.bashrc" ] || grep -q 'DevBox Bash Configuration' "${'$'}rf/home/coder/.bashrc" 2>/dev/null || ( grep -q 'DEVBOX | Custom Bash Environment' "${'$'}rf/home/coder/.bashrc" 2>/dev/null && ! grep -q 'Environment v2' "${'$'}rf/home/coder/.bashrc" 2>/dev/null ); then
+            # Hanya buat jika belum ada, atau jika masih memakai template lama / template v1-v2
+            if [ ! -f "${'$'}rf/home/coder/.bashrc" ] || grep -q 'DevBox Bash Configuration' "${'$'}rf/home/coder/.bashrc" 2>/dev/null || ( grep -q 'DEVBOX | Custom Bash Environment' "${'$'}rf/home/coder/.bashrc" 2>/dev/null && ! grep -q 'Environment v3' "${'$'}rf/home/coder/.bashrc" 2>/dev/null ); then
                 cat << 'BASHRC_EOF' > "${'$'}rf/home/coder/.bashrc"
 # ============================================================
-# DEVBOX | Custom Bash Environment v2
+# DEVBOX | Custom Bash Environment v3
 # Ubuntu 24.04 LTS ARM64
 # ============================================================
 
@@ -988,17 +1163,66 @@ alias projects='cd ~/projects'
 alias storage='cd ~/storage'
 alias downloads='cd ~/storage/downloads'
 
+# Anti-Orphan Daemon Wrapper for Antigravity CLI (agy) & Claude CLI
+agy() {
+    if [[ -n "${'$'}{DEVBOX_SESSION_ID:-}" ]]; then
+        printf 'agy' > "/tmp/.devbox_active_agent_${'$'}{DEVBOX_SESSION_ID}" 2>/dev/null || true
+        printf 'agy' > "/tmp/.devbox_active_agent" 2>/dev/null || true
+    fi
+    command agy "${'$'}@"
+    local ret=${'$'}?
+    if [[ -n "${'$'}{DEVBOX_SESSION_ID:-}" ]]; then
+        rm -f "/tmp/.devbox_active_agent_${'$'}{DEVBOX_SESSION_ID}" "/tmp/.devbox_active_agent" 2>/dev/null || true
+        for p in /proc/[0-9]*; do
+            [[ -d "${'$'}p" ]] || continue
+            if [[ "${'$'}(cat "${'$'}p/comm" 2>/dev/null)" == "agy" ]]; then
+                if grep -s -a -q "DEVBOX_SESSION_ID=${'$'}{DEVBOX_SESSION_ID}" "${'$'}p/environ" 2>/dev/null; then
+                    kill -9 "${'$'}{p##*/}" 2>/dev/null || true
+                fi
+            fi
+        done
+    fi
+    return ${'$'}ret
+}
+
+claude() {
+    if [[ -n "${'$'}{DEVBOX_SESSION_ID:-}" ]]; then
+        printf 'claude' > "/tmp/.devbox_active_agent_${'$'}{DEVBOX_SESSION_ID}" 2>/dev/null || true
+        printf 'claude' > "/tmp/.devbox_active_agent" 2>/dev/null || true
+    fi
+    command claude "${'$'}@"
+    local ret=${'$'}?
+    if [[ -n "${'$'}{DEVBOX_SESSION_ID:-}" ]]; then
+        rm -f "/tmp/.devbox_active_agent_${'$'}{DEVBOX_SESSION_ID}" "/tmp/.devbox_active_agent" 2>/dev/null || true
+    fi
+    return ${'$'}ret
+}
+
 # Git branch
 parse_git_branch() {
     git symbolic-ref --quiet --short HEAD 2>/dev/null |
         sed 's/^/ /'
 }
 
-# Powerline prompt
+# Powerline prompt + CWD & Orphan Sync
 devbox_prompt() {
     local exit_code=${'$'}?
     local branch=''
     local status_color
+
+    if [[ -n "${'$'}{DEVBOX_SESSION_ID:-}" ]]; then
+        printf '%s' "${'$'}PWD" > "/tmp/.devbox_cwd_${'$'}{DEVBOX_SESSION_ID}" 2>/dev/null || true
+        if [[ -f "/tmp/.devbox_active_agent_${'$'}{DEVBOX_SESSION_ID}" ]]; then
+            rm -f "/tmp/.devbox_active_agent_${'$'}{DEVBOX_SESSION_ID}" "/tmp/.devbox_active_agent" 2>/dev/null || true
+            for p in /proc/[0-9]*; do
+                [[ -d "${'$'}p" ]] || continue
+                if [[ "${'$'}(cat "${'$'}p/comm" 2>/dev/null)" == "agy" ]] && grep -s -a -q "DEVBOX_SESSION_ID=${'$'}{DEVBOX_SESSION_ID}" "${'$'}p/environ" 2>/dev/null; then
+                    kill -9 "${'$'}{p##*/}" 2>/dev/null || true
+                fi
+            done
+        fi
+    fi
+    printf '\033]0;coder@devbox:%s\007' "${'$'}PWD"
 
     if [[ ${'$'}exit_code -eq 0 ]]; then
         status_color='\[\033[38;5;114m\]'

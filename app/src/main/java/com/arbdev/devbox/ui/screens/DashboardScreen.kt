@@ -75,8 +75,8 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -158,12 +158,19 @@ fun DashboardScreen(
     var installSuccess by remember { mutableStateOf(false) }
 
     // In-App Updater State
-    val updateStatus by UpdateManager.updateStatus.collectAsState()
+    val updateStatus by UpdateManager.updateStatus.collectAsStateWithLifecycle()
 
     fun refreshState() {
         scope.launch {
             isRefreshing = true
             state = ChrootManager.getChrootState()
+            if (state.isRootGranted && state.isRootfsExists) {
+                val activeIds = TerminalSessionManager.sessions.map { it.id }
+                val activePids = TerminalSessionManager.sessions.mapNotNull { it.getProcessPid() }
+                orphanProcesses = ChrootManager.getOrphanChrootProcesses(activeIds, activePids)
+            } else {
+                orphanProcesses = emptyList()
+            }
             isInitialLoading = false
             wakeLockActive = KeepAliveService.isRunning
             isRefreshing = false

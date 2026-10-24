@@ -290,27 +290,25 @@ fun TerminalScreen(
         }
     }
 
-    // Helper navigasi tombol panah dinamis (menghormati DECCKM dan sesi aktif)
-    val sendArrowUp = {
+    // Helper navigasi tombol panah dinamis (menghormati DECCKM, modifier Shift/Alt/Ctrl, dan sesi aktif)
+    val sendArrowWithModifiers: (Char) -> Unit = { dirChar ->
         val s = TerminalSessionManager.getActiveSession()
-        if (s.buffer.isApplicationCursorKeys) s.sendText("\u001BOA")
-        else s.sendText("\u001B[A")
+        val modMask = (if (isShiftActive) 1 else 0) + (if (isAltActive) 2 else 0) + (if (isCtrlActive) 4 else 0)
+        if (modMask > 0) {
+            val modCode = 1 + modMask
+            s.sendText("\u001B[1;${modCode}$dirChar")
+            isShiftActive = false
+            isAltActive = false
+            isCtrlActive = false
+        } else {
+            if (s.buffer.isApplicationCursorKeys) s.sendText("\u001BO$dirChar")
+            else s.sendText("\u001B[$dirChar")
+        }
     }
-    val sendArrowDown = {
-        val s = TerminalSessionManager.getActiveSession()
-        if (s.buffer.isApplicationCursorKeys) s.sendText("\u001BOB")
-        else s.sendText("\u001B[B")
-    }
-    val sendArrowRight = {
-        val s = TerminalSessionManager.getActiveSession()
-        if (s.buffer.isApplicationCursorKeys) s.sendText("\u001BOC")
-        else s.sendText("\u001B[C")
-    }
-    val sendArrowLeft = {
-        val s = TerminalSessionManager.getActiveSession()
-        if (s.buffer.isApplicationCursorKeys) s.sendText("\u001BOD")
-        else s.sendText("\u001B[D")
-    }
+    val sendArrowUp = { sendArrowWithModifiers('A') }
+    val sendArrowDown = { sendArrowWithModifiers('B') }
+    val sendArrowRight = { sendArrowWithModifiers('C') }
+    val sendArrowLeft = { sendArrowWithModifiers('D') }
 
     LaunchedEffect(Unit) {
         KeepAliveService.startService(context)
@@ -856,6 +854,10 @@ fun TerminalScreen(
                         val targetSession = TerminalSessionManager.getActiveSession()
                         if (isCtrlActive) {
                             val bytes = mutableListOf<Byte>()
+                            if (isAltActive) {
+                                bytes.add(27.toByte())
+                                isAltActive = false
+                            }
                             for (ch in text) {
                                 val code = when (ch.lowercaseChar()) {
                                     'c' -> 3
@@ -874,17 +876,39 @@ fun TerminalScreen(
                             }
                             targetSession.sendBytes(bytes.toByteArray())
                             isCtrlActive = false
+                            isShiftActive = false
                         } else if (text == "\r" || text == "\n" || text == "\r\n") {
-                            targetSession.sendText("\r")
+                            if (isAltActive) {
+                                targetSession.sendText("\u001B\r")
+                                isAltActive = false
+                            } else {
+                                targetSession.sendText("\r")
+                            }
+                            isShiftActive = false
                         } else if (text.length > 1 && (text.contains('\n') || text.contains('\r'))) {
                             targetSession.pasteText(text)
                         } else {
-                            targetSession.sendText(text)
+                            var processed = if (isShiftActive) {
+                                isShiftActive = false
+                                text.uppercase()
+                            } else {
+                                text
+                            }
+                            if (isAltActive) {
+                                isAltActive = false
+                                processed = "\u001B$processed"
+                            }
+                            targetSession.sendText(processed)
                         }
                     }
                     onBackspace = {
                         autoScrollEnabled = true
-                        TerminalSessionManager.getActiveSession().sendBytes(byteArrayOf(127))
+                        if (isAltActive) {
+                            isAltActive = false
+                            TerminalSessionManager.getActiveSession().sendBytes(byteArrayOf(27, 127))
+                        } else {
+                            TerminalSessionManager.getActiveSession().sendBytes(byteArrayOf(127))
+                        }
                     }
                     onSendKey = { keyCode ->
                         val targetSession = TerminalSessionManager.getActiveSession()
@@ -2299,7 +2323,7 @@ fun TerminalCanvas(
 
         // 1. Menu Kontekstual Seleksi Teks (In-Tree Overlay Surface)
         if (hasSelection && selMin != null && selMax != null && showSelectionMenu && !isDraggingHandle) {
-            val scrollX = 0f
+            val scrollX = horizontalScrollState.value.toFloat()
             val scrollY = if (!isAltBuffer) verticalScrollState.value else 0
 
             val topTextScreenY = selMin.line * charHeight - scrollY
@@ -2436,7 +2460,7 @@ fun TerminalCanvas(
         // 2. Menu Kontekstual Tempel (In-Tree Overlay Surface)
         val pastePos = pasteMenuOffset
         if (pastePos != null && selectionStart == null) {
-            val scrollX = 0f
+            val scrollX = horizontalScrollState.value.toFloat()
             val scrollY = if (!isAltBuffer) verticalScrollState.value else 0
             val screenX = pastePos.x - scrollX
             val screenY = pastePos.y - scrollY

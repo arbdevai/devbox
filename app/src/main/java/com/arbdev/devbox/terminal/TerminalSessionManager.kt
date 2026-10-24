@@ -53,6 +53,14 @@ class NativeTerminalSession(
         buffer.onTitleChanged = { title ->
             mainHandler.post {
                 currentTitle = title
+                if (title.contains(":")) {
+                    val rawPath = title.substringAfter(":").trim()
+                    when {
+                        rawPath == "~" -> currentDir = "/home/coder"
+                        rawPath.startsWith("~/") -> currentDir = "/home/coder/" + rawPath.removePrefix("~/")
+                        rawPath.startsWith("/") -> currentDir = rawPath
+                    }
+                }
                 if (!isCustomName && title.isNotBlank()) {
                     name = cleanSessionTitle(title)
                 }
@@ -148,16 +156,33 @@ class NativeTerminalSession(
                     kotlinx.coroutines.delay(2000)
                     cycle++
 
-                    // 1. Cek permintaan buka URL dari CLI (xdg-open / browser link)
+                    // 1. Cek permintaan buka URL & notifikasi dari CLI (xdg-open / devbox-bridge)
                     try {
-                        val triggerFile = File("$targetRootfs/tmp/.devbox_open_url")
-                        if (triggerFile.exists()) {
-                            val lines = triggerFile.readLines()
-                            triggerFile.delete()
-                            for (u in lines) {
-                                if (u.isNotBlank()) {
+                        for (path in listOf("$targetRootfs/tmp/.devbox_open_url", "$targetRootfs/tmp/devbox-bridge/url.txt")) {
+                            val triggerFile = File(path)
+                            if (triggerFile.exists()) {
+                                val lines = triggerFile.readLines()
+                                triggerFile.delete()
+                                for (u in lines) {
+                                    if (u.isNotBlank()) {
+                                        mainHandler.post {
+                                            ChrootManager.openUrlInAndroidBrowser(u.trim())
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        val notifyFile = File("$targetRootfs/tmp/devbox-bridge/notify.txt")
+                        if (notifyFile.exists()) {
+                            val lines = notifyFile.readLines()
+                            notifyFile.delete()
+                            for (line in lines) {
+                                if (line.isNotBlank()) {
+                                    val title = line.substringBefore("|", "DevBox Agent").trim()
+                                    val msg = line.substringAfter("|", line).trim()
                                     mainHandler.post {
-                                        ChrootManager.openUrlInAndroidBrowser(u.trim())
+                                        ChrootManager.postBridgeNotification(title, msg)
                                     }
                                 }
                             }
@@ -184,10 +209,25 @@ class NativeTerminalSession(
                         } catch (_: Exception) {}
                     }
 
-                    // 3. Cek nama proses / agent aktif secara pasif via trigger file tanpa memanggil su berkala
+                    // 3. Cek working directory (CWD) & nama agent aktif per sesi secara pasif via trigger file tanpa memanggil su berkala
                     try {
-                        val agentFile = File("$targetRootfs/tmp/.devbox_active_agent")
-                        val detected = if (agentFile.exists()) agentFile.readText().trim() else ""
+                        val cwdFile = File("$targetRootfs/tmp/.devbox_cwd_$sessionId")
+                        if (cwdFile.exists()) {
+                            val cwd = cwdFile.readText().trim()
+                            if (cwd.isNotBlank()) {
+                                mainHandler.post {
+                                    currentDir = cwd
+                                }
+                            }
+                        }
+
+                        val sessionAgentFile = File("$targetRootfs/tmp/.devbox_active_agent_$sessionId")
+                        val globalAgentFile = File("$targetRootfs/tmp/.devbox_active_agent")
+                        val detected = when {
+                            sessionAgentFile.exists() -> sessionAgentFile.readText().trim()
+                            globalAgentFile.exists() -> globalAgentFile.readText().trim()
+                            else -> ""
+                        }
                         mainHandler.post {
                             if (detected.isNotBlank()) {
                                 activeAgentName = detected
@@ -433,7 +473,7 @@ class NativeTerminalSession(
             process?.destroy()
             cachedPtsDev = null
             sessionScope.launch(Dispatchers.IO) {
-                val cleanupCmd = "rm -f '$targetRootfs/tmp/.devbox_pts_$sessionId' '$targetRootfs/tmp/.devbox_pid_$sessionId' '$targetRootfs/tmp/.devbox_ws_$sessionId' '$targetRootfs/home/coder/.devbox_pts_$sessionId' 2>/dev/null"
+                val cleanupCmd = "rm -f '$targetRootfs/tmp/.devbox_pts_$sessionId' '$targetRootfs/tmp/.devbox_pid_$sessionId' '$targetRootfs/tmp/.devbox_ws_$sessionId' '$targetRootfs/tmp/.devbox_cwd_$sessionId' '$targetRootfs/tmp/.devbox_active_agent_$sessionId' '$targetRootfs/home/coder/.devbox_pts_$sessionId' 2>/dev/null"
                 com.arbdev.devbox.data.RootExecutor.executeSync(cleanupCmd, silent = true)
             }
         } catch (_: Exception) {}

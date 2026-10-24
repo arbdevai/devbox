@@ -66,6 +66,7 @@ fun WebIdeScreen() {
     var loadProgress by remember { mutableFloatStateOf(0f) }
     var hasError by remember { mutableStateOf(false) }
     var isFullscreen by remember { mutableStateOf(false) }
+    var isStartingServer by remember { mutableStateOf(false) }
 
     Column(
         modifier = Modifier
@@ -258,17 +259,33 @@ fun WebIdeScreen() {
                             Button(
                                 onClick = {
                                     scope.launch {
+                                        isStartingServer = true
                                         ChrootManager.toggleCodeServer(true)
+                                        // Tunggu hingga port 8080 (:1F90) benar-benar listening (maks 3 detik) sebelum reload
+                                        for (attempt in 1..6) {
+                                            kotlinx.coroutines.delay(500)
+                                            val listening = try {
+                                                java.io.File("/proc/net/tcp").takeIf { it.exists() }
+                                                    ?.readLines()
+                                                    ?.any { it.contains(":1F90 ") && it.contains(" 0A ") } == true
+                                            } catch (_: Exception) { false }
+                                            if (listening) break
+                                        }
+                                        isStartingServer = false
                                         hasError = false
                                         webViewRef?.reload()
                                     }
                                 },
+                                enabled = !isStartingServer,
                                 shape = RoundedCornerShape(8.dp),
                                 colors = ButtonDefaults.buttonColors(containerColor = DevPrimary)
                             ) {
                                 Icon(Icons.Default.PlayArrow, contentDescription = null, tint = Color.Black)
                                 Spacer(modifier = Modifier.width(6.dp))
-                                Text("Nyalakan Code-Server", color = Color.Black)
+                                Text(
+                                    if (isStartingServer) "Menyalakan Code-Server..." else "Nyalakan Code-Server",
+                                    color = Color.Black
+                                )
                             }
                         }
                     }

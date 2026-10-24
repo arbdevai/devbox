@@ -3,8 +3,6 @@ package com.arbdev.devbox.data
 import com.arbdev.devbox.util.AppLogger
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
-import java.io.BufferedReader
-import java.io.BufferedWriter
 
 data class CommandResult(
     val exitCode: Int,
@@ -21,50 +19,6 @@ object RootExecutor {
 
     @Volatile
     private var cachedRootAvailable: Boolean? = null
-
-    // Persistent interactive root shell: hanya menjalankan 'su' 1 KALI saja sepanjang aplikasi hidup
-    // Mencegah Magisk memunculkan pop-up izin berulang kali / looping
-    private var sharedShell: Process? = null
-    private var shellWriter: BufferedWriter? = null
-    private var shellReader: BufferedReader? = null
-    private val shellLock = Any()
-
-    private fun getOrCreateShell(): Boolean {
-        synchronized(shellLock) {
-            val p = sharedShell
-            if (p != null) {
-                try {
-                    p.exitValue()
-                    destroyShell()
-                } catch (_: IllegalThreadStateException) {
-                    return true
-                }
-            }
-            return try {
-                val newProc = ProcessBuilder("su")
-                    .redirectErrorStream(true)
-                    .start()
-                sharedShell = newProc
-                shellWriter = newProc.outputStream.bufferedWriter()
-                shellReader = newProc.inputStream.bufferedReader()
-                true
-            } catch (e: Exception) {
-                destroyShell()
-                false
-            }
-        }
-    }
-
-    private fun destroyShell() {
-        synchronized(shellLock) {
-            try { shellWriter?.close() } catch (_: Exception) {}
-            try { shellReader?.close() } catch (_: Exception) {}
-            try { sharedShell?.destroy() } catch (_: Exception) {}
-            shellWriter = null
-            shellReader = null
-            sharedShell = null
-        }
-    }
 
     suspend fun isRootAvailable(forceCheck: Boolean = false): Boolean = withContext(Dispatchers.IO) {
         if (!forceCheck && cachedRootAvailable == true) {
