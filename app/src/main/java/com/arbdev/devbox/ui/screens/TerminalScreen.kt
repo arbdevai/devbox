@@ -327,14 +327,8 @@ fun TerminalScreen(
         activeSession.buffer.version.intValue,
         activeSession.buffer.isAltBuffer
     ) {
-        if (activeSession.buffer.isAltBuffer) {
-            if (verticalScrollState.value != 0) {
-                verticalScrollState.scrollTo(0)
-            }
-        } else {
-            if (autoScrollEnabled && verticalScrollState.maxValue > 0) {
-                verticalScrollState.scrollTo(verticalScrollState.maxValue)
-            }
+        if (autoScrollEnabled && verticalScrollState.maxValue > 0) {
+            verticalScrollState.scrollTo(verticalScrollState.maxValue)
         }
     }
 
@@ -1019,7 +1013,7 @@ fun TerminalScreen(
                     val vPaddingPx = 4.dp.toPx() // 2.dp vertical margin di setiap sisi
                     if (charWidthPx > 0 && charHeightPx > 0) {
                         val cols = ((maxWidth.toPx() - hPaddingPx).coerceAtLeast(1f) / charWidthPx).toInt().coerceIn(20, 300)
-                        val rows = ((maxHeight.toPx() - vPaddingPx).coerceAtLeast(1f) / charHeightPx).toInt().coerceIn(4, 200)
+                        val rows = ((maxHeight.toPx() - vPaddingPx).coerceAtLeast(1f) / charHeightPx).toInt().coerceIn(18, 200)
                         activeSession.updateWindowSize(cols, rows, isImmediate = !isFontZoom)
                     }
                 }
@@ -2021,12 +2015,13 @@ fun TerminalCanvas(
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .then(
-                    if (!isAltBuffer) Modifier.verticalScroll(
-                        verticalScrollState,
-                        enabled = !isDraggingHandle
-                    )
-                    else Modifier
+                .verticalScroll(
+                    verticalScrollState,
+                    enabled = !isDraggingHandle
+                )
+                .horizontalScroll(
+                    horizontalScrollState,
+                    enabled = !isDraggingHandle
                 )
                 .padding(horizontal = 4.dp, vertical = 2.dp)
         ) {
@@ -2116,8 +2111,8 @@ fun TerminalCanvas(
                     val selMax = if (hasSelection) maxOf(selStart!!, selEnd!!) else null
 
                     // Viewport culling: Hanya render baris yang masuk dalam viewport layar
-                    val scrollY = if (isAltBuffer) 0f else verticalScrollState.value.toFloat()
-                    val viewportHeight = if (isAltBuffer || verticalScrollState.viewportSize == 0) {
+                    val scrollY = verticalScrollState.value.toFloat()
+                    val viewportHeight = if (verticalScrollState.viewportSize == 0) {
                         totalHeightPx.toFloat()
                     } else {
                         verticalScrollState.viewportSize.toFloat()

@@ -143,29 +143,68 @@ class TerminalGridBuffer(
     fun resize(newCols: Int, newRows: Int) {
         synchronized(lock) {
             val c = newCols.coerceIn(20, 300)
-            val r = newRows.coerceIn(4, 200)
+            val r = newRows.coerceIn(18, 200)
             if (c == maxCols && r == maxRows) return
 
+            val oldCols = maxCols
+            val oldRows = maxRows
             maxCols = c
             maxRows = r
 
-            val newGrid = Array(maxRows) { Array(maxCols) { TerminalCell() } }
-            for (row in 0 until maxRows.coerceAtMost(grid.size)) {
-                for (col in 0 until maxCols.coerceAtMost(grid[0].size)) {
-                    newGrid[row][col].copyFrom(grid[row][col])
+            if (!isAltBuffer) {
+                val newGrid = Array(maxRows) { Array(maxCols) { TerminalCell() } }
+                if (r < oldRows) {
+                    // Layar mengecil (misal keyboard virtual terbuka):
+                    // Geser baris di atas kursor ke scrollback agar kursor dan prompt tetap berada di layar aktif
+                    val shift = (cursorRow - (r - 1)).coerceIn(0, oldRows - r)
+                    for (row in 0 until shift) {
+                        val savedLine = Array(oldCols) { col ->
+                            TerminalCell().apply { copyFrom(grid[row][col]) }
+                        }
+                        scrollback.add(savedLine)
+                        if (scrollback.size > maxScrollback) {
+                            scrollback.removeAt(0)
+                        }
+                    }
+                    for (row in 0 until r) {
+                        val srcRow = row + shift
+                        if (srcRow < oldRows) {
+                            for (col in 0 until maxCols.coerceAtMost(oldCols)) {
+                                newGrid[row][col].copyFrom(grid[srcRow][col])
+                            }
+                        }
+                    }
+                    cursorRow = (cursorRow - shift).coerceIn(0, maxRows - 1)
+                } else {
+                    // Layar membesar (misal keyboard virtual ditutup):
+                    // Tarik kembali baris dari scrollback untuk mengisi ruang baris atas yang bertambah
+                    val unwind = (r - oldRows).coerceAtMost(scrollback.size)
+                    for (row in 0 until unwind) {
+                        val pulledLine = scrollback.removeAt(scrollback.size - (unwind - row))
+                        for (col in 0 until maxCols.coerceAtMost(pulledLine.size)) {
+                            newGrid[row][col].copyFrom(pulledLine[col])
+                        }
+                    }
+                    for (row in 0 until oldRows) {
+                        for (col in 0 until maxCols.coerceAtMost(oldCols)) {
+                            newGrid[row + unwind][col].copyFrom(grid[row][col])
+                        }
+                    }
+                    cursorRow = (cursorRow + unwind).coerceIn(0, maxRows - 1)
                 }
-            }
-            grid = newGrid
-
-            val newAltGrid = Array(maxRows) { Array(maxCols) { TerminalCell() } }
-            for (row in 0 until maxRows.coerceAtMost(altGrid.size)) {
-                for (col in 0 until maxCols.coerceAtMost(altGrid[0].size)) {
-                    newAltGrid[row][col].copyFrom(altGrid[row][col])
+                grid = newGrid
+            } else {
+                // Alternate buffer (nano, vim, htop): buffer independen tanpa scrollback
+                val newAltGrid = Array(maxRows) { Array(maxCols) { TerminalCell() } }
+                for (row in 0 until maxRows.coerceAtMost(altGrid.size)) {
+                    for (col in 0 until maxCols.coerceAtMost(altGrid[0].size)) {
+                        newAltGrid[row][col].copyFrom(altGrid[row][col])
+                    }
                 }
+                altGrid = newAltGrid
+                cursorRow = cursorRow.coerceIn(0, maxRows - 1)
             }
-            altGrid = newAltGrid
 
-            cursorRow = cursorRow.coerceIn(0, maxRows - 1)
             cursorCol = cursorCol.coerceIn(0, maxCols - 1)
             scrollTop = 0
             scrollBottom = maxRows - 1
@@ -193,7 +232,10 @@ class TerminalGridBuffer(
                             }
                             ch == '\t' -> {
                                 val nextTabStop = ((cursorCol / 8) + 1) * 8
-                                cursorCol = nextTabStop.coerceAtMost(maxCols - 1)
+                                val targetCol = nextTabStop.coerceAtMost(maxCols - 1)
+                                while (cursorCol < targetCol) {
+                                    putChar(' ')
+                                }
                             }
                             ch == '\u0007' -> {
                                 onBell?.invoke()
@@ -300,23 +342,33 @@ class TerminalGridBuffer(
 
     private fun isWideCodePoint(code: Int): Boolean {
         if (code < 0x1100) return false
-        return (code in 0x1100..0x115F) || // Hangul Jamo
-               (code in 0x2E80..0xA4CF && code != 0x303F) || // CJK Radicals, Ideographs
-               (code in 0xAC00..0xD7A3) || // Hangul Syllables
-               (code in 0xF900..0xFAFF) || // CJK Compatibility Ideographs
-               (code in 0xFE10..0xFE19) || // Vertical forms
-               (code in 0xFE30..0xFE6F) || // CJK Compatibility Forms
-               (code in 0xFF01..0xFF60) || // Fullwidth Forms
-               (code in 0xFFE0..0xFFE6) || // Fullwidth Symbols
-               (code in 0x20000..0x2FFFD) || // CJK Ext B..F
-               (code in 0x30000..0x3FFFD) || // CJK Ext G..
-               (code in 0x1F300..0x1F64F) || // Emojis & Pictographs
-               (code in 0x1F900..0x1FAFF) || // Supplemental Symbols & Emojis
-               isWideMiscSymbol(code)
+        // CJK Radicals, Ideographs, Hangul, Fullwidth Forms
+        if ((code in 0x1100..0x115F) ||
+            (code in 0x2E80..0xA4CF && code != 0x303F) ||
+            (code in 0xAC00..0xD7A3) ||
+            (code in 0xF900..0xFAFF) ||
+            (code in 0xFE10..0xFE19) ||
+            (code in 0xFE30..0xFE6F) ||
+            (code in 0xFF01..0xFF60) ||
+            (code in 0xFFE0..0xFFE6) ||
+            (code in 0x20000..0x2FFFD) ||
+            (code in 0x30000..0x3FFFD)) {
+            return true
+        }
+        // Plane 1 Emojis, Symbols & Pictographs (U+1F100..U+1FBFF)
+        if ((code in 0x1F100..0x1F2FF) ||
+            (code in 0x1F300..0x1F6FF) ||
+            (code in 0x1F780..0x1FAFF) ||
+            (code in 0x1FB00..0x1FBFF)) {
+            return true
+        }
+        // BMP Technical, Dingbats & Miscellaneous Symbols that take 2 cells
+        return isWideBmpSymbol(code)
     }
 
-    private fun isWideMiscSymbol(code: Int): Boolean {
-        return code == 0x2614 || code == 0x2615 || (code in 0x2648..0x2653) ||
+    private fun isWideBmpSymbol(code: Int): Boolean {
+        return (code in 0x231A..0x231B) || (code in 0x23E9..0x23F3) ||
+               code == 0x2614 || code == 0x2615 || (code in 0x2648..0x2653) ||
                code == 0x267F || code == 0x2693 || code == 0x26A1 ||
                (code in 0x26AA..0x26AB) || (code in 0x26BD..0x26BE) ||
                (code in 0x26C4..0x26C5) || code == 0x26CE || code == 0x26D4 ||
@@ -324,7 +376,8 @@ class TerminalGridBuffer(
                code == 0x26FA || code == 0x26FD || code == 0x2702 || code == 0x2705 ||
                (code in 0x270A..0x270B) || code == 0x2728 || code == 0x274C ||
                code == 0x274E || (code in 0x2753..0x2755) || code == 0x2757 ||
-               (code in 0x2795..0x2797) || code == 0x27B0 || code == 0x27BF
+               (code in 0x2795..0x2797) || code == 0x27B0 || code == 0x27BF ||
+               code == 0x2B50 || code == 0x2B55
     }
 
     private fun putChar(ch: Char, extra: Char? = null, isWide: Boolean = false) {
