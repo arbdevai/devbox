@@ -993,12 +993,14 @@ fun TerminalScreen(
 
             LaunchedEffect(activeSession, maxWidth, maxHeight, charWidthPx, charHeightPx) {
                 delay(80)
-                val hPaddingPx = with(density) { 8.dp.toPx() } // 4.dp horizontal margin di setiap sisi
-                val vPaddingPx = with(density) { 4.dp.toPx() } // 2.dp vertical margin di setiap sisi
-                if (charWidthPx > 0 && charHeightPx > 0) {
-                    val cols = ((maxWidth.toPx() - hPaddingPx).coerceAtLeast(1f) / charWidthPx).toInt().coerceIn(20, 300)
-                    val rows = ((maxHeight.toPx() - vPaddingPx).coerceAtLeast(1f) / charHeightPx).toInt().coerceIn(4, 200)
-                    activeSession.updateWindowSize(cols, rows)
+                with(density) {
+                    val hPaddingPx = 8.dp.toPx() // 4.dp horizontal margin di setiap sisi
+                    val vPaddingPx = 4.dp.toPx() // 2.dp vertical margin di setiap sisi
+                    if (charWidthPx > 0 && charHeightPx > 0) {
+                        val cols = ((maxWidth.toPx() - hPaddingPx).coerceAtLeast(1f) / charWidthPx).toInt().coerceIn(20, 300)
+                        val rows = ((maxHeight.toPx() - vPaddingPx).coerceAtLeast(1f) / charHeightPx).toInt().coerceIn(4, 200)
+                        activeSession.updateWindowSize(cols, rows)
+                    }
                 }
             }
 
