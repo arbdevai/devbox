@@ -185,31 +185,20 @@ class NativeTerminalSession(
                         } catch (_: Exception) {}
                     }
 
-                    // 3. Cek nama proses / agent aktif (agy, python, node, dll) setiap 20 detik secara instan
-                    if (cycle % 10 == 0) {
-                        try {
-                            val suPid = getProcessPid()
-                            val checkCmd = if (suPid != null) {
-                                "for c in \$(pgrep -P $suPid 2>/dev/null || true); do " +
-                                        "for g in \$c \$(pgrep -P \$c 2>/dev/null || true); do " +
-                                        "comm=\$(cat /proc/\$g/comm 2>/dev/null); " +
-                                        "if [ -n \"\$comm\" ] && [ \"\$comm\" != 'script' ] && [ \"\$comm\" != 'bash' ] && [ \"\$comm\" != 'stty' ] && [ \"\$comm\" != 'su' ]; then " +
-                                        "echo \"\$comm\"; break 2; " +
-                                        "fi; done; done"
-                            } else null
-                            val res = if (checkCmd != null) com.arbdev.devbox.data.RootExecutor.executeSync(checkCmd, silent = true) else null
-                            val detected = res?.getOrNull()?.stdout?.trim().orEmpty()
-                            mainHandler.post {
-                                if (detected.isNotBlank()) {
-                                    activeAgentName = detected
-                                    isAgentRunning = true
-                                } else {
-                                    activeAgentName = null
-                                    isAgentRunning = false
-                                }
+                    // 3. Cek nama proses / agent aktif secara pasif via trigger file tanpa memanggil su berkala
+                    try {
+                        val agentFile = File("$targetRootfs/tmp/.devbox_active_agent")
+                        val detected = if (agentFile.exists()) agentFile.readText().trim() else ""
+                        mainHandler.post {
+                            if (detected.isNotBlank()) {
+                                activeAgentName = detected
+                                isAgentRunning = true
+                            } else {
+                                activeAgentName = null
+                                isAgentRunning = false
                             }
-                        } catch (_: Exception) {}
-                    }
+                        }
+                    } catch (_: Exception) {}
                 }
             }
 
@@ -319,10 +308,10 @@ class NativeTerminalSession(
         val targetRootfs = ChrootManager.activeRootfs
         val sessionId = id
 
-        // Debounce: batalkan pemanggilan stty sebelumnya jika ukuran berubah cepat
+        // Debounce: batalkan pemanggilan stty sebelumnya jika ukuran berubah cepat (180ms saat pinch zoom)
         resizeJob?.cancel()
         resizeJob = sessionScope.launch(Dispatchers.IO) {
-            delay(50)
+            delay(180)
             try {
                 val currentPts = cachedPtsDev
                 if (currentPts != null) {

@@ -37,13 +37,18 @@ class MainActivity : ComponentActivity() {
         lifecycleScope.launch(Dispatchers.IO) {
             UpdateManager.cleanupOldApks(applicationContext)
             ChrootManager.cleanStaleAgyLocks()
-            try {
-                val myPid = android.os.Process.myPid()
-                com.arbdev.devbox.data.RootExecutor.executeSync(
-                    "echo -1000 > /proc/$myPid/oom_score_adj 2>/dev/null; sysctl -w vm.swappiness=60 2>/dev/null",
-                    silent = true
-                )
-            } catch (_: Exception) {}
+            if (!com.arbdev.devbox.data.RootExecutor.hasAppliedSystemTweaks) {
+                com.arbdev.devbox.data.RootExecutor.hasAppliedSystemTweaks = true
+                try {
+                    val myPid = android.os.Process.myPid()
+                    com.arbdev.devbox.data.RootExecutor.executeSync(
+                        "echo -1000 > /proc/$myPid/oom_score_adj 2>/dev/null; sysctl -w vm.swappiness=60 2>/dev/null",
+                        silent = true
+                    )
+                } catch (_: Exception) {
+                    com.arbdev.devbox.data.RootExecutor.hasAppliedSystemTweaks = false
+                }
+            }
         }
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {

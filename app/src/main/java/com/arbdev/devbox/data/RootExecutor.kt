@@ -17,6 +17,9 @@ data class CommandResult(
 object RootExecutor {
 
     @Volatile
+    var hasAppliedSystemTweaks: Boolean = false
+
+    @Volatile
     private var cachedRootAvailable: Boolean? = null
 
     // Persistent interactive root shell: hanya menjalankan 'su' 1 KALI saja sepanjang aplikasi hidup
