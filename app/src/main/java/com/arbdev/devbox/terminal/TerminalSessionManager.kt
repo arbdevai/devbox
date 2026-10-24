@@ -108,7 +108,11 @@ class NativeTerminalSession(
 
             // Menggunakan /usr/bin/script untuk mengalokasikan PTY sejati tanpa JNI,
             // dan menjalankan login shell interaktif dengan privilege root dan environment user coder.
+            val initRows = if (lastRows > 0) lastRows else 30
+            val initCols = if (lastCols > 0) lastCols else 80
+
             val chrootCmd = "mkdir -p '$targetRootfs/dev' '$targetRootfs/dev/pts' '$targetRootfs/proc' '$targetRootfs/sys' '$targetRootfs/mnt/sdcard' '$targetRootfs/tmp' 2>/dev/null; " +
+                    "chmod 1777 '$targetRootfs/tmp' 2>/dev/null; " +
                     "mountpoint -q '$targetRootfs/dev' || { mount --bind /dev '$targetRootfs/dev' 2>/dev/null && mount --make-private '$targetRootfs/dev' 2>/dev/null; }; " +
                     "mountpoint -q '$targetRootfs/dev/pts' || mount -t devpts devpts '$targetRootfs/dev/pts' 2>/dev/null || mount --bind /dev/pts '$targetRootfs/dev/pts' 2>/dev/null; " +
                     "mountpoint -q '$targetRootfs/proc' || mount -t proc proc '$targetRootfs/proc' 2>/dev/null; " +
@@ -116,7 +120,7 @@ class NativeTerminalSession(
                     "mountpoint -q '$targetRootfs/mnt/sdcard' || { mount --bind /sdcard '$targetRootfs/mnt/sdcard' 2>/dev/null && mount --make-private '$targetRootfs/mnt/sdcard' 2>/dev/null; }; " +
                     "mount --make-rprivate '$targetRootfs' 2>/dev/null; " +
                     "chown -R 1000:1000 '$targetRootfs/home/coder' 2>/dev/null; chmod -R 777 '$targetRootfs/home/coder' 2>/dev/null; " +
-                    "cd '$targetRootfs' && exec chroot '$targetRootfs' /usr/bin/env -i HOME=/home/coder USER=coder LOGNAME=sahal SHELL=/bin/bash TERM=xterm-256color COLORTERM=truecolor DEVBOX=1 DEVBOX_SESSION_ID='$id' GH_NO_KEYRING=1 PATH=/home/coder/.local/bin:/home/coder/.cargo/bin:/home/coder/go/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin /bin/bash -c 'cd /home/coder 2>/dev/null || cd /; if [ -x /usr/bin/script ]; then exec /usr/bin/script -qefc \"tty > /tmp/.devbox_pts_$id 2>/dev/null; stty rows 30 cols 80 opost onlcr 2>/dev/null; exec /bin/bash -l\" /dev/null; else exec /bin/bash -l; fi'"
+                    "cd '$targetRootfs' && exec chroot '$targetRootfs' /usr/bin/env -i HOME=/home/coder USER=coder LOGNAME=sahal SHELL=/bin/bash TERM=xterm-256color COLORTERM=truecolor DEVBOX=1 DEVBOX_SESSION_ID='$id' GH_NO_KEYRING=1 PATH=/home/coder/.local/bin:/home/coder/.cargo/bin:/home/coder/go/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin /bin/bash -c 'cd /home/coder 2>/dev/null || cd /; if [ -x /usr/bin/script ]; then exec /usr/bin/script -qefc \"shopt -s checkwinsize 2>/dev/null; tty > /tmp/.devbox_pts_$id 2>/dev/null; echo \\\$(tty) > /home/coder/.devbox_pts_$id 2>/dev/null; stty rows $initRows cols $initCols opost onlcr 2>/dev/null; exec /bin/bash -l\" /dev/null; else exec /bin/bash -l; fi'"
 
             val pb = ProcessBuilder(suBinary, "-c", chrootCmd)
             pb.redirectErrorStream(true) // Gabungkan stderr ke stdout stream
@@ -304,6 +308,7 @@ class NativeTerminalSession(
         }
     }
 
+    private var cachedPtsDev: String? = null
     private var resizeJob: Job? = null
 
     fun updateWindowSize(cols: Int, rows: Int) {
@@ -314,41 +319,40 @@ class NativeTerminalSession(
         val targetRootfs = ChrootManager.activeRootfs
         val sessionId = id
 
-        // Debounce: batalkan pemanggilan stty sebelumnya jika ukuran berubah cepat (anti-fork explosion Magisk)
+        // Debounce: batalkan pemanggilan stty sebelumnya jika ukuran berubah cepat
         resizeJob?.cancel()
         resizeJob = sessionScope.launch(Dispatchers.IO) {
             delay(50)
             try {
-                var ptsDev: String? = null
-                val ptsFile = File("$targetRootfs/tmp/.devbox_pts_$sessionId")
-                if (ptsFile.exists()) {
-                    val content = ptsFile.readText().trim()
-                    if (content.startsWith("/dev/pts/")) {
-                        ptsDev = content
-                    }
+                val currentPts = cachedPtsDev
+                if (currentPts != null) {
+                    val directCmd = "chroot '$targetRootfs' /usr/bin/stty -F '$currentPts' rows $rows cols $cols 2>/dev/null || stty -F '$targetRootfs$currentPts' rows $rows cols $cols 2>/dev/null || stty -F '$currentPts' rows $rows cols $cols 2>/dev/null"
+                    val res = com.arbdev.devbox.data.RootExecutor.executeSync(directCmd, silent = true)
+                    if (res.isSuccess) return@launch
                 }
 
-                if (ptsDev != null) {
-                    val sttyCmd = "chroot '$targetRootfs' /usr/bin/stty -F '$ptsDev' rows $rows cols $cols 2>/dev/null || stty -F '$ptsDev' rows $rows cols $cols 2>/dev/null"
-                    com.arbdev.devbox.data.RootExecutor.executeSync(sttyCmd, silent = true)
-                } else {
-                    // Fallback cepat: cari PTS via PID proses sesi tanpa memindai seluruh /proc (<50ms)
-                    val suPid = getProcessPid()
-                    val pgrepCmd = if (suPid != null) {
-                        "for cpid in \$(pgrep -P $suPid 2>/dev/null || true); do " +
-                                "for gpid in \$cpid \$(pgrep -P \$cpid 2>/dev/null || true); do " +
-                                "for fd in /proc/\$gpid/fd/*; do " +
-                                "t=\$(readlink \$fd 2>/dev/null); " +
-                                "if [[ \$t == */dev/pts/* ]]; then " +
-                                "dev=\"/dev/pts/\${t##*/}\"; " +
-                                "echo \"\$dev\" > '$targetRootfs/tmp/.devbox_pts_$sessionId' 2>/dev/null; " +
-                                "chroot '$targetRootfs' /usr/bin/stty -F \"\$dev\" rows $rows cols $cols 2>/dev/null || stty -F \"\$t\" rows $rows cols $cols 2>/dev/null; " +
-                                "break 3; " +
-                                "fi; done; done; done"
-                    } else null
-                    if (pgrepCmd != null) {
-                        com.arbdev.devbox.data.RootExecutor.executeSync(pgrepCmd, silent = true)
-                    }
+                // Resolusi PTS slave via root: baca file cache atau grep environ secara instan (<30ms)
+                val resolveAndSetCmd = "pts=\$(cat '$targetRootfs/tmp/.devbox_pts_$sessionId' 2>/dev/null || cat '$targetRootfs/home/coder/.devbox_pts_$sessionId' 2>/dev/null); " +
+                        "if [ -z \"\$pts\" ]; then " +
+                        "env_file=\$(grep -l 'DEVBOX_SESSION_ID=$sessionId' /proc/[0-9]*/environ 2>/dev/null | head -n 1); " +
+                        "if [ -n \"\$env_file\" ]; then " +
+                        "pid=\$(echo \"\$env_file\" | cut -d/ -f3); " +
+                        "for fd in /proc/\$pid/fd/*; do " +
+                        "t=\$(readlink \$fd 2>/dev/null); " +
+                        "if [[ \$t == */dev/pts/* ]]; then " +
+                        "pts=\"/dev/pts/\${t##*/}\"; " +
+                        "echo \"\$pts\" > '$targetRootfs/tmp/.devbox_pts_$sessionId' 2>/dev/null; " +
+                        "break; " +
+                        "fi; done; fi; fi; " +
+                        "if [ -n \"\$pts\" ]; then " +
+                        "chroot '$targetRootfs' /usr/bin/stty -F \"\$pts\" rows $rows cols $cols 2>/dev/null || stty -F \"\$targetRootfs\$pts\" rows $rows cols $cols 2>/dev/null || stty -F \"\$pts\" rows $rows cols $cols 2>/dev/null; " +
+                        "echo \"\$pts\"; " +
+                        "fi"
+
+                val res = com.arbdev.devbox.data.RootExecutor.executeSync(resolveAndSetCmd, silent = true)
+                val resolvedPts = res.getOrNull()?.stdout?.trim()
+                if (!resolvedPts.isNullOrBlank() && resolvedPts.startsWith("/dev/pts/")) {
+                    cachedPtsDev = resolvedPts
                 }
             } catch (_: Exception) {}
         }
@@ -426,7 +430,11 @@ class NativeTerminalSession(
             outputStream?.close()
             inputStream?.close()
             process?.destroy()
-            File("$targetRootfs/tmp/.devbox_pts_$sessionId").delete()
+            cachedPtsDev = null
+            sessionScope.launch(Dispatchers.IO) {
+                val cleanupCmd = "rm -f '$targetRootfs/tmp/.devbox_pts_$sessionId' '$targetRootfs/home/coder/.devbox_pts_$sessionId' 2>/dev/null"
+                com.arbdev.devbox.data.RootExecutor.executeSync(cleanupCmd, silent = true)
+            }
         } catch (_: Exception) {}
     }
 

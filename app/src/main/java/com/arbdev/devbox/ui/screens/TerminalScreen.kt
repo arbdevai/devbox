@@ -968,18 +968,37 @@ fun TerminalScreen(
                 }
         ) {
             val density = LocalDensity.current
-            LaunchedEffect(maxWidth, maxHeight, terminalFontSize) {
-                delay(100)
-                with(density) {
-                    val charWidth = (terminalFontSize * 0.6f).sp.toPx()
-                    val charHeight = (terminalFontSize * 1.25f).sp.toPx()
-                    val hPaddingPx = 8.dp.toPx() // 4.dp horizontal margin di setiap sisi
-                    val vPaddingPx = 4.dp.toPx() // 2.dp vertical margin di setiap sisi
-                    if (charWidth > 0 && charHeight > 0) {
-                        val cols = ((maxWidth.toPx() - hPaddingPx).coerceAtLeast(1f) / charWidth).toInt().coerceIn(20, 300)
-                        val rows = ((maxHeight.toPx() - vPaddingPx).coerceAtLeast(1f) / charHeight).toInt().coerceIn(4, 200)
-                        activeSession.updateWindowSize(cols, rows)
-                    }
+            val terminalTypeface = remember(context) {
+                try {
+                    android.graphics.Typeface.createFromAsset(context.assets, "fonts/jetbrains_mono_nerd_font.ttf")
+                } catch (_: Exception) {
+                    android.graphics.Typeface.MONOSPACE
+                }
+            }
+            val charWidthPx = remember(terminalFontSize, density, terminalTypeface) {
+                val p = android.graphics.Paint().apply {
+                    typeface = terminalTypeface
+                    textSize = with(density) { terminalFontSize.sp.toPx() }
+                }
+                p.measureText("M").coerceAtLeast(1f)
+            }
+            val charHeightPx = remember(terminalFontSize, density, terminalTypeface) {
+                val p = android.graphics.Paint().apply {
+                    typeface = terminalTypeface
+                    textSize = with(density) { terminalFontSize.sp.toPx() }
+                }
+                val fm = p.fontMetrics
+                ((fm.descent - fm.ascent) * 1.25f).coerceAtLeast(1f)
+            }
+
+            LaunchedEffect(activeSession, maxWidth, maxHeight, charWidthPx, charHeightPx) {
+                delay(80)
+                val hPaddingPx = with(density) { 8.dp.toPx() } // 4.dp horizontal margin di setiap sisi
+                val vPaddingPx = with(density) { 4.dp.toPx() } // 2.dp vertical margin di setiap sisi
+                if (charWidthPx > 0 && charHeightPx > 0) {
+                    val cols = ((maxWidth.toPx() - hPaddingPx).coerceAtLeast(1f) / charWidthPx).toInt().coerceIn(20, 300)
+                    val rows = ((maxHeight.toPx() - vPaddingPx).coerceAtLeast(1f) / charHeightPx).toInt().coerceIn(4, 200)
+                    activeSession.updateWindowSize(cols, rows)
                 }
             }
 
