@@ -324,7 +324,8 @@ class NativeTerminalSession(
                         "target=\$(readlink \$fd 2>/dev/null); " +
                         "if [[ \$target == /dev/pts/* ]]; then " +
                         "chroot '$targetRootfs' /usr/bin/stty -F \"\$target\" rows $rows cols $cols 2>/dev/null; " +
-                        "fi; done; break; fi; fi; done"
+                        "break 2; " +
+                        "fi; done; fi; fi; done"
                 com.arbdev.devbox.data.RootExecutor.executeSync(cmd, silent = true)
             } catch (_: Exception) {}
         }

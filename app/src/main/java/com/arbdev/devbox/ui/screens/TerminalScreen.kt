@@ -873,9 +873,12 @@ fun TerminalScreen(
                             }
                             targetSession.sendBytes(bytes.toByteArray())
                             isCtrlActive = false
+                        } else if (text == "\r") {
+                            targetSession.sendText("\r")
+                        } else if (text.contains('\n') || text.contains('\r')) {
+                            targetSession.pasteText(text)
                         } else {
-                            val sanitized = text.replace("\r\n", "\r").replace("\n", "\r")
-                            targetSession.sendText(sanitized)
+                            targetSession.sendText(text)
                         }
                     }
                     onBackspace = {

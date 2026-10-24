@@ -1,0 +1,596 @@
+================================================================================
+DEVBOX: DOKUMENTASI AUDIT FORENSIK 4 MASALAH TERMINAL
+================================================================================
+Target Investigasi : 
+1. Paste Multi-Baris (Kasus cat -A, Newline, Echo vs Output)
+2. Autentikasi Token Antigravity CLI Tidak Terlihat (No-Echo / Mode Raw)
+3. TUI Tidak Responsif Terhadap Ukuran Terminal & Preferensi Tidak Tersimpan
+4. Input Masking Menyisipkan Awalan Bintang ("*****") ke Paste di Semua CLI
+
+Status Pemeriksaan : AUDIT READ-ONLY LENGKAP
+Repositori         : /home/coder/projects/devbox
+Branch / Commit    : master (10219c5d458fa34ddaf4c9363b028cf504571a52)
+Versi Build Target : Application ID com.arbdev.devbox | VersionCode 71 | VersionName 1.0.70
+================================================================================
+
+I. RINGKASAN EKSEKUTIF
+--------------------------------------------------------------------------------
++----------------+--------------------+------------------------------------+------------------------------------+------------------------------------+
+| ID Masalah     | Status Audit       | Akar Masalah Terverifikasi         | Dampak                             | Perbaikan Minimal Rekomendasi      |
++----------------+--------------------+------------------------------------+------------------------------------+------------------------------------+
+| A. Paste       | TERVERIFIKASI      | 1. Teks "CHARLIE" tidak memiliki   | Pengguna mengira DevBox melakukan  | 1. Harmonisasi input IME di        |
+| Multi-Baris    | (Bukan duplikasi   | newline penutup (\n).              | duplikasi paste atau korupsi teks, | TerminalScreen.kt:877 agar         |
+| (cat -A)       | input / bug UI)    | 2. cat -A berjalan pada TTY        | padahal merupakan karakteristik    | menggunakan pipeline pasteText()   |
+|                |                    | canonical mode dengan ECHO aktif.  | alami line discipline Linux PTY    | standar (bukan replace \n -> \r).  |
+|                |                    | 3. Output program ditulis mulai    | saat input tanpa terminator \n     | 2. Edukasi pembeda echo TTY        |
+|                |                    | dari posisi kursor aktif baris 3   | bertemu program canonical.         | vs output program.                 |
+|                |                    | kolom 7 ("CHARLIEALPHA$").         |                                    |                                    |
+|                |                    | 4. Ada inkonsistensi di Gboard IME |                                    |                                    |
+|                |                    | yang masih mengubah \n menjadi \r. |                                    |                                    |
++----------------+--------------------+------------------------------------+------------------------------------+------------------------------------+
+| B. Token       | TERVERIFIKASI      | CLI Antigravity menonaktifkan echo | Pengguna mengira aplikasi macet    | Pertahankan integritas keamanan.   |
+| Antigravity    | (Perilaku standar  | TTY (c_lflag &= ~ECHO) saat        | atau token gagal ditempel,         | Jangan tampilkan token di layar.   |
+| CLI Tidak      | keamanan Unix,     | membaca rahasia. DevBox meneruskan | memicu eksperimen masking bintang  | Berikan indikator visual           |
+| Terlihat       | bukan bug)         | byte ke PTY tanpa local echo. PTY  | yang merusak stabilitas terminal.  | non-destruktif di UI (misal        |
+|                |                    | tidak memantulkan byte balik.      |                                    | toast: "Input rahasia terkirim,    |
+|                |                    | Token diterima utuh oleh kernel.   |                                    | silakan tekan Enter").             |
++----------------+--------------------+------------------------------------+------------------------------------+------------------------------------+
+| C. TUI Resize  | TERVERIFIKASI      | 1. Cacat skrip /proc di            | Ukuran PTY di kernel Linux tetap   | 1. Perbaiki logika break pada      |
+| & Preferensi   | (Bug logika pada   | TerminalSessionManager.kt:327: ada | terkunci pada 80x30 default. TUI   | loop FD di TerminalSessionManager: |
+| Tidak Simpan   | skrip resize PTY)  | perintah break prematur di level   | Antigravity, nano, htop tidak      | hanya break jika target /dev/pts/* |
+|                |                    | PID pembungkus (bash -c) yang fds- | merespons perubahan ukuran layar/  | telah ditemukan dan disetel stty.  |
+|                |                    | nya adalah pipe, bukan /dev/pts/*. | rotasi HP dan tampilannya terpotong| 2. Sinkronkan ukuran layar aktual  |
+|                |                    | stty TIDAK PERNAH DIJALANKAN.      | atau berantakan.                   | sesaat setelah Canvas terukur.     |
+|                |                    | 2. Sesi baru selalu hardcoded      |                                    |                                    |
+|                |                    | 80x30 saat startup sebelum Compose |                                    |                                    |
+|                |                    | layout terukur.                    |                                    |                                    |
++----------------+--------------------+------------------------------------+------------------------------------+------------------------------------+
+| D. Input       | TERVERIFIKASI      | Fitur displayMaskedInput() pada    | Pengguna pada build v1.0.36-1.0.46 | Hapus deklarasi dead code          |
+| Masking        | (Regresi v1.0.36,  | v1.0.36 menyuntikkan sel visual '*'| melihat "*****" di depan teks paste| displayMaskedInput() di            |
+| Menyisipkan    | dihapus v1.0.47,   | langsung ke activeGrid[][] dan     | biasa. Di versi master saat ini    | TerminalGridBuffer.kt agar tidak   |
+| "*****"        | sisa dead code     | memajukan kursor col tanpa kirim   | (v1.0.70), pemanggilan ini sudah   | ada potensi mutasi sel liar di     |
+|                | masih ada)         | ke PTY. Bintang tertinggal jika    | dihapus (dead code).               | masa depan.                        |
+|                |                    | prompt dibatalkan / ganti baris.   |                                    |                                    |
++----------------+--------------------+------------------------------------+------------------------------------+------------------------------------+
+
+
+================================================================================
+II. BUKTI SOURCE CODE AKTUAL
+================================================================================
+
+1. BUKTI KASUS A: PIPELINE PASTE & INKONSISTENSI IME
+--------------------------------------------------------------------------------
+File: app/src/main/java/com/arbdev/devbox/terminal/TerminalSessionManager.kt
+Baris: 274 - 286
+Implementasi:
+    fun pasteText(text: String) {
+        if (text.isEmpty()) return
+        // Normalisasikan CRLF (\r\n) dan standalone CR (\r) menjadi Unix newline (\n) tanpa mengubah karakter lain
+        val normalized = text.replace("\r\n", "\n").replace('\r', '\n')
+
+        // Jika DECSET 2004 (Bracketed Paste Mode) aktif di terminal (misal di bash, zsh, nano, vim),
+        // bungkus dengan escape sequence \u001B[200~ dan \u001B[201~.
+        if (buffer.isBracketedPasteMode) {
+            sendText("\u001B[200~$normalized\u001B[201~")
+        } else {
+            sendText(normalized)
+        }
+    }
+
+Analisis:
+- Pipeline pasteText() pada commit 10219c5d sudah benar dalam menormalkan teks menjadi \n Unix murni.
+- Tidak ada duplikasi teks atau pemanggilan ganda di fungsi ini.
+
+File Inkonsistensi IME: app/src/main/java/com/arbdev/devbox/ui/screens/TerminalScreen.kt
+Baris: 853 - 880
+Implementasi:
+    TerminalInputView(ctx).apply {
+        onCommitText = { text ->
+            autoScrollEnabled = true
+            val targetSession = TerminalSessionManager.getActiveSession()
+            if (isCtrlActive) {
+                ...
+            } else {
+                val sanitized = text.replace("\r\n", "\r").replace("\n", "\r")
+                targetSession.sendText(sanitized)
+            }
+        }
+
+Analisis Cacat IME:
+- Jika pengguna menempelkan teks melalui keyboard virtual (misal clipboard suggestion chip di Gboard), Gboard memanggil commitText().
+- Di onCommitText (baris 877), karakter newline justru diubah menjadi \r (carriage return), BUKAN \n.
+- Jalur ini juga TIDAK memeriksa buffer.isBracketedPasteMode sehingga teks multi-baris langsung tereksekusi per baris di shell.
+
+
+2. BUKTI KASUS B: JALUR PENGIRIMAN TOKEN KE PTY (NO LOCAL ECHO)
+--------------------------------------------------------------------------------
+File: app/src/main/java/com/arbdev/devbox/terminal/TerminalSessionManager.kt
+Baris: 241 - 256
+Implementasi:
+    fun sendText(text: String) {
+        if (!isRunning || outputStream == null) {
+            AppLogger.w("NativeTerminal", "Sesi [$name] mati/terputus. Meluncurkan ulang sesi...")
+            initializeProcess()
+        }
+        sessionScope.launch(Dispatchers.IO) {
+            val out = outputStream ?: return@launch
+            try {
+                val bytes = text.toByteArray(Charsets.UTF_8)
+                out.write(bytes)
+                out.flush()
+            } catch (e: Exception) {
+                AppLogger.e("NativeTerminal", "Gagal kirim teks ke [$name]: ${e.message}")
+            }
+        }
+    }
+
+Analisis:
+- sendText() mengirim byte UTF-8 murni langsung ke stdin proses Linux / PTY master.
+- Tidak ada filter, modifikasi, pencegatan, atau masking di level data stream.
+- Terminal DevBox mengadopsi prinsip zero local-echo (hanya menggambar apa yang dikembalikan dari stream output PTY).
+- Ketika Antigravity CLI meminta token, CLI menonaktifkan echo pada termios driver TTY. Driver TTY kernel tidak memantulkan input, sehingga layar tetap kosong. Ini adalah standar keamanan Unix.
+
+
+3. BUKTI KASUS C: CACAT LOGIKA SKRIP RESIZE PTY
+--------------------------------------------------------------------------------
+File: app/src/main/java/com/arbdev/devbox/terminal/TerminalSessionManager.kt
+Baris: 307 - 331
+Implementasi:
+    fun updateWindowSize(cols: Int, rows: Int) {
+        if (cols == lastCols && rows == lastRows) return
+        lastCols = cols
+        lastRows = rows
+        buffer.resize(cols, rows)
+        val targetRootfs = ChrootManager.activeRootfs
+        val sessionId = id
+
+        // Debounce: batalkan pemanggilan stty sebelumnya jika ukuran berubah cepat (anti-fork explosion Magisk)
+        resizeJob?.cancel()
+        resizeJob = sessionScope.launch(Dispatchers.IO) {
+            delay(100)
+            try {
+                val cmd = "for p in /proc/[0-9]*; do " +
+                        "if [ \"\$(readlink \$p/root 2>/dev/null)\" = '$targetRootfs' ]; then " +
+                        "if grep -z '^DEVBOX_SESSION_ID=$sessionId' \"\$p/environ\" 2>/dev/null >/dev/null; then " +
+                        "for fd in \$p/fd/*; do " +
+                        "target=\$(readlink \$fd 2>/dev/null); " +
+                        "if [[ \$target == /dev/pts/* ]]; then " +
+                        "chroot '$targetRootfs' /usr/bin/stty -F \"\$target\" rows $rows cols $cols 2>/dev/null; " +
+                        "fi; done; break; fi; fi; done"
+                com.arbdev.devbox.data.RootExecutor.executeSync(cmd, silent = true)
+            } catch (_: Exception) {}
+        }
+    }
+
+Analisis Cacat Kritis:
+- Perhatikan baris 327:
+  "for fd in \$p/fd/*; do target=\$(readlink \$fd 2>/dev/null); if [[ \$target == /dev/pts/* ]]; then ... fi; done; break; fi; fi; done"
+- Posisi `break` berada tepat setelah loop `for fd` selesai pada proses pertama yang cocok dengan DEVBOX_SESSION_ID.
+- Saat sesi dibuat via `su`, proses pertama dengan DEVBOX_SESSION_ID adalah proses shell pembungkus (/bin/bash -c "cd /home/coder ... script ...").
+- File descriptor 0, 1, 2 milik proses pembungkus ini terhubung ke *pipe* su, BUKAN ke `/dev/pts/*`.
+- Akibatnya:
+  1. Loop fd tidak menemukan `/dev/pts/*` pada proses pembungkus.
+  2. Perintah `break` langsung menghentikan loop PID `/proc/[0-9]*`.
+  3. Loop tidak pernah mencapai proses anak (/bin/bash -l atau antigravity) yang memegang `/dev/pts/*` sebenarnya!
+  4. Perintah `stty -F "$target" rows $rows cols $cols` TIDAK PERNAH DIJALANKAN.
+  5. Sinyal SIGWINCH tidak pernah dibangkitkan oleh kernel Linux.
+  6. Ukuran terminal di kernel Linux tetap terkunci pada nilai default: rows 30 cols 80 (dari baris 119).
+
+File Inisialisasi: app/src/main/java/com/arbdev/devbox/terminal/TerminalSessionManager.kt
+Baris: 119
+Implementasi:
+    ... if [ -x /usr/bin/script ]; then exec /usr/bin/script -qefc \"stty rows 30 cols 80 opost onlcr 2>/dev/null; exec /bin/bash -l\" /dev/null; else exec /bin/bash -l; fi ...
+
+File Persistensi Font: app/src/main/java/com/arbdev/devbox/ui/screens/TerminalScreen.kt
+Baris: 171 - 182
+Implementasi:
+    val prefs = remember { context.getSharedPreferences("devbox_terminal_prefs", Context.MODE_PRIVATE) }
+    var terminalFontSize by remember { mutableFloatStateOf(prefs.getFloat("terminal_font_size", 12f)) }
+    val updateFontSize: (Float) -> Unit = { newSize ->
+        val clamped = (Math.round(newSize * 2f) / 2f).coerceIn(8f, 28f)
+        terminalFontSize = clamped
+        prefs.edit().putFloat("terminal_font_size", clamped).apply()
+        ...
+    }
+Analisis:
+- Preferensi ukuran font (terminal_font_size) sebenarnya berhasil disimpan dan dipulihkan via SharedPreferences.
+- Namun karena kegagalan propagasi resize stty di atas, ukuran baris & kolom PTY tidak pernah sinkron ke kernel Linux saat aplikasi dibuka kembali.
+
+
+4. BUKTI KASUS D: ASAL-USUL FITUR MASKING BINTANG ("*****")
+--------------------------------------------------------------------------------
+Riwayat Git: Commit 3f12641a (Release v1.0.36)
+Author: coder
+Pesan: "Release v1.0.36 - Realtime asterisks masking for silent prompts and giant clipboard anti-loop protection"
+Potongan Diff:
+--- a/app/src/main/java/com/arbdev/devbox/terminal/TerminalGridBuffer.kt
++++ b/app/src/main/java/com/arbdev/devbox/terminal/TerminalGridBuffer.kt
+@@ -918,6 +918,25 @@ class TerminalGridBuffer(
++    fun displayMaskedInput(charCount: Int) {
++        synchronized(lock) {
++            val count = charCount.coerceIn(1, maxCols)
++            val row = activeGrid[cursorRow]
++            for (i in 0 until count) {
++                val c = cursorCol + i
++                if (c < maxCols) {
++                    row[c] = TerminalCell('*', fgColor = Color(0xFF61AFEF), isBold = true)
++                }
++            }
++            cursorCol = (cursorCol + count).coerceAtMost(maxCols - 1)
++            version.intValue++
++        }
++    }
+--- a/app/src/main/java/com/arbdev/devbox/terminal/TerminalSessionManager.kt
++++ b/app/src/main/java/com/arbdev/devbox/terminal/TerminalSessionManager.kt
+@@ -172,6 +172,11 @@ class NativeTerminalSession(
+         val sanitized = text.replace("\r\n", "\r").replace("\n", "\r")
++        if (!sanitized.contains('\r') && sanitized.length <= 120) {
++            buffer.displayMaskedInput(sanitized.length)
++        }
+         sendText(sanitized)
+
+Riwayat Git: Commit f7a858a4 (Release v1.0.47)
+Author: coder
+Pesan: "Release v1.0.47: Termux-style text selection in TUI, clean raw paste without dummy asterisks, and standard Shift+Tab backtab support"
+Potongan Diff:
+--- a/app/src/main/java/com/arbdev/devbox/terminal/TerminalSessionManager.kt
++++ b/app/src/main/java/com/arbdev/devbox/terminal/TerminalSessionManager.kt
+@@ -208,15 +208,8 @@ class NativeTerminalSession(
+         val sanitized = text.replace("\r\n", "\r").replace("\n", "\r")
+-        if (!sanitized.contains('\r') && sanitized.length <= 120) {
+-            buffer.displayMaskedInput(sanitized.length)
+-        }
+         sendText(sanitized)
+
+Status di File Terkini: app/src/main/java/com/arbdev/devbox/terminal/TerminalGridBuffer.kt
+Baris: 982 - 995
+- Metode displayMaskedInput() masih ada secara fisik di berkas ini, namun TIDAK PERNAH DIPANGGIL di mana pun (Dead Code).
+- Karakter bintang tidak pernah dikirim sebagai byte ke PTY, melainkan hanya ditulis ke sel visual array activeGrid[][].
+- Munculnya awalan "*****" terjadi jika prompt sebelumnya menyuntikkan 5 bintang ke sel buffer lalu prompt dibatalkan tanpa membersihkan baris kursor. Saat teks baru "sahal arbani" ditempel, echo dimulai setelah sel bintang tersebut.
+
+
+================================================================================
+III. PETA ALIRAN DATA LENGKAP
+================================================================================
+
+1. ALIRAN PASTE KE PTY
+--------------------------------------------------------------------------------
+[Tindakan Pengguna: Tempel / Paste Clipboard]
+   │
+   ├──► JALUR A: Tombol UI DevBox (PASTE Key / Context Menu / Overflow Menu)
+   │      │
+   │      ▼
+   │    pasteText(clip) [TerminalSessionManager.kt:274]
+   │      │
+   │      ├── Normalisasi: .replace("\r\n", "\n").replace('\r', '\n')
+   │      │
+   │      ├── Evaluasi DECSET 2004:
+   │      │     ├─ isBracketedPasteMode == true  ──► Bungkus \u001B[200~ + teks + \u001B[201~
+   │      │     └─ isBracketedPasteMode == false ──► Teks normal Unix murni
+   │      │
+   │      ▼
+   │    sendText() ──► IO Dispatcher ──► out.write(bytes) ──► PTY Master
+   │
+   └──► JALUR B: Gboard IME / Android Context Menu System
+          │
+          ▼
+        TerminalInputView.commitText() [TerminalInputView.kt:39]
+          │
+          ▼
+        onCommitText lambda [TerminalScreen.kt:853]
+          │
+          ├── [CACAT SINKRONISASI]: .replace("\r\n", "\r").replace("\n", "\r")
+          ├── [CACAT PROTOKOL]: Tidak membungkus DECSET 2004 Bracketed Paste
+          │
+          ▼
+        sendText() ──► IO Dispatcher ──► out.write(bytes) ──► PTY Master
+
+
+2. ALIRAN INPUT AUTENTIKASI (PROMPT RAHASIA / NO-ECHO)
+--------------------------------------------------------------------------------
+[Kredensial / Token di Clipboard]
+   │
+   ▼
+pasteText() / sendText()
+   │
+   ▼
+PTY Master (/dev/ptmx) ──► Kernel TTY Driver ──► PTY Slave (/dev/pts/X)
+                                  │
+                                  ├─► CLI Antigravity menonaktifkan ECHO:
+                                  │     termios.c_lflag &= ~ECHO
+                                  │
+                                  ├─► Kernel TTY TIDAK memantulkan byte ke stream output
+                                  │
+                                  ▼
+[Stream Pembaca DevBox: TerminalSessionManager.kt:211]
+   │
+   ├─► Membaca 0 byte output dari PTY
+   ▼
+[TerminalCanvas drawText()] ──► Tidak ada pembaruan karakter di layar (Layar Diam)
+                                (Kredensial AMAN & sudah masuk ke antrean buffer kernel)
+   │
+   ▼
+[Pengguna Menekan ENTER] ──► Byte \r dikirim ──► CLI membaca token ──► Autentikasi Sukses
+
+
+3. ALIRAN PROPAGASI RESIZE KE PTY
+--------------------------------------------------------------------------------
+[Perubahan Ukuran Layar / Rotasi / Buka Keyboard / Zoom Font]
+   │
+   ▼
+BoxWithConstraints [TerminalScreen.kt:932]
+   │
+   ├── LaunchedEffect(maxWidth, maxHeight, terminalFontSize) [Baris 939]
+   │     │
+   │     ├── Hitung charWidth = (terminalFontSize * 0.6f).sp.toPx()
+   │     ├── Hitung charHeight = (terminalFontSize * 1.25f).sp.toPx()
+   │     ├── cols = (maxWidth / charWidth).coerceIn(20, 200)
+   │     ├── rows = (maxHeight / charHeight).coerceIn(4, 100)
+   │     │
+   │     ▼
+   │   updateWindowSize(cols, rows) [TerminalSessionManager.kt:307]
+   │     │
+   │     ├── buffer.resize(cols, rows) ──► [BERHASIL: Buffer Compose Berubah Ukuran]
+   │     │
+   │     ▼
+   │   sessionScope.launch(Dispatchers.IO) [Debounce 100ms]
+   │     │
+   │     ▼
+   │   Skrip Bash RootExecutor:
+   │   "for p in /proc/[0-9]*; do ... break; done"
+   │     │
+   │     ▲
+   │     └── [TITIK KEGAGALAN KRITIS]:
+   │         PID pertama (bash -c) tidak memiliki /dev/pts/* di fds-nya.
+   │         Perintah break langsung menghentikan loop.
+   │         stty TIDAK PERNAH DIPANGGIL.
+   │         Kernel Linux PTY tetap berukuran 80x30.
+   │         TUI Antigravity tidak menerima sinyal SIGWINCH.
+
+
+================================================================================
+IV. ANALISIS MENDALAM AKAR MASALAH PER KASUS
+================================================================================
+
+--------------------------------------------------------------------------------
+KASUS A: POLA OUTPUT "CHARLIEALPHA$" DAN "BRAVO$" PADA cat -A
+--------------------------------------------------------------------------------
+1. GEJALA:
+Pengguna menjalankan:
+   cat -A
+Kemudian menempelkan 3 baris:
+   ALPHA
+   BRAVO
+   CHARLIE
+Output terminal terlihat:
+   ALPHA
+   BRAVO
+   CHARLIEALPHA$
+   BRAVO$
+
+2. AKAR MASALAH TERVERIFIKASI:
+Pola tersebut BUKAN karena DevBox mengirim input dua kali, bukan karena callback paste terpanggil dua kali, dan bukan kesalahan Canvas.
+
+Pola tersebut terjadi karena interaksi 3 faktor:
+A. Teks paste yang disalin dari clipboard tidak memiliki karakter newline penutup setelah kata "CHARLIE" (payload: "ALPHA\nBRAVO\nCHARLIE").
+B. Program `cat -A` berjalan dalam mode kanonikal standar Linux dengan driver TTY echo aktif.
+C. Terjadi perbedaan waktu pembacaan antara echo TTY (instan saat byte masuk) dan output dari program `cat -A` (setelah line buffer \n diproses).
+
+Kronologi Kejadian per Karakter:
+1. DevBox mengirim string "ALPHA\nBRAVO\nCHARLIE" ke stream master PTY.
+2. Kernel TTY menerima "ALPHA\n":
+   - TTY line discipline langsung meng-echo "ALPHA\r\n" ke terminal reader.
+   - Karena ada karakter '\n', kernel membuka blokir pembacaan baris 1 untuk program `cat`.
+3. Kernel TTY menerima "BRAVO\n":
+   - TTY line discipline meng-echo "BRAVO\r\n" ke terminal reader.
+   - Karena ada karakter '\n', kernel membuka blokir pembacaan baris 2 untuk program `cat`.
+4. Kernel TTY menerima "CHARLIE":
+   - TTY line discipline meng-echo "CHARLIE" ke terminal reader.
+   - Kursor terminal DevBox kini berada di Baris ke-3 Kolom ke-7 (tepat setelah huruf 'E' pada CHARLIE).
+   - Karena TIDAK ADA karakter '\n', kernel TTY TIDAK membuka blokir baris 3 untuk `cat`. Kata "CHARLIE" tertahan di antrean kanonikal TTY.
+5. Sementara itu, program `cat -A` yang telah membaca Baris 1 ("ALPHA\n") mulai mencetak outputnya:
+   - Sesuai fungsi `cat -A`, ia mencetak string dengan penanda akhir baris '$': "ALPHA$\r\n".
+   - Output ini tiba di terminal DevBox saat kursor masih berada di Baris 3 Kolom 7!
+   - Akibatnya, "ALPHA$" langsung digambar menyambung di baris yang sama, menghasilkan:
+     "CHARLIEALPHA$"
+6. Karakter "\r\n" dari output `cat -A` baris 1 memindahkan kursor ke awal Baris ke-4.
+7. Program `cat -A` kemudian mencetak output Baris 2 ("BRAVO\n"):
+   - Output yang dicetak adalah "BRAVO$\r\n".
+   - Dicetak pada Baris ke-4, menghasilkan:
+     "BRAVO$"
+8. Baris ke-5 kini menunggu pengguna menekan Enter (untuk menyelesaikan kata CHARLIE) atau Ctrl+C.
+
+3. KESIMPULAN KASUS A:
+- DevBox mengirim data tepat satu kali.
+- Tulisan "ALPHA" dan "BRAVO" di baris 1 dan 2 adalah ECHO TTY.
+- Tulisan "ALPHA$" dan "BRAVO$" di baris 3 dan 4 adalah OUTPUT PROGRAM `cat -A`.
+- Penggabungan "CHARLIEALPHA$" terjadi murni karena "CHARLIE" tidak memiliki \n penutup sehingga kursor tidak berpindah baris sebelum program `cat` mencetak outputnya.
+
+
+--------------------------------------------------------------------------------
+KASUS B: TOKEN ANTIGRAVITY CLI TIDAK TERLIHAT
+--------------------------------------------------------------------------------
+1. GEJALA:
+Saat pengguna menempelkan token autentikasi ke Antigravity CLI, karakter token tidak tampak sama sekali di terminal.
+
+2. AKAR MASALAH TERVERIFIKASI:
+- Perilaku Normal Prompt Rahasia Unix:
+  CLI Antigravity (seperti utilitas Unix aman lainnya: sudo, gh auth, passwd) memanggil konfigurasi termios untuk menonaktifkan echo terminal (`stty -echo` atau `c_lflag &= ~ECHO`) saat meminta token atau password.
+- DevBox Arsitektur Murni (Zero Local Echo):
+  Terminal DevBox tidak membuat echo tiruan di aplikasi Android. Tampilan layar 100% dikendalikan oleh output yang dikembalikan oleh kernel Linux PTY.
+- Keberadaan Token di Stream Data:
+  Fungsi `sendText()` di TerminalSessionManager.kt mengirimkan byte UTF-8 token secara utuh ke master PTY. Byte tersebut telah diterima oleh kernel Linux dan tersimpan di buffer pembacaan CLI.
+- Begitu pengguna menekan tombol ENTER (\r), CLI Antigravity langsung membaca token tersebut dari stdin, memproses autentikasi, dan mengembalikan echo terminal ke kondisi normal.
+- Kesimpulan: Ini BUKAN bug aplikasi DevBox. Token tidak hilang, token terkirim sempurna. Menyembunyikan token adalah standar keamanan Unix untuk mencegah kredensial terbaca oleh orang lain atau terekam screenshot.
+
+
+--------------------------------------------------------------------------------
+KASUS C: TUI RESIZE TIDAK RESPONSIF & PREFERENSI TAMPILAN
+--------------------------------------------------------------------------------
+1. GEJALA:
+Antigravity TUI tidak menyesuaikan ukuran saat rotasi atau perubahan viewport, dan preferensi ukuran terminal dianggap tidak tersimpan setelah aplikasi ditutup-buka.
+
+2. AKAR MASALAH TERVERIFIKASI:
+Ada 2 akar masalah yang terpisah:
+
+A. Cacat Skrip Resize PTY di TerminalSessionManager.kt (Baris 320-330):
+   ```bash
+   for p in /proc/[0-9]*; do
+     if [ "$(readlink $p/root 2>/dev/null)" = '$targetRootfs' ]; then
+       if grep -z '^DEVBOX_SESSION_ID=$sessionId' "$p/environ" 2>/dev/null >/dev/null; then
+         for fd in $p/fd/*; do
+           target=$(readlink $fd 2>/dev/null);
+           if [[ $target == /dev/pts/* ]]; then
+             chroot '$targetRootfs' /usr/bin/stty -F "$target" rows $rows cols $cols 2>/dev/null;
+           fi
+         done
+         break   <=== SUMBER KEGAGALAN
+       fi
+     fi
+   done
+   ```
+   - Skrip di atas bermaksud mencari file descriptor PTS milik sesi aktif, lalu mengeksekusi `stty rows R cols C`.
+   - Namun peletakan perintah `break` berada di luar loop FD dan di dalam blok PID pertama yang cocok dengan DEVBOX_SESSION_ID.
+   - Sesi terminal dijalankan melalui `su -c ... exec /bin/bash -c '... /usr/bin/script ...'`.
+   - Proses pertama yang tercatat di `/proc` dengan DEVBOX_SESSION_ID adalah proses wrapper pembungkus shell tersebut. File descriptor milik proses wrapper ini adalah anonim *pipe*, BUKAN `/dev/pts/*`.
+   - Ketika loop memeriksa proses wrapper ini:
+     1. Loop `for fd` tidak menemukan `/dev/pts/*`.
+     2. Perintah `break` langsung mengakhiri pencarian PID di `/proc`!
+     3. Proses anak sesungguhnya (`/bin/bash -l` dan `antigravity`) yang memegang `/dev/pts/*` tidak pernah diperiksa sama sekali!
+   - Dampak Fatal: Perintah `stty` TIDAK PERNAH DIJALANKAN. Kernel Linux PTY tetap berukuran 80x30 selamanya. Sinyal SIGWINCH tidak pernah dibangkitkan.
+
+B. Status Persistensi Preferensi:
+   - Preferensi `terminal_font_size` sebenarnya disimpan di SharedPreferences ("devbox_terminal_prefs") dan dipulihkan saat startup.
+   - Namun, sesi baru PTY selalu di-spawn dengan ukuran statis `stty rows 30 cols 80` (baris 119).
+   - Karena cacat skrip resize di atas, saat TerminalCanvas selesai mengukur layar perangkat dan memanggil `updateWindowSize()`, panggilan tersebut gagal total di kernel.
+   - Akibatnya, setiap kali aplikasi dibuka kembali, terminal selalu terkunci pada 80x30, menciptakan kesan bagi pengguna bahwa pengaturan ukuran terminal tidak tersimpan.
+
+
+--------------------------------------------------------------------------------
+KASUS D: INPUT MASKING MENYISIPKAN "*****" KE PASTE DI SEMUA CLI
+--------------------------------------------------------------------------------
+1. GEJALA:
+Menempelkan teks biasa (seperti "sahal arbani") pada CLI kadang menghasilkan awalan bintang yang tidak ada di clipboard: "*****sahal arbani".
+
+2. AKAR MASALAH TERVERIFIKASI:
+- Asal Kode:
+  Pada commit 3f12641a (v1.0.36), pengembang mencoba memuaskan permintaan visual pengguna untuk prompt rahasia dengan membuat fungsi `displayMaskedInput()` di TerminalGridBuffer.kt.
+- Mekanisme Cacat:
+  Fungsi tersebut menulis karakter '*' langsung ke sel array `activeGrid[cursorRow][cursorCol]` dan menggeser nilai `cursorCol`.
+  Karakter bintang ini TIDAK PERNAH dikirim ke stream PTY.
+  Namun, sel array tersebut menetap di memori buffer terminal DevBox.
+- Terjadinya Awalan "*****":
+  Jika sebuah prompt sebelumnya meminta 5 karakter rahasia (atau pengguna pernah menempelkan 5 karakter), 5 sel pertama diisi '*'. Jika prompt tersebut berganti atau dibatalkan tanpa ada ANSI sequence untuk membersihkan baris (misal \u001B[2K), sel bintang tersebut tetap berada di layar.
+  Ketika pengguna berikutnya menempelkan teks "sahal arbani", echo dari PTY dimulai setelah posisi kolom bintang tersebut.
+  Di layar, tampak gabungan: "*****sahal arbani".
+- Status Saat Ini:
+  Pemanggilan `displayMaskedInput()` telah DIHAPUS dari `pasteText()` pada commit f7a858a4 (v1.0.47).
+  Pada versi master saat ini (v1.0.70), fungsi tersebut sudah menjadi *dead code* (tidak dipanggil di mana pun).
+  Pengguna yang masih melihat gejala ini menjalankan APK lama (v1.0.36–v1.0.46) atau menggunakan sesi lama yang belum di-reset.
+
+
+================================================================================
+V. RENCANA PERBAIKAN MINIMAL (MENUNGGU PERSETUJUAN)
+================================================================================
+
+Perbaikan dirancang sesederhana mungkin tanpa merombak arsitektur, tanpa dependensi baru, dan tanpa risiko regresi:
+
+1. Perbaikan Skrip Propagasi Resize PTY (Solusi Masalah C)
+   Berkas: app/src/main/java/com/arbdev/devbox/terminal/TerminalSessionManager.kt
+   Fungsi: updateWindowSize(cols: Int, rows: Int)
+   Perubahan:
+   Ganti logika loop pencarian fd di baris 320-330 agar `break` hanya dilakukan setelah target /dev/pts/* ditemukan dan disetel:
+   ```bash
+   for p in /proc/[0-9]*; do
+     if [ "$(readlink $p/root 2>/dev/null)" = '$targetRootfs' ] && grep -q -z '^DEVBOX_SESSION_ID=$sessionId' "$p/environ" 2>/dev/null; then
+       for fd in $p/fd/*; do
+         target=$(readlink $fd 2>/dev/null)
+         if [[ $target == /dev/pts/* ]]; then
+           chroot '$targetRootfs' /usr/bin/stty -F "$target" rows $rows cols $cols 2>/dev/null
+           break 2
+         fi
+       done
+     fi
+   done
+   ```
+   Efek: Kernel PTY akan langsung diperbarui ke ukuran baris & kolom aktual layar perangkat, dan sinyal SIGWINCH seketika diterima oleh TUI Antigravity, nano, dan vim.
+
+2. Harmonisasi Input Paste Gboard IME (Solusi Masalah A & Konsistensi Input)
+   Berkas: app/src/main/java/com/arbdev/devbox/ui/screens/TerminalScreen.kt
+   Lokasi: TerminalInputView onCommitText (baris 876-880)
+   Perubahan:
+   Arahkan input teks multiline atau teks yang panjangnya > 1 karakter dari `commitText` ke fungsi `targetSession.pasteText(text)` alih-alih `text.replace("\n", "\r")`.
+   Efek: Menempelkan teks via Gboard akan mematuhi normalisasi Unix newline (\n) dan Bracketed Paste Mode (DECSET 2004), mencegah eksekusi perintah prematur di shell.
+
+3. Pembersihan Sisa Dead Code Masking Bintang (Solusi Masalah D)
+   Berkas: app/src/main/java/com/arbdev/devbox/terminal/TerminalGridBuffer.kt
+   Lokasi: Baris 982-995
+   Perubahan:
+   Hapus fungsi `displayMaskedInput(charCount: Int)` yang sudah usang dan tidak dipanggil.
+   Efek: Mencegah potensi modifikasi sel layar secara artifisial di masa mendatang.
+
+
+================================================================================
+VI. MATRIKS PENGUJIAN REGRESI
+================================================================================
+
++-------+-----------------------------+------------------------------------+------------------------------------+
+| ID    | Skenario Pengujian          | Input / Prosedur                   | Hasil yang Diharapkan              |
++-------+-----------------------------+------------------------------------+------------------------------------+
+| TC-01 | Paste Single-Line tanpa \n  | Shell biasa: Paste "echo halo"     | Teks "echo halo" muncul di prompt, |
+|       |                             | (tanpa Enter di clipboard).        | kursor di akhir kata halo.         |
+|       |                             |                                    | Perintah TIDAK langsung dieksekusi.|
++-------+-----------------------------+------------------------------------+------------------------------------+
+| TC-02 | Paste Multi-Line tanpa \n   | cat -A: Paste                      | Echo TTY: ALPHA, BRAVO, CHARLIE.   |
+|       | penutup                     | "ALPHA\nBRAVO\nCHARLIE"            | Output cat: ALPHA$, BRAVO$.        |
+|       |                             |                                    | Kursor menunggu di belakang        |
+|       |                             |                                    | CHARLIE di baris ke-3.             |
++-------+-----------------------------+------------------------------------+------------------------------------+
+| TC-03 | Paste Multi-Line dengan \n  | cat -A: Paste                      | Echo TTY: 3 baris.                 |
+|       | penutup                     | "ALPHA\nBRAVO\nCHARLIE\n"          | Output cat: ALPHA$, BRAVO$,        |
+|       |                             |                                    | CHARLIE$ di baris terpisah rapi.   |
++-------+-----------------------------+------------------------------------+------------------------------------+
+| TC-04 | Input Token No-Echo         | Jalankan stty -echo; read tok;     | Layar tetap kosong saat paste.     |
+|       |                             | stty echo; echo "OK: ${#tok}"      | Tekan Enter. Output: "OK: <panjang>|
+|       |                             | Tempel token dummy.                | Token diterima lengkap di kernel.  |
++-------+-----------------------------+------------------------------------+------------------------------------+
+| TC-05 | Paste via Gboard Chip       | Salin teks 3 baris, tempel via     | Teks masuk melalui pasteText(),    |
+|       |                             | clipboard suggestion chip Gboard.  | menghormati Bracketed Paste.       |
++-------+-----------------------------+------------------------------------+------------------------------------+
+| TC-06 | Resize PTY saat TUI Aktif   | Buka nano atau agy. Putar HP       | TUI menyesuaikan ukuran jendela    |
+|       |                             | dari Portrait ke Landscape.        | secara instan tanpa terpotong 80x30|
++-------+-----------------------------+------------------------------------+------------------------------------+
+| TC-07 | Validasi stty size Kernel   | Di bash DevBox, jalankan:          | Output menampilkan kolom dan baris |
+|       |                             | stty size                          | aktual layar HP (bukan 30 80 statis|
++-------+-----------------------------+------------------------------------+------------------------------------+
+| TC-08 | Persistensi Font & Restore  | Ubah font ke 14.5 sp di menu.      | Font tetap 14.5 sp, baris/kolom    |
+|       |                             | Force stop aplikasi, buka kembali. | dihitung ulang proporsional.       |
++-------+-----------------------------+------------------------------------+------------------------------------+
+| TC-09 | Verifikasi Bebas Bintang    | Paste "sahal arbani" di shell,     | Teks muncul murni: "sahal arbani"  |
+|       |                             | gh auth login, atau agy.           | tanpa ada awalan "*****".          |
++-------+-----------------------------+------------------------------------+------------------------------------+
+
+
+================================================================================
+VII. STATUS PERUBAHAN
+================================================================================
+- Apakah ada source code yang diubah? TIDAK. (Workspace git tetap bersih).
+- Apakah ada file yang dihapus? TIDAK.
+- Apakah ada commit atau branch baru? TIDAK. (Tetap di commit 10219c5d).
+- Apakah ada build APK atau workflow yang dijalankan? TIDAK.
+- Apakah ada dependensi baru yang ditambahkan? TIDAK.
+- Berkas yang dibuat: berkas dokumentasi ini atas permintaan eksplisit pengguna.
+
+
+================================================================================
+VIII. REKOMENDASI & URUTAN PERBAIKAN
+================================================================================
+Jika disetujui, perbaikan teknis direkomendasikan dengan urutan:
+1. Memperbaiki bug break skrip resize PTY di TerminalSessionManager.kt:327 (Prioritas Utama - Perbaikan Bug Nyata).
+2. Menyelaraskan onCommitText IME Gboard di TerminalScreen.kt:877 ke pipeline pasteText() (Peningkatan Stabilitas).
+3. Menghapus dead code displayMaskedInput() di TerminalGridBuffer.kt:982 (Pembersihan Kode).
+4. Menyusun build rilis baru (v1.0.71) dengan pesan commit yang diawali "Release v..." agar GitHub Actions mempublikasikan APK release secara otomatis.
+
+================================================================================
+AKHIR DOKUMEN FORENSIK
+================================================================================
