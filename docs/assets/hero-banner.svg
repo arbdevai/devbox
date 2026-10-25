@@ -1,0 +1,88 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 380" width="100%" height="100%" fill="none">
+  <defs>
+    <linearGradient id="canvasBg" x1="0" y1="0" x2="1200" y2="380" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#141414"/>
+      <stop offset="50%" stop-color="#181B17"/>
+      <stop offset="100%" stop-color="#0F100E"/>
+    </linearGradient>
+    <radialGradient id="acidGlow" cx="75%" cy="50%" r="55%">
+      <stop offset="0%" stop-color="#7DFF4C" stop-opacity="0.18"/>
+      <stop offset="60%" stop-color="#1B3712" stop-opacity="0.06"/>
+      <stop offset="100%" stop-color="#141414" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="pillFill" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#1B3712"/>
+      <stop offset="100%" stop-color="#14280D"/>
+    </linearGradient>
+    <pattern id="grid" width="40" height="40" patternUnits="userSpaceOnUse">
+      <path d="M 40 0 L 0 0 0 40" fill="none" stroke="#2D312B" stroke-width="0.6" stroke-opacity="0.45"/>
+    </pattern>
+  </defs>
+
+  <!-- Base Carbon Matte Canvas -->
+  <rect width="1200" height="380" rx="28" fill="url(#canvasBg)" stroke="#2D312B" stroke-width="2"/>
+  <rect width="1200" height="380" rx="28" fill="url(#grid)"/>
+  <rect width="1200" height="380" rx="28" fill="url(#acidGlow)"/>
+
+  <!-- Left Content Column -->
+  <!-- Status Pill -->
+  <rect x="64" y="54" width="280" height="34" rx="17" fill="url(#pillFill)" stroke="#7DFF4C" stroke-opacity="0.6" stroke-width="1.2"/>
+  <circle cx="84" cy="71" r="5" fill="#7DFF4C"/>
+  <text x="98" y="76" fill="#98FF6E" font-family="monospace, sans-serif" font-size="13" font-weight="700" letter-spacing="0.8">2026 M3 EXPRESSIVE • v1.0.82</text>
+
+  <!-- Main Title -->
+  <text x="64" y="152" fill="#F2F4F0" font-family="system-ui, -apple-system, sans-serif" font-size="64" font-weight="800" letter-spacing="-1.5">DevBox</text>
+  <circle cx="298" cy="138" r="7" fill="#7DFF4C"/>
+
+  <!-- Subtitle -->
+  <text x="64" y="198" fill="#7DFF4C" font-family="monospace, sans-serif" font-size="21" font-weight="600">Linux Container Engine &amp; AI Agent Runtime for Android</text>
+  <text x="64" y="236" fill="#9AA097" font-family="system-ui, -apple-system, sans-serif" font-size="17" font-weight="400">Native ARM64 Ubuntu Chroot • True 2D VT100/XTerm PTY • Zero-Orphan Reaper</text>
+  <text x="64" y="262" fill="#9AA097" font-family="system-ui, -apple-system, sans-serif" font-size="17" font-weight="400">Built for Google Antigravity CLI (agy), Claude Code, Code-Server &amp; Local Dev</text>
+
+  <!-- Feature Pills Bottom Left -->
+  <g transform="translate(64, 294)">
+    <rect x="0" y="0" width="148" height="36" rx="18" fill="#1C1E1B" stroke="#2D312B" stroke-width="1.2"/>
+    <text x="74" y="23" text-anchor="middle" fill="#E3E5E0" font-family="monospace" font-size="13" font-weight="600">⚡ Native PTY</text>
+
+    <rect x="160" y="0" width="176" height="36" rx="18" fill="#1C1E1B" stroke="#2D312B" stroke-width="1.2"/>
+    <text x="248" y="23" text-anchor="middle" fill="#E3E5E0" font-family="monospace" font-size="13" font-weight="600">🛡️ 0-Orphan Reaper</text>
+
+    <rect x="348" y="0" width="166" height="36" rx="18" fill="#1C1E1B" stroke="#2D312B" stroke-width="1.2"/>
+    <text x="431" y="23" text-anchor="middle" fill="#E3E5E0" font-family="monospace" font-size="13" font-weight="600">🤖 AI CLI Ready</text>
+
+    <rect x="526" y="0" width="154" height="36" rx="18" fill="#1B3712" stroke="#7DFF4C" stroke-width="1.2"/>
+    <text x="603" y="23" text-anchor="middle" fill="#7DFF4C" font-family="monospace" font-size="13" font-weight="700">#7DFF4C • #141414</text>
+  </g>
+
+  <!-- Right Bento Terminal Mock Card -->
+  <g transform="translate(790, 44)">
+    <rect x="0" y="0" width="350" height="292" rx="24" fill="#1C1E1B" stroke="#2D312B" stroke-width="2"/>
+    <!-- Top Bar -->
+    <rect x="16" y="16" width="110" height="28" rx="14" fill="#1B3712" stroke="#7DFF4C" stroke-width="1"/>
+    <circle cx="32" cy="30" r="4" fill="#7DFF4C"/>
+    <text x="44" y="34" fill="#7DFF4C" font-family="monospace" font-size="12" font-weight="700">tes • agy</text>
+
+    <rect x="246" y="16" width="88" height="28" rx="14" fill="#252824"/>
+    <text x="290" y="34" text-anchor="middle" fill="#98FF6E" font-family="monospace" font-size="11" font-weight="700">RUNNING</text>
+
+    <!-- Terminal Window Inside -->
+    <rect x="16" y="56" width="318" height="176" rx="14" fill="#0F100E" stroke="#2D312B" stroke-width="1"/>
+    <text x="30" y="84" fill="#7DFF4C" font-family="monospace" font-size="12" font-weight="700">coder@devbox:~/projects$</text>
+    <text x="210" y="84" fill="#F2F4F0" font-family="monospace" font-size="12">agy</text>
+    <text x="30" y="112" fill="#98FF6E" font-family="monospace" font-size="12" font-weight="700">Antigravity CLI 1.4.7</text>
+    <text x="30" y="132" fill="#9AA097" font-family="monospace" font-size="11">Ubuntu 24.04 • PTY /dev/pts/0</text>
+    <text x="30" y="152" fill="#9AA097" font-family="monospace" font-size="11">0 Orphans • OOM Guard Active</text>
+    <line x1="30" y1="168" x2="318" y2="168" stroke="#2D312B" stroke-width="1"/>
+    <text x="30" y="192" fill="#7DFF4C" font-family="monospace" font-size="13" font-weight="700">&gt;</text>
+    <rect x="44" y="179" width="9" height="16" fill="#7DFF4C"/>
+
+    <!-- Bottom Telemetry Mini Bento -->
+    <rect x="16" y="244" width="152" height="34" rx="10" fill="#252824"/>
+    <text x="28" y="265" fill="#9AA097" font-family="monospace" font-size="11">RAM</text>
+    <text x="64" y="265" fill="#7DFF4C" font-family="monospace" font-size="12" font-weight="700">Optimal</text>
+
+    <rect x="182" y="244" width="152" height="34" rx="10" fill="#252824"/>
+    <text x="194" y="265" fill="#9AA097" font-family="monospace" font-size="11">IDE</text>
+    <text x="228" y="265" fill="#F2F4F0" font-family="monospace" font-size="12" font-weight="700">:8080 Ready</text>
+  </g>
+</svg>

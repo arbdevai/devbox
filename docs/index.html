@@ -1,0 +1,344 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>DevBox v1.0.82 — Linux Container Engine & AI Agent Runtime for Android</title>
+  <meta name="description" content="Native ARM64 Ubuntu Chroot Engine, 2D Matrix VT100/XTerm PTY, Zero-Orphan Process Reaper, and Integrated Code-Server IDE for Android. Redesigned with 2026 Material 3 Expressive (#7DFF4C & #141414)." />
+  <meta name="theme-color" content="#141414" />
+  <link rel="icon" type="image/svg+xml" href="assets/logo.svg" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <!-- Ambient Background Glow -->
+  <div class="ambient-glow glow-top"></div>
+  <div class="ambient-glow glow-bottom"></div>
+
+  <!-- Sticky 2026 Glass Navigation -->
+  <header class="navbar">
+    <div class="container nav-inner">
+      <a href="#" class="brand">
+        <img src="assets/logo.svg" alt="DevBox Logo" class="brand-logo" />
+        <span class="brand-name">DevBox</span>
+        <span class="version-pill">v1.0.82</span>
+      </a>
+
+      <nav class="nav-links">
+        <a href="#showcase">Interactive UI</a>
+        <a href="#bento">Architecture</a>
+        <a href="#gallery">Screens</a>
+        <a href="#comparison">vs Termux</a>
+      </nav>
+
+      <div class="nav-actions">
+        <a href="https://github.com/arbdevai/devbox" target="_blank" rel="noopener" class="btn btn-tonal">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M12 .3a12 12 0 0 0-3.8 23.4c.6.1.8-.3.8-.6v-2c-3.3.7-4-1.6-4-1.6-.6-1.4-1.4-1.8-1.4-1.8-1-.7.1-.7.1-.7 1.2.1 1.8 1.2 1.8 1.2 1 1.8 2.8 1.3 3.5 1 .1-.8.4-1.3.7-1.6-2.7-.3-5.5-1.3-5.5-5.9 0-1.3.5-2.4 1.2-3.2-.1-.3-.5-1.5.1-3.2 0 0 1-.3 3.3 1.2a11.5 11.5 0 0 1 6 0c2.3-1.5 3.3-1.2 3.3-1.2.6 1.7.2 2.9.1 3.2.8.8 1.2 1.9 1.2 3.2 0 4.6-2.8 5.6-5.5 5.9.4.4.8 1.1.8 2.2v3.3c0 .3.2.7.8.6A12 12 0 0 0 12 .3"/></svg>
+          <span>GitHub</span>
+        </a>
+        <a href="https://github.com/arbdevai/devbox/releases/tag/v1.0.82" target="_blank" rel="noopener" class="btn btn-primary">
+          <span>Download APK</span>
+          <span class="btn-arrow">→</span>
+        </a>
+      </div>
+    </div>
+  </header>
+
+  <main>
+    <!-- Hero Section -->
+    <section class="hero container" id="showcase">
+      <div class="hero-content">
+        <div class="status-badge">
+          <span class="pulse-dot"></span>
+          <span>2026 MATERIAL 3 EXPRESSIVE • #7DFF4C &amp; #141414</span>
+        </div>
+
+        <h1 class="hero-title">
+          Linux Container Engine &amp; <span class="text-acid">AI Agent Runtime</span> for Android.
+        </h1>
+
+        <p class="hero-subtitle">
+          Say goodbye to legacy Termux PRoot bottlenecks, zombie RAM leaks, and broken TUI keyboards. Run native ARM64 <strong>Ubuntu 24.04 Chroot</strong>, <strong>Google Antigravity CLI (<code>agy</code>)</strong>, <strong>Claude Code</strong>, and <strong>Code-Server IDE</strong> with zero orphan processes.
+        </p>
+
+        <div class="hero-cta-row">
+          <a href="https://github.com/arbdevai/devbox/releases/tag/v1.0.82" class="btn btn-primary btn-lg">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+            <span>Download DevBox v1.0.82 (.apk)</span>
+          </a>
+          <a href="https://github.com/arbdevai/devbox" target="_blank" rel="noopener" class="btn btn-surface btn-lg">
+            <span>Explore Source Code</span>
+          </a>
+        </div>
+
+        <!-- Quick Terminal Snippet -->
+        <div class="code-pill-box">
+          <div class="code-pill-header">
+            <span class="code-dot"></span>
+            <span class="code-label">coder@devbox:~/projects$</span>
+            <button class="copy-btn" id="copyCmdBtn" title="Copy command">Copy</button>
+          </div>
+          <pre><code id="cmdText">cd ~/projects/devbox &amp;&amp; agy --dangerously-skip-permissions</code></pre>
+        </div>
+
+        <div class="hero-metrics">
+          <div class="metric-item">
+            <span class="metric-val">0 Orphans</span>
+            <span class="metric-lbl">Session-ID Reaper</span>
+          </div>
+          <div class="metric-divider"></div>
+          <div class="metric-item">
+            <span class="metric-val">60 FPS</span>
+            <span class="metric-lbl">2D VT100/XTerm Grid</span>
+          </div>
+          <div class="metric-divider"></div>
+          <div class="metric-item">
+            <span class="metric-val">#7DFF4C</span>
+            <span class="metric-lbl">M3 Expressive Dark</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Interactive Phone Switcher -->
+      <div class="hero-QuickPreview">
+        <div class="phone-frame">
+          <div class="phone-notch"></div>
+          <img
+            id="activeScreenImg"
+            src="assets/screenshots/01-dashboard.png"
+            alt="DevBox App Screen Preview"
+            class="phone-screen-img"
+          />
+        </div>
+
+        <div class="screen-tabs" role="tablist">
+          <button class="screen-tab active" data-img="assets/screenshots/01-dashboard.png" data-caption="Container Dashboard & 2x2 Bento Telemetry">
+            1. Dashboard
+          </button>
+          <button class="screen-tab" data-img="assets/screenshots/02-terminal-agy.png" data-caption="Native PTY Terminal Running Antigravity CLI (agy)">
+            2. Terminal (agy)
+          </button>
+          <button class="screen-tab" data-img="assets/screenshots/03-system-logs.png" data-caption="System Logs, Mount Audit & Process Reaper Diagnostics">
+            3. Diagnostics
+          </button>
+          <button class="screen-tab" data-img="assets/screenshots/04-code-server-ide.png" data-caption="Integrated Code-Server VS Code Web IDE (127.0.0.1:8080)">
+            4. Web IDE
+          </button>
+          <button class="screen-tab" data-img="assets/screenshots/05-web-preview.png" data-caption="Multi-Tab Localhost Browser with Instant Port Presets">
+            5. Preview
+          </button>
+        </div>
+        <p id="activeScreenCaption" class="screen-caption">Container Dashboard &amp; 2x2 Bento Telemetry</p>
+      </div>
+    </section>
+
+    <!-- 2026 Bento Architecture Section -->
+    <section class="section container" id="bento">
+      <div class="section-header">
+        <span class="eyebrow">2026 CORE ARCHITECTURE</span>
+        <h2 class="section-title">Engineered for AI CLI Agents &amp; Heavy Linux Workloads</h2>
+        <p class="section-desc">
+          Every subsystem in DevBox is purpose-built to eliminate the crashes, keyboard corruption, and memory leaks that plague traditional Android terminal emulators.
+        </p>
+      </div>
+
+      <div class="bento-grid">
+        <article class="bento-card bento-wide">
+          <div class="bento-icon">⚡</div>
+          <h3>2D Matrix VT100/XTerm PTY Engine &amp; Differential IME Bridge</h3>
+          <p>
+            Unlike line-based text views, <code>TerminalGridBuffer</code> maintains a true dual-buffer (Primary + <code>?1049h</code> Alternate Screen) character matrix with 24-bit TrueColor, regional scrolling (<code>DECSTBM</code>), and a custom differential Android <code>InputConnection</code>. Typing inside <strong>Google Antigravity CLI (<code>agy</code>)</strong>, <strong>Claude Code</strong>, or <strong>Neovim</strong> never suffers from predictive keyboard composition bugs or stuck cursors.
+          </p>
+          <div class="bento-tags">
+            <span>/dev/ptmx JNI</span>
+            <span>?1049h Alt-Buffer</span>
+            <span>TIOCSWINSZ Auto-Resize</span>
+            <span>60FPS Throttling</span>
+          </div>
+        </article>
+
+        <article class="bento-card">
+          <div class="bento-icon">🛡️</div>
+          <h3>Zero-Orphan Process Reaper</h3>
+          <p>
+            Every shell session is tagged with a unique <code>DEVBOX_SESSION_ID</code> in <code>/proc/[pid]/environ</code>. Closing a session executes an escalating <code>SIGHUP → SIGTERM → SIGKILL</code> sweep across the process tree while protecting active foreground AI agents.
+          </p>
+          <div class="bento-tags">
+            <span>0 Zombie Leaks</span>
+            <span>RAM Guard</span>
+          </div>
+        </article>
+
+        <article class="bento-card">
+          <div class="bento-icon">🎨</div>
+          <h3>2026 Google M3 Expressive UI</h3>
+          <p>
+            Crafted with Carbon Matte Black (<code>#141414</code>), Elevated Olive-Slate (<code>#1C1E1B</code>), and Neon Acid Green (<code>#7DFF4C</code>) for maximum legibility, zero blue-light eye strain, and tactile ergonomics.
+          </p>
+          <div class="bento-tags">
+            <span>#7DFF4C Primary</span>
+            <span>#141414 Matte</span>
+          </div>
+        </article>
+
+        <article class="bento-card">
+          <div class="bento-icon">💻</div>
+          <h3>Embedded Code-Server IDE</h3>
+          <p>
+            Launch and interact with VS Code (<code>127.0.0.1:8080</code>) directly inside the dedicated <strong>Web IDE</strong> tab with automatic port readiness probing and full clipboard integration.
+          </p>
+          <div class="bento-tags">
+            <span>127.0.0.1:8080</span>
+            <span>1-Tap Daemon</span>
+          </div>
+        </article>
+
+        <article class="bento-card">
+          <div class="bento-icon">🌐</div>
+          <h3>Multi-Tab Localhost Browser</h3>
+          <p>
+            Chrome-style pill tabs, rounded URL omnibox, and 1-tap port presets (<code>:3000 Next/Node</code>, <code>:5173 Vite</code>, <code>:8000 FastAPI</code>, <code>:8080 IDE</code>) plus automatic URL detection from terminal stdout.
+          </p>
+          <div class="bento-tags">
+            <span>Multi-Tab WebView</span>
+            <span>Port Chips</span>
+          </div>
+        </article>
+      </div>
+    </section>
+
+    <!-- Full 5-Screen Visual Gallery -->
+    <section class="section container" id="gallery">
+      <div class="section-header">
+        <span class="eyebrow">COMPLETE INTERFACE TOUR</span>
+        <h2 class="section-title">Every Screen, Unified in <span class="text-acid">#7DFF4C</span> &amp; <span class="text-mono">#141414</span></h2>
+        <p class="section-desc">
+          All 5 core workspaces share a cohesive Google Material 3 Expressive design system with clean English developer terminology.
+        </p>
+      </div>
+
+      <div class="gallery-grid">
+        <div class="gallery-card">
+          <div class="gallery-img-wrap">
+            <img src="assets/screenshots/01-dashboard.png" alt="Dashboard Screen" loading="lazy" />
+          </div>
+          <div class="gallery-info">
+            <span class="gallery-badge">01 • DASHBOARD</span>
+            <h4>Hero Container Status &amp; Bento Telemetry</h4>
+            <p>Live container state squircle, quick-launch pills, 2x2 Bento telemetry (RAM, Swap/ZRAM, Container PIDs, PTY Sessions), and 1-tap service switches.</p>
+          </div>
+        </div>
+
+        <div class="gallery-card">
+          <div class="gallery-img-wrap">
+            <img src="assets/screenshots/02-terminal-agy.png" alt="Terminal Screen running Antigravity CLI" loading="lazy" />
+          </div>
+          <div class="gallery-info">
+            <span class="gallery-badge">02 • TERMINAL</span>
+            <h4>True PTY Shell &amp; Antigravity CLI</h4>
+            <p>Google Pill session tabs, native <code>agy</code> AI agent execution with <code>#7DFF4C</code> block cursor, ModalBottomSheets, and 2-row tactile Extra-Keys dock.</p>
+          </div>
+        </div>
+
+        <div class="gallery-card">
+          <div class="gallery-img-wrap">
+            <img src="assets/screenshots/03-system-logs.png" alt="System Logs Screen" loading="lazy" />
+          </div>
+          <div class="gallery-info">
+            <span class="gallery-badge">03 • LOGS &amp; DIAGNOSTICS</span>
+            <h4>Real-Time Mount &amp; Reaper Audit</h4>
+            <p>Inspect every root command, chroot mount operation, and orphan reaper pass with pill filter chips and 1-tap clipboard export.</p>
+          </div>
+        </div>
+
+        <div class="gallery-card">
+          <div class="gallery-img-wrap">
+            <img src="assets/screenshots/04-code-server-ide.png" alt="Code-Server Web IDE Screen" loading="lazy" />
+          </div>
+          <div class="gallery-info">
+            <span class="gallery-badge">04 • WEB IDE</span>
+            <h4>Integrated Code-Server Workspace</h4>
+            <p>Dedicated <code>127.0.0.1:8080</code> IDE container with instant offline recovery card and 1-tap daemon startup.</p>
+          </div>
+        </div>
+
+        <div class="gallery-card">
+          <div class="gallery-img-wrap">
+            <img src="assets/screenshots/05-web-preview.png" alt="Web Preview Browser Screen" loading="lazy" />
+          </div>
+          <div class="gallery-info">
+            <span class="gallery-badge">05 • PREVIEW</span>
+            <h4>Chrome-Style Pill Omnibox &amp; Port Chips</h4>
+            <p>Persistent multi-tab WebView browser with instant localhost port chips (<code>:3000</code>, <code>:5173</code>, <code>:8000</code>, <code>:8080</code>).</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Comparison Table Section -->
+    <section class="section container" id="comparison">
+      <div class="section-header">
+        <span class="eyebrow">BENCHMARK COMPARISON</span>
+        <h2 class="section-title">Why Switch from Legacy Termux + PRoot/Chroot?</h2>
+      </div>
+
+      <div class="table-wrap">
+        <table class="comp-table">
+          <thead>
+            <tr>
+              <th>Engineering Dimension</th>
+              <th>Legacy Termux + PRoot/Chroot</th>
+              <th class="highlight-col">DevBox v1.0.82</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><strong>Orphan Process &amp; RAM Management</strong></td>
+              <td>Orphaned Node/Python daemons accumulate and exhaust RAM</td>
+              <td class="highlight-col"><strong>Automated <code>DEVBOX_SESSION_ID</code> Process Tree Reaper</strong></td>
+            </tr>
+            <tr>
+              <td><strong>TUI AI Agent Input (<code>agy</code>, <code>claude</code>)</strong></td>
+              <td>Android IME predictive composition corrupts TUI input lines</td>
+              <td class="highlight-col"><strong>Differential IME Bridge + 2D Matrix VT100/XTerm Buffer</strong></td>
+            </tr>
+            <tr>
+              <td><strong>Filesystem Execution Speed</strong></td>
+              <td>Slow <code>ptrace</code> syscall translation in PRoot</td>
+              <td class="highlight-col"><strong>Native Kernel <code>chroot</code> + <code>/dev/ptmx</code> JNI</strong></td>
+            </tr>
+            <tr>
+              <td><strong>Localhost Web Dev &amp; IDE</strong></td>
+              <td>External browser context-switching required</td>
+              <td class="highlight-col"><strong>Embedded Code-Server Tab + Multi-Tab Port Preview</strong></td>
+            </tr>
+            <tr>
+              <td><strong>Design Language</strong></td>
+              <td>Legacy Holo / Basic Material</td>
+              <td class="highlight-col"><strong>2026 Google M3 Expressive (<code>#7DFF4C</code> &amp; <code>#141414</code>)</strong></td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+  </main>
+
+  <footer class="footer">
+    <div class="container footer-inner">
+      <div class="footer-brand">
+        <img src="assets/logo.svg" alt="DevBox Logo" width="28" height="28" />
+        <span><strong>DevBox v1.0.82</strong> — Crafted by ARBDEV AI</span>
+      </div>
+      <div class="footer-links">
+        <a href="https://github.com/arbdevai/devbox">GitHub Repository</a>
+        <a href="https://github.com/arbdevai/devbox/releases/tag/v1.0.82">Download v1.0.82 APK</a>
+        <a href="https://github.com/arbdevai/devbox/actions">CI/CD Builds</a>
+      </div>
+    </div>
+  </footer>
+
+  <script src="app.js"></script>
+</body>
+</html>
