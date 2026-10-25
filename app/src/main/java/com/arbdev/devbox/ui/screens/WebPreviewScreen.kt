@@ -10,6 +10,7 @@ import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -26,6 +27,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
@@ -38,12 +40,13 @@ import androidx.compose.material.icons.filled.Language
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
-import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -57,7 +60,6 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.text.TextStyle
@@ -68,7 +70,14 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
+import com.arbdev.devbox.ui.theme.DevBackground
+import com.arbdev.devbox.ui.theme.DevBorder
+import com.arbdev.devbox.ui.theme.DevOnSurface
+import com.arbdev.devbox.ui.theme.DevOnSurfaceVariant
 import com.arbdev.devbox.ui.theme.DevPrimary
+import com.arbdev.devbox.ui.theme.DevPrimaryContainer
+import com.arbdev.devbox.ui.theme.DevSurface
+import com.arbdev.devbox.ui.theme.DevSurfaceVariant
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
@@ -78,7 +87,7 @@ import java.util.UUID
 class WebTabItem(
     val id: String = UUID.randomUUID().toString(),
     initialUrl: String,
-    initialTitle: String = "Lokal"
+    initialTitle: String = "Localhost"
 ) {
     var url by mutableStateOf(initialUrl)
     var title by mutableStateOf(initialTitle)
@@ -88,7 +97,7 @@ class WebTabItem(
 @Serializable
 data class SavedWebTab(
     val url: String,
-    val title: String = "Lokal"
+    val title: String = "Localhost"
 )
 
 object WebPreviewStateManager {
@@ -185,7 +194,6 @@ fun WebPreviewScreen() {
         canForward = currentTab.webView?.canGoForward() == true
     }
 
-    // Intercept back button for in-webview history navigation
     BackHandler(enabled = canBack) {
         val activeView = currentTab.webView ?: webViewRef
         if (activeView?.canGoBack() == true) {
@@ -211,80 +219,78 @@ fun WebPreviewScreen() {
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .background(Color(0xFF000000))
+            .background(DevBackground)
     ) {
-        // Multi-Tab Header Bar
+        // 2026 Google M3 Pill Tab Bar
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .background(Color(0xFF080808))
+                .background(DevSurface)
                 .horizontalScroll(rememberScrollState())
-                .padding(horizontal = 6.dp, vertical = 4.dp),
+                .padding(horizontal = 8.dp, vertical = 6.dp),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(4.dp)
+            horizontalArrangement = Arrangement.spacedBy(6.dp)
         ) {
             tabs.forEachIndexed { index, tab ->
                 val isActive = index == activeTabIndex
-                Row(
-                    modifier = Modifier
-                        .background(
-                            color = if (isActive) Color(0xFF161616) else Color(0xFF0C0C0C),
-                            shape = RoundedCornerShape(topStart = 8.dp, topEnd = 8.dp)
-                        )
-                        .border(
-                            width = 1.dp,
-                            color = if (isActive) DevPrimary.copy(alpha = 0.6f) else Color(0xFF1E1E1E),
-                            shape = RoundedCornerShape(topStart = 8.dp, topEnd = 8.dp)
-                        )
-                        .clickable {
-                            if (activeTabIndex != index) {
-                                activeTabIndex = index
-                                urlInput = tab.url
-                                canBack = tab.webView?.canGoBack() == true
-                                canForward = tab.webView?.canGoForward() == true
-                                WebPreviewStateManager.save(context)
-                            }
+                Surface(
+                    color = if (isActive) DevPrimaryContainer else DevSurfaceVariant,
+                    shape = RoundedCornerShape(50),
+                    border = BorderStroke(
+                        width = 1.dp,
+                        color = if (isActive) DevPrimary else DevBorder
+                    ),
+                    modifier = Modifier.clickable {
+                        if (activeTabIndex != index) {
+                            activeTabIndex = index
+                            urlInput = tab.url
+                            canBack = tab.webView?.canGoBack() == true
+                            canForward = tab.webView?.canGoForward() == true
+                            WebPreviewStateManager.save(context)
                         }
-                        .padding(horizontal = 10.dp, vertical = 6.dp),
-                    verticalAlignment = Alignment.CenterVertically
+                    }
                 ) {
-                    Text(
-                        text = tab.title,
-                        fontSize = 11.sp,
-                        fontWeight = if (isActive) FontWeight.Bold else FontWeight.Normal,
-                        color = if (isActive) DevPrimary else Color.LightGray,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
-                    if (tabs.size > 1) {
-                        Spacer(modifier = Modifier.width(6.dp))
-                        Icon(
-                            imageVector = Icons.Default.Close,
-                            contentDescription = "Tutup Tab",
-                            tint = Color.Gray,
-                            modifier = Modifier
-                                .size(14.dp)
-                                .clickable {
-                                    val removed = tabs.removeAt(index)
-                                    try {
-                                        removed.webView?.destroy()
-                                    } catch (_: Exception) {}
-                                    if (activeTabIndex >= tabs.size) {
-                                        activeTabIndex = tabs.size - 1
-                                    }
-                                    val newActive = tabs[activeTabIndex]
-                                    urlInput = newActive.url
-                                    canBack = newActive.webView?.canGoBack() == true
-                                    canForward = newActive.webView?.canGoForward() == true
-                                    WebPreviewStateManager.save(context)
-                                }
+                    Row(
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 5.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = tab.title,
+                            fontSize = 11.sp,
+                            fontWeight = if (isActive) FontWeight.Bold else FontWeight.Medium,
+                            color = if (isActive) DevPrimary else DevOnSurfaceVariant,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
                         )
+                        if (tabs.size > 1) {
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Icon(
+                                imageVector = Icons.Default.Close,
+                                contentDescription = "Close Tab",
+                                tint = if (isActive) DevPrimary else DevOnSurfaceVariant,
+                                modifier = Modifier
+                                    .size(13.dp)
+                                    .clickable {
+                                        val removed = tabs.removeAt(index)
+                                        try {
+                                            removed.webView?.destroy()
+                                        } catch (_: Exception) {}
+                                        if (activeTabIndex >= tabs.size) {
+                                            activeTabIndex = tabs.size - 1
+                                        }
+                                        val newActive = tabs[activeTabIndex]
+                                        urlInput = newActive.url
+                                        canBack = newActive.webView?.canGoBack() == true
+                                        canForward = newActive.webView?.canGoForward() == true
+                                        WebPreviewStateManager.save(context)
+                                    }
+                            )
+                        }
                     }
                 }
             }
 
-            // Add Tab Button (+)
-            IconButton(
+            Surface(
                 onClick = {
                     val defaultUrl = "http://127.0.0.1:3000"
                     val newTab = WebTabItem(
@@ -298,26 +304,30 @@ fun WebPreviewScreen() {
                     canForward = false
                     WebPreviewStateManager.save(context)
                 },
+                color = DevSurfaceVariant,
+                shape = CircleShape,
+                border = BorderStroke(1.dp, DevBorder),
                 modifier = Modifier.size(28.dp)
             ) {
-                Icon(
-                    imageVector = Icons.Default.Add,
-                    contentDescription = "Tab Baru",
-                    tint = DevPrimary,
-                    modifier = Modifier.size(16.dp)
-                )
+                Box(contentAlignment = Alignment.Center) {
+                    Icon(
+                        imageVector = Icons.Default.Add,
+                        contentDescription = "New Tab",
+                        tint = DevPrimary,
+                        modifier = Modifier.size(16.dp)
+                    )
+                }
             }
         }
 
-        // Navigation Bar with History (Back, Forward, Reload) and URL input
+        // Google Chrome-style Pill Omnibox Bar
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .background(Color(0xFF0F0F0F))
-                .padding(horizontal = 6.dp, vertical = 4.dp),
+                .background(DevSurface)
+                .padding(horizontal = 8.dp, vertical = 4.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            // History Back Button
             IconButton(
                 onClick = { (currentTab.webView ?: webViewRef)?.goBack() },
                 enabled = canBack,
@@ -325,13 +335,12 @@ fun WebPreviewScreen() {
             ) {
                 Icon(
                     imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                    contentDescription = "Kembali",
-                    tint = if (canBack) Color.White else Color.DarkGray,
+                    contentDescription = "Back",
+                    tint = if (canBack) DevOnSurface else DevOnSurfaceVariant.copy(alpha = 0.4f),
                     modifier = Modifier.size(18.dp)
                 )
             }
 
-            // History Forward Button
             IconButton(
                 onClick = { (currentTab.webView ?: webViewRef)?.goForward() },
                 enabled = canForward,
@@ -339,28 +348,26 @@ fun WebPreviewScreen() {
             ) {
                 Icon(
                     imageVector = Icons.AutoMirrored.Filled.ArrowForward,
-                    contentDescription = "Maju",
-                    tint = if (canForward) Color.White else Color.DarkGray,
+                    contentDescription = "Forward",
+                    tint = if (canForward) DevOnSurface else DevOnSurfaceVariant.copy(alpha = 0.4f),
                     modifier = Modifier.size(18.dp)
                 )
             }
 
-            // Reload Button
             IconButton(
                 onClick = { (currentTab.webView ?: webViewRef)?.reload() },
                 modifier = Modifier.size(32.dp)
             ) {
                 Icon(
                     imageVector = Icons.Default.Refresh,
-                    contentDescription = "Segarkan",
-                    tint = Color.White,
+                    contentDescription = "Refresh",
+                    tint = DevOnSurface,
                     modifier = Modifier.size(18.dp)
                 )
             }
 
-            Spacer(modifier = Modifier.width(4.dp))
+            Spacer(modifier = Modifier.width(6.dp))
 
-            // URL Address Input Field
             OutlinedTextField(
                 value = urlInput,
                 onValueChange = { urlInput = it },
@@ -368,8 +375,8 @@ fun WebPreviewScreen() {
                     .weight(1f)
                     .height(46.dp),
                 singleLine = true,
-                shape = RoundedCornerShape(8.dp),
-                textStyle = TextStyle(fontSize = 12.sp, fontFamily = FontFamily.Monospace, color = Color.White),
+                shape = RoundedCornerShape(50),
+                textStyle = TextStyle(fontSize = 12.sp, fontFamily = FontFamily.Monospace, color = DevOnSurface),
                 leadingIcon = {
                     Icon(
                         imageVector = Icons.Default.Language,
@@ -380,9 +387,9 @@ fun WebPreviewScreen() {
                 },
                 colors = OutlinedTextFieldDefaults.colors(
                     focusedBorderColor = DevPrimary,
-                    unfocusedBorderColor = Color(0xFF252525),
-                    focusedContainerColor = Color(0xFF050505),
-                    unfocusedContainerColor = Color(0xFF050505)
+                    unfocusedBorderColor = DevBorder,
+                    focusedContainerColor = DevSurfaceVariant,
+                    unfocusedContainerColor = DevSurfaceVariant
                 ),
                 keyboardOptions = KeyboardOptions(imeAction = ImeAction.Go),
                 keyboardActions = KeyboardActions(onGo = { navigateTo(urlInput) })
@@ -393,27 +400,28 @@ fun WebPreviewScreen() {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .background(Color(0xFF0A0A0A))
+                .background(DevBackground)
                 .horizontalScroll(rememberScrollState())
-                .padding(horizontal = 6.dp, vertical = 2.dp),
-            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                .padding(horizontal = 8.dp, vertical = 2.dp),
+            horizontalArrangement = Arrangement.spacedBy(6.dp)
         ) {
-            PortChip(label = ":3000") { navigateTo("http://127.0.0.1:3000") }
+            PortChip(label = ":3000 (Next/Node)") { navigateTo("http://127.0.0.1:3000") }
             PortChip(label = ":5173 (Vite)") { navigateTo("http://127.0.0.1:5173") }
             PortChip(label = ":8000 (FastAPI)") { navigateTo("http://127.0.0.1:8000") }
-            PortChip(label = ":8080 (VS Code)") { navigateTo("http://127.0.0.1:8080") }
+            PortChip(label = ":8080 (Code-Server)") { navigateTo("http://127.0.0.1:8080") }
         }
 
-        // Loading Progress Bar
+        HorizontalDivider(thickness = 1.dp, color = DevBorder)
+
         if (isLoading) {
             LinearProgressIndicator(
                 progress = { loadProgress },
-                modifier = Modifier.fillMaxWidth(),
-                color = DevPrimary
+                modifier = Modifier.fillMaxWidth().height(3.dp),
+                color = DevPrimary,
+                trackColor = DevSurfaceVariant
             )
         }
 
-        // Embedded Multi-Tab WebView with Persistent In-Memory DOM State
         Box(
             modifier = Modifier
                 .weight(1f)
@@ -528,15 +536,21 @@ fun PortChip(
     FilterChip(
         selected = false,
         onClick = onClick,
-        shape = RoundedCornerShape(6.dp),
+        shape = RoundedCornerShape(50),
+        border = FilterChipDefaults.filterChipBorder(
+            enabled = true,
+            selected = false,
+            borderColor = DevBorder
+        ),
         label = {
             Text(
                 text = label,
                 fontSize = 10.sp,
                 fontFamily = FontFamily.Monospace,
-                color = MaterialTheme.colorScheme.onSurface
+                fontWeight = FontWeight.SemiBold,
+                color = DevPrimary
             )
         },
-        colors = FilterChipDefaults.filterChipColors(containerColor = Color(0xFF141414))
+        colors = FilterChipDefaults.filterChipColors(containerColor = DevSurfaceVariant)
     )
 }

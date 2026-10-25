@@ -63,7 +63,7 @@ class KeepAliveService : Service() {
             try {
                 val active = TerminalSessionManager.getActiveSession()
                 val sessionCount = TerminalSessionManager.sessions.size
-                val statusText = if (active.isRunning) "Menjalankan perintah..." else "Siap"
+                val statusText = if (active.isRunning) "Running" else "Ready"
                 val dir = active.getDisplayDir()
 
                 val manager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
@@ -88,15 +88,16 @@ class KeepAliveService : Service() {
                 )
 
                 val notification = NotificationCompat.Builder(context, CHANNEL_ID)
-                    .setContentTitle("DevBox Linux Container ($sessionCount Sesi)")
+                    .setContentTitle("DevBox Container ($sessionCount Active)")
                     .setContentText("${active.name}: $dir [$statusText]")
                     .setSmallIcon(android.R.drawable.ic_dialog_info)
+                    .setColor(0xFF7DFF4C.toInt())
                     .setOngoing(true)
                     .setContentIntent(pendingOpenIntent)
                     .setPriority(NotificationCompat.PRIORITY_LOW)
                     .addAction(
                         android.R.drawable.ic_menu_close_clear_cancel,
-                        "Matikan Container & Keluar",
+                        "Stop Container & Exit",
                         pendingKillIntent
                     )
                     .build()
@@ -227,19 +228,20 @@ class KeepAliveService : Service() {
 
         val active = TerminalSessionManager.getActiveSession()
         val sessionCount = TerminalSessionManager.sessions.size
-        val statusText = if (active.isRunning) "Menjalankan perintah..." else "Siap"
+        val statusText = if (active.isRunning) "Running" else "Ready"
         val dir = active.getDisplayDir()
 
         return NotificationCompat.Builder(this, CHANNEL_ID)
-            .setContentTitle("DevBox Linux Container ($sessionCount Sesi)")
+            .setContentTitle("DevBox Container ($sessionCount Active)")
             .setContentText("${active.name}: $dir [$statusText]")
             .setSmallIcon(android.R.drawable.ic_dialog_info)
+            .setColor(0xFF7DFF4C.toInt())
             .setOngoing(true)
             .setContentIntent(pendingOpenIntent)
             .setPriority(NotificationCompat.PRIORITY_LOW)
             .addAction(
                 android.R.drawable.ic_menu_close_clear_cancel,
-                "Matikan Container & Keluar",
+                "Stop Container & Exit",
                 pendingKillIntent
             )
             .build()

@@ -1,6 +1,7 @@
 package com.arbdev.devbox.ui.screens
 
 import android.widget.Toast
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
@@ -18,6 +19,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material.icons.Icons
@@ -28,10 +30,9 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -52,12 +53,19 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.arbdev.devbox.data.ChrootManager
 import com.arbdev.devbox.ui.theme.DevBackground
+import com.arbdev.devbox.ui.theme.DevBorder
+import com.arbdev.devbox.ui.theme.DevCanvasDeep
 import com.arbdev.devbox.ui.theme.DevError
+import com.arbdev.devbox.ui.theme.DevOnPrimary
+import com.arbdev.devbox.ui.theme.DevOnSurface
+import com.arbdev.devbox.ui.theme.DevOnSurfaceVariant
 import com.arbdev.devbox.ui.theme.DevPrimary
+import com.arbdev.devbox.ui.theme.DevPrimaryContainer
 import com.arbdev.devbox.ui.theme.DevSecondary
 import com.arbdev.devbox.ui.theme.DevSuccess
+import com.arbdev.devbox.ui.theme.DevSurface
+import com.arbdev.devbox.ui.theme.DevSurfaceVariant
 import com.arbdev.devbox.ui.theme.DevWarning
-import com.arbdev.devbox.ui.theme.TerminalBackground
 import com.arbdev.devbox.util.AppLogger
 import com.arbdev.devbox.util.LogLevel
 import kotlinx.coroutines.launch
@@ -77,7 +85,6 @@ fun LogScreen() {
         if (selectedLevel == null) rawLogs else rawLogs.filter { it.level == selectedLevel }
     }
 
-    // Auto scroll ke paling bawah saat ada log baru
     LaunchedEffect(filteredLogs.size) {
         if (filteredLogs.isNotEmpty()) {
             listState.animateScrollToItem(filteredLogs.size - 1)
@@ -89,136 +96,158 @@ fun LogScreen() {
             .fillMaxSize()
             .background(DevBackground)
     ) {
-        // Header Bar
+        // 2026 Google M3 Header Bar
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .background(Color(0xFF000000))
-                .padding(horizontal = 16.dp, vertical = 10.dp),
+                .background(DevSurface)
+                .padding(horizontal = 16.dp, vertical = 12.dp),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
             Column {
                 Text(
-                    text = "Log Sistem & Diagnostik",
+                    text = "System Logs & Diagnostics",
                     fontSize = 18.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = Color.White
+                    fontWeight = FontWeight.ExtraBold,
+                    color = DevOnSurface
                 )
                 Text(
-                    text = "${rawLogs.size} baris log tercatat",
-                    fontSize = 12.sp,
-                    color = Color.Gray
+                    text = "${rawLogs.size} events recorded",
+                    fontSize = 11.sp,
+                    color = DevOnSurfaceVariant
                 )
             }
 
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                // Copy All Button
-                IconButton(
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Surface(
                     onClick = {
                         val allText = AppLogger.getAllAsText()
                         if (allText.isNotBlank()) {
                             clipboardManager.setText(AnnotatedString(allText))
-                            Toast.makeText(context, "Semua log berhasil disalin ke clipboard", Toast.LENGTH_SHORT).show()
+                            Toast.makeText(context, "All logs copied to clipboard", Toast.LENGTH_SHORT).show()
                         } else {
-                            Toast.makeText(context, "Log masih kosong", Toast.LENGTH_SHORT).show()
+                            Toast.makeText(context, "Log buffer is empty", Toast.LENGTH_SHORT).show()
                         }
-                    }
+                    },
+                    color = DevSurfaceVariant,
+                    shape = CircleShape,
+                    modifier = Modifier.size(36.dp)
                 ) {
-                    Icon(
-                        imageVector = Icons.Default.ContentCopy,
-                        contentDescription = "Salin Semua Log",
-                        tint = DevPrimary,
-                        modifier = Modifier.size(20.dp)
-                    )
+                    Box(contentAlignment = Alignment.Center) {
+                        Icon(
+                            imageVector = Icons.Default.ContentCopy,
+                            contentDescription = "Copy All Logs",
+                            tint = DevPrimary,
+                            modifier = Modifier.size(18.dp)
+                        )
+                    }
                 }
 
-                // Clear Button
-                IconButton(
+                Surface(
                     onClick = {
                         AppLogger.clear()
-                        Toast.makeText(context, "Log berhasil dibersihkan", Toast.LENGTH_SHORT).show()
-                    }
+                        Toast.makeText(context, "Logs cleared", Toast.LENGTH_SHORT).show()
+                    },
+                    color = DevSurfaceVariant,
+                    shape = CircleShape,
+                    modifier = Modifier.size(36.dp)
                 ) {
-                    Icon(
-                        imageVector = Icons.Default.DeleteSweep,
-                        contentDescription = "Hapus Log",
-                        tint = DevError,
-                        modifier = Modifier.size(20.dp)
-                    )
+                    Box(contentAlignment = Alignment.Center) {
+                        Icon(
+                            imageVector = Icons.Default.DeleteSweep,
+                            contentDescription = "Clear Logs",
+                            tint = DevError,
+                            modifier = Modifier.size(18.dp)
+                        )
+                    }
                 }
             }
         }
 
-        // Quick Diagnostics Action Bar & Level Filters
+        HorizontalDivider(thickness = 1.dp, color = DevBorder)
+
+        // Diagnostics & Filter Pill Row
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .background(Color(0xFF0A0A0A))
+                .background(DevBackground)
                 .horizontalScroll(rememberScrollState())
                 .padding(horizontal = 12.dp, vertical = 6.dp),
-            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            // Diagnostik Cepat Button
-            OutlinedButton(
+            Surface(
                 onClick = {
-                    scope.launch {
-                        isRunningDiag = true
-                        ChrootManager.runEnvironmentDiagnostics()
-                        isRunningDiag = false
+                    if (!isRunningDiag) {
+                        scope.launch {
+                            isRunningDiag = true
+                            ChrootManager.runEnvironmentDiagnostics()
+                            isRunningDiag = false
+                        }
                     }
                 },
-                enabled = !isRunningDiag,
-                shape = RoundedCornerShape(8.dp)
+                color = DevPrimaryContainer,
+                shape = RoundedCornerShape(50),
+                border = BorderStroke(1.dp, DevPrimary.copy(alpha = 0.5f))
             ) {
-                Icon(
-                    imageVector = Icons.Default.Assessment,
-                    contentDescription = null,
-                    modifier = Modifier.size(14.dp),
-                    tint = DevPrimary
-                )
-                Spacer(modifier = Modifier.width(6.dp))
-                Text(
-                    text = if (isRunningDiag) "Mendiagnostik..." else "Cek Lingkungan (Diagnostik)",
-                    fontSize = 11.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = DevPrimary
-                )
+                Row(
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 7.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Assessment,
+                        contentDescription = null,
+                        modifier = Modifier.size(15.dp),
+                        tint = DevPrimary
+                    )
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text(
+                        text = if (isRunningDiag) "Inspecting..." else "Run Diagnostics",
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = DevPrimary
+                    )
+                }
             }
 
-            // Filter Chips
             FilterChip(
                 selected = selectedLevel == null,
                 onClick = { selectedLevel = null },
-                label = { Text("Semua (${rawLogs.size})", fontSize = 11.sp) },
-                shape = RoundedCornerShape(6.dp),
+                label = { Text("All (${rawLogs.size})", fontSize = 11.sp, fontWeight = FontWeight.SemiBold) },
+                shape = RoundedCornerShape(50),
                 colors = FilterChipDefaults.filterChipColors(
-                    containerColor = Color(0xFF141414),
+                    containerColor = DevSurfaceVariant,
+                    labelColor = DevOnSurfaceVariant,
                     selectedContainerColor = DevPrimary,
-                    selectedLabelColor = Color.Black
+                    selectedLabelColor = DevOnPrimary
                 )
             )
 
             FilterChip(
                 selected = selectedLevel == LogLevel.ERROR,
                 onClick = { selectedLevel = if (selectedLevel == LogLevel.ERROR) null else LogLevel.ERROR },
-                label = { Text("Error (${rawLogs.count { it.level == LogLevel.ERROR }})", fontSize = 11.sp) },
-                shape = RoundedCornerShape(6.dp),
+                label = { Text("Errors (${rawLogs.count { it.level == LogLevel.ERROR }})", fontSize = 11.sp, fontWeight = FontWeight.SemiBold) },
+                shape = RoundedCornerShape(50),
                 colors = FilterChipDefaults.filterChipColors(
-                    containerColor = Color(0xFF141414),
+                    containerColor = DevSurfaceVariant,
+                    labelColor = DevOnSurfaceVariant,
                     selectedContainerColor = DevError,
-                    selectedLabelColor = Color.White
+                    selectedLabelColor = DevOnPrimary
                 )
             )
 
             FilterChip(
                 selected = selectedLevel == LogLevel.COMMAND,
                 onClick = { selectedLevel = if (selectedLevel == LogLevel.COMMAND) null else LogLevel.COMMAND },
-                label = { Text("Command", fontSize = 11.sp) },
-                shape = RoundedCornerShape(6.dp),
+                label = { Text("Commands", fontSize = 11.sp, fontWeight = FontWeight.SemiBold) },
+                shape = RoundedCornerShape(50),
                 colors = FilterChipDefaults.filterChipColors(
-                    containerColor = Color(0xFF141414),
+                    containerColor = DevSurfaceVariant,
+                    labelColor = DevOnSurfaceVariant,
                     selectedContainerColor = DevWarning,
                     selectedLabelColor = Color.Black
                 )
@@ -227,22 +256,23 @@ fun LogScreen() {
             FilterChip(
                 selected = selectedLevel == LogLevel.OUTPUT,
                 onClick = { selectedLevel = if (selectedLevel == LogLevel.OUTPUT) null else LogLevel.OUTPUT },
-                label = { Text("Output", fontSize = 11.sp) },
-                shape = RoundedCornerShape(6.dp),
+                label = { Text("Output", fontSize = 11.sp, fontWeight = FontWeight.SemiBold) },
+                shape = RoundedCornerShape(50),
                 colors = FilterChipDefaults.filterChipColors(
-                    containerColor = Color(0xFF141414),
-                    selectedContainerColor = DevSuccess,
-                    selectedLabelColor = Color.Black
+                    containerColor = DevSurfaceVariant,
+                    labelColor = DevOnSurfaceVariant,
+                    selectedContainerColor = DevPrimary,
+                    selectedLabelColor = DevOnPrimary
                 )
             )
         }
 
-        // Log Entries List with Native Selection Container
+        // Log Entries List
         SelectionContainer(
             modifier = Modifier
                 .weight(1f)
                 .fillMaxWidth()
-                .background(TerminalBackground)
+                .background(DevBackground)
         ) {
             if (filteredLogs.isEmpty()) {
                 Box(
@@ -250,9 +280,9 @@ fun LogScreen() {
                     contentAlignment = Alignment.Center
                 ) {
                     Text(
-                        text = "Belum ada log tercatat.\nTekan tombol 'Cek Lingkungan' untuk mulai diagnostik.",
-                        color = Color.DarkGray,
-                        fontSize = 13.sp,
+                        text = "No log events recorded.\nTap 'Run Diagnostics' to inspect container health.",
+                        color = DevOnSurfaceVariant,
+                        fontSize = 12.sp,
                         fontFamily = FontFamily.Monospace,
                         textAlign = androidx.compose.ui.text.style.TextAlign.Center
                     )
@@ -262,24 +292,25 @@ fun LogScreen() {
                     state = listState,
                     modifier = Modifier
                         .fillMaxSize()
-                        .padding(horizontal = 8.dp, vertical = 6.dp),
-                    verticalArrangement = Arrangement.spacedBy(4.dp)
+                        .padding(horizontal = 12.dp, vertical = 6.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
                     items(filteredLogs) { entry ->
                         val badgeColor = when (entry.level) {
-                            LogLevel.INFO -> DevSecondary
+                            LogLevel.INFO -> DevPrimary
                             LogLevel.WARN -> DevWarning
                             LogLevel.ERROR -> DevError
-                            LogLevel.COMMAND -> Color(0xFFE3B341)
+                            LogLevel.COMMAND -> DevSecondary
                             LogLevel.OUTPUT -> DevSuccess
                         }
 
                         Card(
-                            colors = CardDefaults.cardColors(containerColor = Color(0xFF080808)),
-                            shape = RoundedCornerShape(4.dp),
+                            colors = CardDefaults.cardColors(containerColor = DevCanvasDeep),
+                            shape = RoundedCornerShape(10.dp),
+                            border = BorderStroke(1.dp, DevBorder),
                             modifier = Modifier.fillMaxWidth()
                         ) {
-                            Column(modifier = Modifier.padding(6.dp)) {
+                            Column(modifier = Modifier.padding(10.dp)) {
                                 Row(
                                     modifier = Modifier.fillMaxWidth(),
                                     horizontalArrangement = Arrangement.SpaceBetween,
@@ -289,7 +320,7 @@ fun LogScreen() {
                                         Text(
                                             text = "[${entry.level}]",
                                             fontSize = 10.sp,
-                                            fontWeight = FontWeight.Bold,
+                                            fontWeight = FontWeight.ExtraBold,
                                             fontFamily = FontFamily.Monospace,
                                             color = badgeColor
                                         )
@@ -298,22 +329,22 @@ fun LogScreen() {
                                             text = entry.tag,
                                             fontSize = 10.sp,
                                             fontFamily = FontFamily.Monospace,
-                                            color = Color.LightGray
+                                            color = DevOnSurfaceVariant
                                         )
                                     }
                                     Text(
                                         text = entry.timestamp,
                                         fontSize = 10.sp,
                                         fontFamily = FontFamily.Monospace,
-                                        color = Color.DarkGray
+                                        color = DevOnSurfaceVariant
                                     )
                                 }
-                                Spacer(modifier = Modifier.height(2.dp))
+                                Spacer(modifier = Modifier.height(4.dp))
                                 Text(
                                     text = entry.message,
                                     fontSize = 11.sp,
                                     fontFamily = FontFamily.Monospace,
-                                    color = if (entry.level == LogLevel.ERROR) DevError else Color(0xFFC9D1D9)
+                                    color = if (entry.level == LogLevel.ERROR) DevError else DevOnSurface
                                 )
                             }
                         }

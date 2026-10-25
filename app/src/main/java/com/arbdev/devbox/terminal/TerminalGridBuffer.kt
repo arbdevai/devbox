@@ -1087,21 +1087,21 @@ class TerminalGridBuffer(
 
     private fun ansi16Color(index: Int): Color {
         return when (index.coerceIn(0, 15)) {
-            0 -> Color(0xFF1E1E1E) // Black
-            1 -> Color(0xFFE06C75) // Red
-            2 -> Color(0xFF98C379) // Green
-            3 -> Color(0xFFE5C07B) // Yellow
-            4 -> Color(0xFF61AFEF) // Blue
+            0 -> Color(0xFF141414) // Black
+            1 -> Color(0xFFFF6B6B) // Red
+            2 -> Color(0xFF7DFF4C) // Green (#7DFF4C)
+            3 -> Color(0xFFFFD166) // Yellow
+            4 -> Color(0xFFA8FF82) // Accent Lime
             5 -> Color(0xFFC678DD) // Magenta
-            6 -> Color(0xFF56B6C2) // Cyan
-            7 -> Color(0xFFABB2BF) // Light Gray (Default)
-            8 -> Color(0xFF5C6370) // Dark Gray
-            9 -> Color(0xFFBE5046) // Bright Red
-            10 -> Color(0xFFA3D487) // Bright Green
-            11 -> Color(0xFFF0D18C) // Bright Yellow
-            12 -> Color(0xFF7EC0EE) // Bright Blue
+            6 -> Color(0xFF73F59F) // Mint/Emerald
+            7 -> Color(0xFFE3E5E0) // Light Gray (Default)
+            8 -> Color(0xFF5C635A) // Dark Gray
+            9 -> Color(0xFFFF8585) // Bright Red
+            10 -> Color(0xFF98FF6E) // Bright Green
+            11 -> Color(0xFFFFDE8A) // Bright Yellow
+            12 -> Color(0xFFB8FF99) // Bright Lime
             13 -> Color(0xFFD896FF) // Bright Magenta
-            14 -> Color(0xFF6FE2EF) // Bright Cyan
+            14 -> Color(0xFF8FFFB4) // Bright Mint
             15 -> Color(0xFFFFFFFF) // White
             else -> defaultFg
         }
@@ -1225,8 +1225,8 @@ class TerminalGridBuffer(
             }
 
             val isCursorHere = (isCursorVisible && rowIdx == cursorRow && col == cursorColIdx)
-            val fg = if (isCursorHere) Color.Black else cell.fgColor
-            val bg = if (isCursorHere) Color(0xFF61AFEF) else cell.bgColor
+            val fg = if (isCursorHere) Color(0xFF062100) else cell.fgColor
+            val bg = if (isCursorHere) Color(0xFF7DFF4C) else cell.bgColor
             val bold = cell.isBold
             val underline = cell.isUnderline
 
@@ -1238,8 +1238,8 @@ class TerminalGridBuffer(
                     continue
                 }
                 val curCursor = (isCursorVisible && rowIdx == cursorRow && col == cursorColIdx)
-                val curFg = if (curCursor) Color.Black else curCell.fgColor
-                val curBg = if (curCursor) Color(0xFF61AFEF) else curCell.bgColor
+                val curFg = if (curCursor) Color(0xFF062100) else curCell.fgColor
+                val curBg = if (curCursor) Color(0xFF7DFF4C) else curCell.bgColor
                 if (curFg != fg || curBg != bg || curCell.isBold != bold || curCell.isUnderline != underline) {
                     break
                 }
@@ -1269,7 +1269,7 @@ class TerminalGridBuffer(
 
         // Tampilkan kursor jika kursor berada setelah karakter terakhir baris
         if (isCursorVisible && rowIdx == cursorRow && cursorColIdx >= endCol && cursorColIdx < maxCols) {
-            builder.pushStyle(SpanStyle(background = Color(0xFF61AFEF), color = Color.Black))
+            builder.pushStyle(SpanStyle(background = Color(0xFF7DFF4C), color = Color(0xFF062100)))
             builder.append(' ')
             builder.pop()
         }

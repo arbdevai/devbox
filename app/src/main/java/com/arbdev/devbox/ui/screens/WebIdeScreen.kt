@@ -9,6 +9,7 @@ import android.webkit.WebResourceRequest
 import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -19,6 +20,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -33,10 +35,11 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
-import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -47,13 +50,21 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import com.arbdev.devbox.data.ChrootManager
+import com.arbdev.devbox.ui.theme.DevBackground
+import com.arbdev.devbox.ui.theme.DevBorder
+import com.arbdev.devbox.ui.theme.DevOnPrimary
+import com.arbdev.devbox.ui.theme.DevOnSurface
+import com.arbdev.devbox.ui.theme.DevOnSurfaceVariant
 import com.arbdev.devbox.ui.theme.DevPrimary
+import com.arbdev.devbox.ui.theme.DevPrimaryContainer
+import com.arbdev.devbox.ui.theme.DevSurface
+import com.arbdev.devbox.ui.theme.DevSurfaceVariant
 import kotlinx.coroutines.launch
 
 @SuppressLint("SetJavaScriptEnabled")
@@ -71,82 +82,104 @@ fun WebIdeScreen() {
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .background(MaterialTheme.colorScheme.background)
+            .background(DevBackground)
     ) {
-        // Control Bar (Hidden when in fullscreen mode)
         if (!isFullscreen) {
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .background(MaterialTheme.colorScheme.surface)
-                    .padding(horizontal = 12.dp, vertical = 8.dp),
+                    .background(DevSurface)
+                    .padding(horizontal = 14.dp, vertical = 6.dp),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(
-                        imageVector = Icons.Default.Code,
-                        contentDescription = null,
-                        tint = DevPrimary
-                    )
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text(
-                        text = "VS Code (127.0.0.1:8080)",
-                        fontSize = 14.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        color = MaterialTheme.colorScheme.onSurface
-                    )
+                    Surface(
+                        color = DevPrimaryContainer,
+                        shape = RoundedCornerShape(8.dp),
+                        modifier = Modifier.size(30.dp)
+                    ) {
+                        Box(contentAlignment = Alignment.Center) {
+                            Icon(
+                                imageVector = Icons.Default.Code,
+                                contentDescription = null,
+                                tint = DevPrimary,
+                                modifier = Modifier.size(17.dp)
+                            )
+                        }
+                    }
+                    Spacer(modifier = Modifier.width(10.dp))
+                    Column {
+                        Text(
+                            text = "Code-Server IDE",
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = DevOnSurface
+                        )
+                        Text(
+                            text = "127.0.0.1:8080",
+                            fontSize = 10.sp,
+                            fontFamily = FontFamily.Monospace,
+                            color = DevPrimary
+                        )
+                    }
                 }
 
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     IconButton(
                         onClick = { webViewRef?.goBack() },
-                        enabled = webViewRef?.canGoBack() == true
+                        enabled = webViewRef?.canGoBack() == true,
+                        modifier = Modifier.size(34.dp)
                     ) {
                         Icon(
                             imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                            contentDescription = "Kembali",
-                            tint = if (webViewRef?.canGoBack() == true) Color.White else Color.DarkGray
+                            contentDescription = "Back",
+                            tint = if (webViewRef?.canGoBack() == true) DevOnSurface else DevOnSurfaceVariant.copy(alpha = 0.4f),
+                            modifier = Modifier.size(18.dp)
                         )
                     }
                     IconButton(
                         onClick = { webViewRef?.goForward() },
-                        enabled = webViewRef?.canGoForward() == true
+                        enabled = webViewRef?.canGoForward() == true,
+                        modifier = Modifier.size(34.dp)
                     ) {
                         Icon(
                             imageVector = Icons.AutoMirrored.Filled.ArrowForward,
-                            contentDescription = "Maju",
-                            tint = if (webViewRef?.canGoForward() == true) Color.White else Color.DarkGray
+                            contentDescription = "Forward",
+                            tint = if (webViewRef?.canGoForward() == true) DevOnSurface else DevOnSurfaceVariant.copy(alpha = 0.4f),
+                            modifier = Modifier.size(18.dp)
                         )
                     }
-                    IconButton(onClick = { webViewRef?.reload() }) {
+                    IconButton(onClick = { webViewRef?.reload() }, modifier = Modifier.size(34.dp)) {
                         Icon(
                             imageVector = Icons.Default.Refresh,
-                            contentDescription = "Segarkan",
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant
+                            contentDescription = "Reload",
+                            tint = DevOnSurfaceVariant,
+                            modifier = Modifier.size(18.dp)
                         )
                     }
-                    IconButton(onClick = { isFullscreen = true }) {
+                    IconButton(onClick = { isFullscreen = true }, modifier = Modifier.size(34.dp)) {
                         Icon(
                             imageVector = Icons.Default.Fullscreen,
-                            contentDescription = "Layar Penuh",
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant
+                            contentDescription = "Fullscreen",
+                            tint = DevPrimary,
+                            modifier = Modifier.size(18.dp)
                         )
                     }
                 }
             }
+            HorizontalDivider(thickness = 1.dp, color = DevBorder)
         }
 
-        // Loading bar
         if (isLoading && !hasError) {
             LinearProgressIndicator(
                 progress = { loadProgress },
-                modifier = Modifier.fillMaxWidth(),
-                color = DevPrimary
+                modifier = Modifier.fillMaxWidth().height(3.dp),
+                color = DevPrimary,
+                trackColor = DevSurfaceVariant
             )
         }
 
-        // Web Content
         Box(
             modifier = Modifier
                 .weight(1f)
@@ -208,60 +241,78 @@ fun WebIdeScreen() {
                 modifier = Modifier.fillMaxSize()
             )
 
-            // Fullscreen Exit Overlay Button
             if (isFullscreen) {
-                IconButton(
+                Surface(
                     onClick = { isFullscreen = false },
                     modifier = Modifier
                         .align(Alignment.TopEnd)
-                        .padding(16.dp)
-                        .background(Color.Black.copy(alpha = 0.6f), shape = RoundedCornerShape(8.dp))
+                        .padding(16.dp),
+                    color = DevSurface.copy(alpha = 0.85f),
+                    shape = RoundedCornerShape(10.dp),
+                    border = BorderStroke(1.dp, DevPrimary.copy(alpha = 0.5f))
                 ) {
-                    Icon(
-                        imageVector = Icons.Default.FullscreenExit,
-                        contentDescription = "Keluar Layar Penuh",
-                        tint = Color.White
-                    )
+                    Box(modifier = Modifier.padding(8.dp), contentAlignment = Alignment.Center) {
+                        Icon(
+                            imageVector = Icons.Default.FullscreenExit,
+                            contentDescription = "Exit Fullscreen",
+                            tint = DevPrimary
+                        )
+                    }
                 }
             }
 
-            // Error Overlay: If Code-Server is not running
             if (hasError) {
                 Box(
                     modifier = Modifier
                         .fillMaxSize()
-                        .background(MaterialTheme.colorScheme.background)
+                        .background(DevBackground)
                         .padding(24.dp),
                     contentAlignment = Alignment.Center
                 ) {
                     Card(
                         modifier = Modifier.fillMaxWidth(),
-                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-                        shape = RoundedCornerShape(16.dp)
+                        colors = CardDefaults.cardColors(containerColor = DevSurface),
+                        shape = RoundedCornerShape(24.dp),
+                        border = BorderStroke(1.dp, DevBorder)
                     ) {
                         Column(
-                            modifier = Modifier.padding(20.dp),
+                            modifier = Modifier.padding(24.dp),
                             horizontalAlignment = Alignment.CenterHorizontally
                         ) {
+                            Surface(
+                                color = DevPrimaryContainer,
+                                shape = RoundedCornerShape(16.dp),
+                                modifier = Modifier.size(52.dp)
+                            ) {
+                                Box(contentAlignment = Alignment.Center) {
+                                    Icon(
+                                        imageVector = Icons.Default.Code,
+                                        contentDescription = null,
+                                        tint = DevPrimary,
+                                        modifier = Modifier.size(28.dp)
+                                    )
+                                }
+                            }
+                            Spacer(modifier = Modifier.height(14.dp))
                             Text(
-                                text = "Code-Server Belum Aktif",
-                                fontSize = 16.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = MaterialTheme.colorScheme.onSurface
+                                text = "Code-Server Offline",
+                                fontSize = 18.sp,
+                                fontWeight = FontWeight.ExtraBold,
+                                color = DevOnSurface
                             )
                             Spacer(modifier = Modifier.height(8.dp))
                             Text(
-                                text = "Tidak dapat terhubung ke 127.0.0.1:8080. Pastikan layanan code-server di Ubuntu chroot sudah dinyalakan.",
-                                fontSize = 13.sp,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                text = "Unable to connect to 127.0.0.1:8080. Start the code-server service inside your Ubuntu container.",
+                                fontSize = 12.sp,
+                                color = DevOnSurfaceVariant,
+                                textAlign = androidx.compose.ui.text.style.TextAlign.Center
                             )
-                            Spacer(modifier = Modifier.height(16.dp))
+                            Spacer(modifier = Modifier.height(18.dp))
                             Button(
                                 onClick = {
                                     scope.launch {
                                         isStartingServer = true
                                         ChrootManager.toggleCodeServer(true)
-                                        // Tunggu hingga port 8080 (:1F90) benar-benar listening (maks 3 detik) sebelum reload
                                         for (attempt in 1..6) {
                                             kotlinx.coroutines.delay(500)
                                             val listening = try {
@@ -277,14 +328,16 @@ fun WebIdeScreen() {
                                     }
                                 },
                                 enabled = !isStartingServer,
-                                shape = RoundedCornerShape(8.dp),
-                                colors = ButtonDefaults.buttonColors(containerColor = DevPrimary)
+                                shape = RoundedCornerShape(50),
+                                colors = ButtonDefaults.buttonColors(containerColor = DevPrimary),
+                                modifier = Modifier.height(44.dp)
                             ) {
-                                Icon(Icons.Default.PlayArrow, contentDescription = null, tint = Color.Black)
+                                Icon(Icons.Default.PlayArrow, contentDescription = null, tint = DevOnPrimary)
                                 Spacer(modifier = Modifier.width(6.dp))
                                 Text(
-                                    if (isStartingServer) "Menyalakan Code-Server..." else "Nyalakan Code-Server",
-                                    color = Color.Black
+                                    if (isStartingServer) "Starting Code-Server..." else "Launch Code-Server",
+                                    color = DevOnPrimary,
+                                    fontWeight = FontWeight.Bold
                                 )
                             }
                         }

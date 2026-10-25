@@ -82,15 +82,20 @@ import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FloatingActionButton
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.ScrollableTabRow
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Tab
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -149,17 +154,25 @@ import com.arbdev.devbox.service.KeepAliveService
 import com.arbdev.devbox.terminal.NativeTerminalSession
 import com.arbdev.devbox.terminal.TerminalSessionManager
 import com.arbdev.devbox.util.AppLogger
+import com.arbdev.devbox.ui.theme.DevBackground
+import com.arbdev.devbox.ui.theme.DevBorder
+import com.arbdev.devbox.ui.theme.DevCanvasDeep
+import com.arbdev.devbox.ui.theme.DevError
+import com.arbdev.devbox.ui.theme.DevOnPrimary
 import com.arbdev.devbox.ui.theme.DevOnSurface
 import com.arbdev.devbox.ui.theme.DevOnSurfaceVariant
 import com.arbdev.devbox.ui.theme.DevPrimary
+import com.arbdev.devbox.ui.theme.DevPrimaryContainer
 import com.arbdev.devbox.ui.theme.DevSecondary
 import com.arbdev.devbox.ui.theme.DevSurface
+import com.arbdev.devbox.ui.theme.DevSurfaceVariant
+import com.arbdev.devbox.ui.theme.DevWarning
 import com.arbdev.devbox.ui.theme.TerminalBackground
 import com.arbdev.devbox.ui.theme.TerminalCyan
 import com.arbdev.devbox.ui.theme.TerminalGreen
 import com.arbdev.devbox.ui.theme.TerminalText
 
-@OptIn(ExperimentalLayoutApi::class)
+@OptIn(ExperimentalLayoutApi::class, ExperimentalMaterial3Api::class)
 @Composable
 fun TerminalScreen(
     initialCommand: String? = null
@@ -343,20 +356,25 @@ fun TerminalScreen(
             .background(TerminalBackground)
             .imePadding()
     ) {
-        // Multi-Session Tab Row
-        ScrollableTabRow(
-            selectedTabIndex = activeIndex.coerceIn(0, (TerminalSessionManager.sessions.size - 1).coerceAtLeast(0)),
-            containerColor = Color(0xFF0A0A0A),
-            contentColor = DevPrimary,
-            edgePadding = 8.dp,
-            divider = {}
+        // 2026 Google M3 Pill Session Tab Bar
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .background(DevSurface)
+                .horizontalScroll(rememberScrollState())
+                .padding(horizontal = 8.dp, vertical = 6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(6.dp)
         ) {
             TerminalSessionManager.sessions.forEachIndexed { index, session ->
-                Tab(
-                    selected = activeIndex == index,
-                    onClick = {
-                        TerminalSessionManager.activeIndex.intValue = index
-                    },
+                val isSelected = activeIndex == index
+                Surface(
+                    color = if (isSelected) DevPrimaryContainer else DevSurfaceVariant,
+                    shape = RoundedCornerShape(50),
+                    border = BorderStroke(
+                        width = 1.dp,
+                        color = if (isSelected) DevPrimary else DevBorder
+                    ),
                     modifier = Modifier.pointerInput(session.id) {
                         detectTapGestures(
                             onTap = {
@@ -367,82 +385,83 @@ fun TerminalScreen(
                                 renameInputText = session.name
                             }
                         )
-                    },
-                    text = {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Text(
-                                text = session.name,
-                                fontSize = 12.sp,
-                                fontWeight = if (activeIndex == index) FontWeight.Bold else FontWeight.Normal,
-                                color = if (activeIndex == index) DevPrimary else Color.Gray
-                            )
-                            if (session.isAgentRunning && session.activeAgentName != null) {
-                                Spacer(modifier = Modifier.width(4.dp))
-                                val infiniteTransition = rememberInfiniteTransition(label = "tabPulse_${session.id}")
-                                val pulseAlpha by infiniteTransition.animateFloat(
-                                    initialValue = 0.35f,
-                                    targetValue = 1.0f,
-                                    animationSpec = infiniteRepeatable(
-                                        animation = tween(750, easing = LinearEasing),
-                                        repeatMode = RepeatMode.Reverse
-                                    ),
-                                    label = "pulseAlpha"
+                    }
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 5.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(6.dp)
+                                .background(
+                                    color = if (isSelected) DevPrimary else DevOnSurfaceVariant,
+                                    shape = CircleShape
                                 )
-                                Surface(
-                                    color = Color(0xFF1B5E20).copy(alpha = pulseAlpha),
-                                    shape = RoundedCornerShape(4.dp)
-                                ) {
-                                    Row(
-                                        modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp),
-                                        verticalAlignment = Alignment.CenterVertically
-                                    ) {
-                                        Box(
-                                            modifier = Modifier
-                                                .size(5.dp)
-                                                .background(Color(0xFF00E676), shape = CircleShape)
-                                        )
-                                        Spacer(modifier = Modifier.width(3.dp))
-                                        Text(
-                                            text = session.activeAgentName ?: "",
-                                            fontSize = 9.sp,
-                                            fontWeight = FontWeight.Bold,
-                                            color = Color.White
-                                        )
-                                    }
-                                }
-                            }
-                            if (TerminalSessionManager.sessions.size > 1) {
-                                Spacer(modifier = Modifier.width(4.dp))
-                                IconButton(
-                                    onClick = { TerminalSessionManager.closeSession(index) },
-                                    modifier = Modifier.size(16.dp)
-                                ) {
-                                    Icon(
-                                        imageVector = Icons.Default.Close,
-                                        contentDescription = "Tutup Sesi",
-                                        tint = if (activeIndex == index) DevPrimary else Color.DarkGray,
-                                        modifier = Modifier.size(12.dp)
-                                    )
-                                }
+                        )
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(
+                            text = session.name,
+                            fontSize = 11.sp,
+                            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                            color = if (isSelected) DevPrimary else DevOnSurfaceVariant
+                        )
+                        if (session.isAgentRunning && session.activeAgentName != null) {
+                            Spacer(modifier = Modifier.width(6.dp))
+                            val infiniteTransition = rememberInfiniteTransition(label = "tabPulse_${session.id}")
+                            val pulseAlpha by infiniteTransition.animateFloat(
+                                initialValue = 0.35f,
+                                targetValue = 1.0f,
+                                animationSpec = infiniteRepeatable(
+                                    animation = tween(750, easing = LinearEasing),
+                                    repeatMode = RepeatMode.Reverse
+                                ),
+                                label = "pulseAlpha"
+                            )
+                            Surface(
+                                color = DevPrimary.copy(alpha = 0.22f * pulseAlpha),
+                                shape = RoundedCornerShape(50)
+                            ) {
+                                Text(
+                                    text = session.activeAgentName ?: "",
+                                    fontSize = 9.sp,
+                                    fontWeight = FontWeight.ExtraBold,
+                                    color = DevPrimary,
+                                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 1.dp)
+                                )
                             }
                         }
+                        if (TerminalSessionManager.sessions.size > 1) {
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Icon(
+                                imageVector = Icons.Default.Close,
+                                contentDescription = "Close Session",
+                                tint = if (isSelected) DevPrimary else DevOnSurfaceVariant,
+                                modifier = Modifier
+                                    .size(13.dp)
+                                    .clickable { TerminalSessionManager.closeSession(index) }
+                            )
+                        }
                     }
-                )
+                }
             }
 
-            // Button to Add New Session
-            IconButton(
-                onClick = {
-                    TerminalSessionManager.createNewSession()
-                },
-                modifier = Modifier.size(36.dp)
+            // Add New Session Pill Button (+)
+            Surface(
+                onClick = { TerminalSessionManager.createNewSession() },
+                color = DevSurfaceVariant,
+                shape = CircleShape,
+                border = BorderStroke(1.dp, DevBorder),
+                modifier = Modifier.size(28.dp)
             ) {
-                Icon(
-                    imageVector = Icons.Default.Add,
-                    contentDescription = "Tambah Sesi Baru",
-                    tint = DevPrimary,
-                    modifier = Modifier.size(20.dp)
-                )
+                Box(contentAlignment = Alignment.Center) {
+                    Icon(
+                        imageVector = Icons.Default.Add,
+                        contentDescription = "New Session",
+                        tint = DevPrimary,
+                        modifier = Modifier.size(16.dp)
+                    )
+                }
             }
         }
 
@@ -450,12 +469,11 @@ fun TerminalScreen(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .background(Color(0xFF000000))
-                .padding(horizontal = 8.dp, vertical = 4.dp),
+                .background(DevBackground)
+                .padding(horizontal = 10.dp, vertical = 4.dp),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            // Sisi Kiri: Status Prompt & Active Agent (Bisa scroll horizontal jika sempit)
             Row(
                 modifier = Modifier
                     .weight(1f, fill = false)
@@ -466,7 +484,7 @@ fun TerminalScreen(
                     text = "coder@devbox",
                     fontFamily = FontFamily.Monospace,
                     fontSize = 11.sp,
-                    color = TerminalGreen,
+                    color = DevPrimary,
                     fontWeight = FontWeight.Bold,
                     maxLines = 1
                 )
@@ -477,23 +495,31 @@ fun TerminalScreen(
                     color = TerminalCyan,
                     maxLines = 1
                 )
-                Spacer(modifier = Modifier.width(4.dp))
-                Text(
-                    text = if (activeSession.isRunning) "• PTY" else "• SELESAI",
-                    fontFamily = FontFamily.Monospace,
-                    fontSize = 9.sp,
-                    color = if (activeSession.isRunning) DevPrimary else Color.Gray,
-                    maxLines = 1
-                )
+                Spacer(modifier = Modifier.width(6.dp))
+                Surface(
+                    color = if (activeSession.isRunning) DevPrimaryContainer else DevSurfaceVariant,
+                    shape = RoundedCornerShape(50),
+                    border = BorderStroke(1.dp, if (activeSession.isRunning) DevPrimary.copy(alpha = 0.5f) else DevBorder)
+                ) {
+                    Text(
+                        text = if (activeSession.isRunning) "● PTY" else "● EXITED",
+                        fontFamily = FontFamily.Monospace,
+                        fontSize = 9.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = if (activeSession.isRunning) DevPrimary else DevOnSurfaceVariant,
+                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 1.dp),
+                        maxLines = 1
+                    )
+                }
                 if (activeSession.isAgentRunning && activeSession.activeAgentName != null) {
                     Spacer(modifier = Modifier.width(6.dp))
                     Surface(
-                        color = Color(0xFF0D3315),
-                        border = BorderStroke(1.dp, Color(0xFF00E676)),
-                        shape = RoundedCornerShape(4.dp)
+                        color = DevPrimaryContainer,
+                        border = BorderStroke(1.dp, DevPrimary),
+                        shape = RoundedCornerShape(50)
                     ) {
                         Row(
-                            modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp),
+                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 1.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             val infiniteTransition = rememberInfiniteTransition(label = "barPulse")
@@ -509,14 +535,14 @@ fun TerminalScreen(
                             Box(
                                 modifier = Modifier
                                     .size(5.dp)
-                                    .background(Color(0xFF00E676).copy(alpha = pulseAlpha), shape = CircleShape)
+                                    .background(DevPrimary.copy(alpha = pulseAlpha), shape = CircleShape)
                             )
-                            Spacer(modifier = Modifier.width(3.dp))
+                            Spacer(modifier = Modifier.width(4.dp))
                             Text(
                                 text = "${activeSession.activeAgentName}",
                                 fontFamily = FontFamily.Monospace,
                                 fontSize = 9.sp,
-                                color = Color(0xFF00E676),
+                                color = DevPrimary,
                                 fontWeight = FontWeight.Bold
                             )
                         }
@@ -526,11 +552,9 @@ fun TerminalScreen(
 
             Spacer(modifier = Modifier.width(6.dp))
 
-            // Sisi Kanan: Kontrol Bersih (Keyboard, Agent Hub, 3-Dots Menu)
             Row(
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                // 1. Toggle Soft Keyboard
                 IconButton(
                     onClick = {
                         autoScrollEnabled = true
@@ -541,13 +565,12 @@ fun TerminalScreen(
                 ) {
                     Icon(
                         imageVector = Icons.Default.Terminal,
-                        contentDescription = "Buka Keyboard",
+                        contentDescription = "Keyboard",
                         tint = DevPrimary,
                         modifier = Modifier.size(17.dp)
                     )
                 }
 
-                // 3. Antigravity CLI Agent Hub Dialog
                 IconButton(
                     onClick = {
                         loadAgentInfo()
@@ -558,12 +581,11 @@ fun TerminalScreen(
                     Icon(
                         imageVector = Icons.Default.SmartToy,
                         contentDescription = "Antigravity Agent Hub",
-                        tint = if (activeSession.isAgentRunning) Color(0xFF00E676) else DevPrimary,
+                        tint = DevPrimary,
                         modifier = Modifier.size(17.dp)
                     )
                 }
 
-                // 4. Menu Overflow 3-Titik (Menampung fitur sekunder tanpa menumpuk baris)
                 Box {
                     IconButton(
                         onClick = { showOverflowMenu = true },
@@ -571,8 +593,8 @@ fun TerminalScreen(
                     ) {
                         Icon(
                             imageVector = Icons.Default.MoreVert,
-                            contentDescription = "Menu Lainnya",
-                            tint = if (orphanProcesses.isNotEmpty()) Color(0xFFFF9800) else Color.White,
+                            contentDescription = "More Options",
+                            tint = if (orphanProcesses.isNotEmpty()) DevWarning else DevOnSurface,
                             modifier = Modifier.size(18.dp)
                         )
                     }
@@ -581,8 +603,8 @@ fun TerminalScreen(
                         expanded = showOverflowMenu,
                         onDismissRequest = { showOverflowMenu = false },
                         modifier = Modifier
-                            .background(Color(0xFF1E222D))
-                            .border(1.dp, Color(0xFF333842), RoundedCornerShape(8.dp))
+                            .background(DevSurface)
+                            .border(1.dp, DevBorder, RoundedCornerShape(12.dp))
                     ) {
                         DropdownMenuItem(
                             text = {
@@ -590,13 +612,13 @@ fun TerminalScreen(
                                     Icon(
                                         imageVector = Icons.Default.Layers,
                                         contentDescription = null,
-                                        tint = if (orphanProcesses.isNotEmpty()) Color(0xFFFF9800) else DevPrimary,
+                                        tint = if (orphanProcesses.isNotEmpty()) DevWarning else DevPrimary,
                                         modifier = Modifier.size(18.dp)
                                     )
                                     Spacer(modifier = Modifier.width(10.dp))
                                     Text(
-                                        text = if (orphanProcesses.isNotEmpty()) "Kelola Sesi (${orphanProcesses.size} Orphan)" else "Kelola Sesi",
-                                        color = if (orphanProcesses.isNotEmpty()) Color(0xFFFF9800) else Color.White,
+                                        text = if (orphanProcesses.isNotEmpty()) "Active Sessions (${orphanProcesses.size} Orphans)" else "Active Sessions",
+                                        color = if (orphanProcesses.isNotEmpty()) DevWarning else DevOnSurface,
                                         fontSize = 13.sp
                                     )
                                 }
@@ -613,18 +635,18 @@ fun TerminalScreen(
                                     Icon(
                                         imageVector = Icons.Default.SmartToy,
                                         contentDescription = null,
-                                        tint = Color(0xFFFF9800),
+                                        tint = DevPrimary,
                                         modifier = Modifier.size(18.dp)
                                     )
                                     Spacer(modifier = Modifier.width(10.dp))
-                                    Text("Reset Lock agy (Anti-FC)", color = Color.White, fontSize = 13.sp)
+                                    Text("Unlock agy DB", color = DevOnSurface, fontSize = 13.sp)
                                 }
                             },
                             onClick = {
                                 showOverflowMenu = false
                                 coroutineScope.launch {
                                     val count = ChrootManager.cleanStaleAgyLocks()
-                                    Toast.makeText(context, "$count sesi/lock agy lama dibersihkan", Toast.LENGTH_SHORT).show()
+                                    Toast.makeText(context, "$count stale agy locks cleared", Toast.LENGTH_SHORT).show()
                                 }
                             }
                         )
@@ -639,14 +661,14 @@ fun TerminalScreen(
                                         modifier = Modifier.size(18.dp)
                                     )
                                     Spacer(modifier = Modifier.width(10.dp))
-                                    Text("Pindai Tautan (URL)", color = Color.White, fontSize = 13.sp)
+                                    Text("Extract URLs", color = DevOnSurface, fontSize = 13.sp)
                                 }
                             },
                             onClick = {
                                 showOverflowMenu = false
                                 val urls = activeSession.buffer.extractAllUrls()
                                 when {
-                                    urls.isEmpty() -> Toast.makeText(context, "Tidak ada tautan (URL) di layar", Toast.LENGTH_SHORT).show()
+                                    urls.isEmpty() -> Toast.makeText(context, "No URLs found on screen", Toast.LENGTH_SHORT).show()
                                     urls.size == 1 -> activeUrlPrompt = urls.first()
                                     else -> urlListPrompt = urls
                                 }
@@ -663,7 +685,7 @@ fun TerminalScreen(
                                         modifier = Modifier.size(18.dp)
                                     )
                                     Spacer(modifier = Modifier.width(10.dp))
-                                    Text("Salin Layar Penuh", color = Color.White, fontSize = 13.sp)
+                                    Text("Copy Transcript", color = DevOnSurface, fontSize = 13.sp)
                                 }
                             },
                             onClick = {
@@ -671,9 +693,9 @@ fun TerminalScreen(
                                 val text = activeSession.buffer.getTranscriptText()
                                 if (text.isNotEmpty()) {
                                     clipboardManager.setText(AnnotatedString(text))
-                                    Toast.makeText(context, "Layar terminal disalin ke clipboard", Toast.LENGTH_SHORT).show()
+                                    Toast.makeText(context, "Terminal transcript copied", Toast.LENGTH_SHORT).show()
                                 } else {
-                                    Toast.makeText(context, "Tidak ada teks untuk disalin", Toast.LENGTH_SHORT).show()
+                                    Toast.makeText(context, "Buffer is empty", Toast.LENGTH_SHORT).show()
                                 }
                             }
                         )
@@ -688,7 +710,7 @@ fun TerminalScreen(
                                         modifier = Modifier.size(18.dp)
                                     )
                                     Spacer(modifier = Modifier.width(10.dp))
-                                    Text("Tempel (Paste)", color = Color.White, fontSize = 13.sp)
+                                    Text("Paste", color = DevOnSurface, fontSize = 13.sp)
                                 }
                             },
                             onClick = {
@@ -702,7 +724,7 @@ fun TerminalScreen(
                                         curSess.pasteText(clip)
                                     }
                                 } else {
-                                    Toast.makeText(context, "Clipboard kosong", Toast.LENGTH_SHORT).show()
+                                    Toast.makeText(context, "Clipboard is empty", Toast.LENGTH_SHORT).show()
                                 }
                             }
                         )
@@ -717,7 +739,7 @@ fun TerminalScreen(
                                         modifier = Modifier.size(18.dp)
                                     )
                                     Spacer(modifier = Modifier.width(10.dp))
-                                    Text("Perbesar Font (A+)", color = Color.White, fontSize = 13.sp)
+                                    Text("Zoom In (A+)", color = DevOnSurface, fontSize = 13.sp)
                                 }
                             },
                             onClick = {
@@ -736,7 +758,7 @@ fun TerminalScreen(
                                         modifier = Modifier.size(18.dp)
                                     )
                                     Spacer(modifier = Modifier.width(10.dp))
-                                    Text("Perkecil Font (A-)", color = Color.White, fontSize = 13.sp)
+                                    Text("Zoom Out (A-)", color = DevOnSurface, fontSize = 13.sp)
                                 }
                             },
                             onClick = {
@@ -751,11 +773,11 @@ fun TerminalScreen(
                                     Icon(
                                         imageVector = Icons.Default.Refresh,
                                         contentDescription = null,
-                                        tint = TerminalText,
+                                        tint = DevOnSurfaceVariant,
                                         modifier = Modifier.size(18.dp)
                                     )
                                     Spacer(modifier = Modifier.width(10.dp))
-                                    Text("Bersihkan Layar (Ctrl+L)", color = Color.White, fontSize = 13.sp)
+                                    Text("Clear Screen (Ctrl+L)", color = DevOnSurface, fontSize = 13.sp)
                                 }
                             },
                             onClick = {
@@ -768,7 +790,9 @@ fun TerminalScreen(
             }
         }
 
-        // Banner Peringatan Sesi Latar Belakang Usang (Orphan Processes) - disembunyikan saat keyboard aktif untuk hemat ruang
+        HorizontalDivider(thickness = 1.dp, color = DevBorder)
+
+        // Orphan Processes Alert Banner
         AnimatedVisibility(
             visible = orphanProcesses.isNotEmpty() && !isImeVisible,
             enter = expandVertically() + fadeIn(),
@@ -776,12 +800,12 @@ fun TerminalScreen(
         ) {
             val totalRamMb = orphanProcesses.sumOf { it.memoryKb } / 1024
             Surface(
-                color = Color(0xFF231602),
-                shape = RoundedCornerShape(6.dp),
-                border = BorderStroke(1.dp, Color(0xFFFF9800).copy(alpha = 0.7f)),
+                color = Color(0xFF211A0B),
+                shape = RoundedCornerShape(10.dp),
+                border = BorderStroke(1.dp, DevWarning.copy(alpha = 0.7f)),
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 8.dp, vertical = 3.dp)
+                    .padding(horizontal = 8.dp, vertical = 4.dp)
             ) {
                 Row(
                     modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
@@ -795,21 +819,21 @@ fun TerminalScreen(
                         Icon(
                             imageVector = Icons.Default.Warning,
                             contentDescription = null,
-                            tint = Color(0xFFFF9800),
+                            tint = DevWarning,
                             modifier = Modifier.size(16.dp)
                         )
                         Spacer(modifier = Modifier.width(8.dp))
                         Column {
                             Text(
-                                text = "${orphanProcesses.size} Sesi Usang Terdeteksi (~${totalRamMb} MB)",
+                                text = "${orphanProcesses.size} Orphan Processes (~${totalRamMb} MB)",
                                 fontWeight = FontWeight.Bold,
                                 fontSize = 11.sp,
-                                color = Color.White
+                                color = DevOnSurface
                             )
                             Text(
-                                text = "Sisa dari crash lama. Matikan agar RAM HP hemat.",
+                                text = "Detached background processes found.",
                                 fontSize = 9.sp,
-                                color = Color(0xFFB0BEC5)
+                                color = DevOnSurfaceVariant
                             )
                         }
                     }
@@ -822,12 +846,12 @@ fun TerminalScreen(
                                 val killed = ChrootManager.killOrphanChrootProcesses(activeIds, activePids)
                                 orphanProcesses = emptyList()
                                 isCleaningOrphans = false
-                                Toast.makeText(context, "$killed sesi latar belakang berhasil dimatikan", Toast.LENGTH_SHORT).show()
+                                Toast.makeText(context, "$killed orphan processes terminated", Toast.LENGTH_SHORT).show()
                             }
                         },
-                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFF9800)),
-                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
-                        shape = RoundedCornerShape(4.dp),
+                        colors = ButtonDefaults.buttonColors(containerColor = DevWarning),
+                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp),
+                        shape = RoundedCornerShape(50),
                         enabled = !isCleaningOrphans,
                         modifier = Modifier.height(28.dp)
                     ) {
@@ -838,7 +862,7 @@ fun TerminalScreen(
                                 strokeWidth = 2.dp
                             )
                         } else {
-                            Text("Matikan", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color.Black)
+                            Text("Kill All", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color.Black)
                         }
                     }
                 }
@@ -1113,25 +1137,25 @@ fun TerminalScreen(
                             ChrootManager.openUrlInAndroidBrowser(url)
                         },
                         color = DevPrimary,
-                        shape = RoundedCornerShape(16.dp),
+                        shape = RoundedCornerShape(50),
                         shadowElevation = 6.dp
                     ) {
                         Row(
-                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
+                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 5.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Text(
                                 text = "🌐 :$activeWebPort",
-                                color = Color.Black,
+                                color = DevOnPrimary,
                                 fontSize = 11.sp,
-                                fontWeight = FontWeight.Bold
+                                fontWeight = FontWeight.ExtraBold
                             )
-                            Spacer(modifier = Modifier.width(4.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
                             Text(
-                                text = "Buka",
-                                color = Color(0xFF1E222D),
+                                text = "Open →",
+                                color = DevOnPrimary,
                                 fontSize = 10.sp,
-                                fontWeight = FontWeight.SemiBold
+                                fontWeight = FontWeight.Bold
                             )
                         }
                     }
@@ -1139,73 +1163,88 @@ fun TerminalScreen(
             }
         }
 
-        // Dialog Konfirmasi Tempel Teks Sangat Panjang (Mencegah Shell/CLI Looping akibat accidental log paste)
+        // Large Paste Protection Dialog
         pendingLargePaste?.let { largeText ->
             AlertDialog(
                 onDismissRequest = { pendingLargePaste = null },
-                title = { Text("Teks Sangat Panjang", fontWeight = FontWeight.Bold) },
+                containerColor = DevSurface,
+                titleContentColor = DevOnSurface,
+                textContentColor = DevOnSurfaceVariant,
+                title = { Text("Large Clipboard Text", fontWeight = FontWeight.Bold) },
                 text = {
                     Text(
-                        "Clipboard berisi ${largeText.length} karakter (${largeText.lines().size} baris).\n\n" +
-                        "Menempelkan teks log/kode raksasa ke prompt CLI dapat menyebabkan shell hang atau looping.\n\n" +
-                        "Tetap tempelkan teks ini?",
+                        "Clipboard contains ${largeText.length} characters (${largeText.lines().size} lines).\n\n" +
+                        "Pasting a large log/code block directly into an interactive shell may cause command loops.\n\n" +
+                        "Paste anyway?",
                         fontSize = 13.sp
                     )
                 },
                 confirmButton = {
-                    TextButton(
+                    Button(
                         onClick = {
                             val text = pendingLargePaste
                             pendingLargePaste = null
                             if (text != null) {
                                 activeSession.pasteText(text)
                             }
-                        }
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = DevPrimary),
+                        shape = RoundedCornerShape(50)
                     ) {
-                        Text("Tetap Tempel", color = DevPrimary, fontWeight = FontWeight.Bold)
+                        Text("Paste Anyway", color = DevOnPrimary, fontWeight = FontWeight.Bold)
                     }
                 },
                 dismissButton = {
                     TextButton(onClick = { pendingLargePaste = null }) {
-                        Text("Batal")
+                        Text("Cancel", color = DevOnSurfaceVariant)
                     }
                 }
             )
         }
 
-        // Dialog Ubah Nama Sesi (Rename Session)
+        // Rename Session Dialog
         sessionToRename?.let { sess ->
             AlertDialog(
                 onDismissRequest = { sessionToRename = null },
-                title = { Text("Ubah Nama Sesi", fontWeight = FontWeight.Bold) },
+                containerColor = DevSurface,
+                titleContentColor = DevOnSurface,
+                textContentColor = DevOnSurfaceVariant,
+                title = { Text("Rename Session", fontWeight = FontWeight.Bold) },
                 text = {
                     Column {
                         Text(
-                            "Ketik nama kustom untuk sesi ini atau pilih 'Auto Detect' untuk mengikuti nama proses/folder secara otomatis.",
+                            "Enter a custom session title or select 'Auto Detect' to follow active directory/process.",
                             fontSize = 12.sp,
                             color = DevOnSurfaceVariant
                         )
                         Spacer(modifier = Modifier.height(10.dp))
-                        androidx.compose.material3.OutlinedTextField(
+                        OutlinedTextField(
                             value = renameInputText,
                             onValueChange = { renameInputText = it },
-                            label = { Text("Nama Sesi") },
+                            label = { Text("Session Name") },
                             singleLine = true,
+                            shape = RoundedCornerShape(12.dp),
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedBorderColor = DevPrimary,
+                                unfocusedBorderColor = DevBorder
+                            ),
                             modifier = Modifier.fillMaxWidth()
                         )
                     }
                 },
                 confirmButton = {
-                    TextButton(
+                    Button(
                         onClick = {
                             if (renameInputText.isNotBlank()) {
                                 sess.name = renameInputText.trim()
                                 sess.isCustomName = true
                             }
                             sessionToRename = null
-                        }
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = DevPrimary),
+                        shape = RoundedCornerShape(50)
                     ) {
-                        Text("Simpan", color = DevPrimary, fontWeight = FontWeight.Bold)
+                        Text("Save", color = DevOnPrimary, fontWeight = FontWeight.Bold)
                     }
                 },
                 dismissButton = {
@@ -1217,36 +1256,41 @@ fun TerminalScreen(
                                 sessionToRename = null
                             }
                         ) {
-                            Text("Auto Detect", color = DevSecondary)
+                            Text("Auto Detect", color = DevPrimary)
                         }
                         Spacer(modifier = Modifier.width(4.dp))
                         TextButton(onClick = { sessionToRename = null }) {
-                            Text("Batal")
+                            Text("Cancel", color = DevOnSurfaceVariant)
                         }
                     }
                 }
             )
         }
 
-        // Dialog Konfirmasi Buka Tautan (OSC 8 & Teks URL)
+        // Open Single URL Dialog
         activeUrlPrompt?.let { url ->
             AlertDialog(
                 onDismissRequest = { activeUrlPrompt = null },
-                title = { Text("Tautan Terminal", fontWeight = FontWeight.Bold) },
-                text = { Text(url, fontFamily = FontFamily.Monospace, fontSize = 12.sp) },
+                containerColor = DevSurface,
+                titleContentColor = DevOnSurface,
+                textContentColor = DevOnSurfaceVariant,
+                title = { Text("Open Terminal Link", fontWeight = FontWeight.Bold) },
+                text = { Text(url, fontFamily = FontFamily.Monospace, fontSize = 12.sp, color = DevPrimary) },
                 confirmButton = {
-                    TextButton(
+                    Button(
                         onClick = {
                             activeUrlPrompt = null
                             try {
                                 val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url))
                                 context.startActivity(intent)
                             } catch (e: Exception) {
-                                Toast.makeText(context, "Gagal membuka link: ${e.message}", Toast.LENGTH_SHORT).show()
+                                Toast.makeText(context, "Failed to open link: ${e.message}", Toast.LENGTH_SHORT).show()
                             }
-                        }
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = DevPrimary),
+                        shape = RoundedCornerShape(50)
                     ) {
-                        Text("Buka di Browser", color = DevPrimary)
+                        Text("Open Browser", color = DevOnPrimary, fontWeight = FontWeight.Bold)
                     }
                 },
                 dismissButton = {
@@ -1254,37 +1298,53 @@ fun TerminalScreen(
                         onClick = {
                             clipboardManager.setText(AnnotatedString(url))
                             activeUrlPrompt = null
-                            Toast.makeText(context, "URL disalin ke clipboard", Toast.LENGTH_SHORT).show()
+                            Toast.makeText(context, "URL copied to clipboard", Toast.LENGTH_SHORT).show()
                         }
                     ) {
-                        Text("Salin URL")
+                        Text("Copy URL", color = DevOnSurface)
                     }
                 }
             )
         }
 
-        // Dialog Daftar Pilihan Tautan Terminal (Saat ditemukan lebih dari 1 URL di layar)
+        // 2026 M3 ModalBottomSheet: Extracted URLs List
         urlListPrompt?.let { urls ->
-            AlertDialog(
+            ModalBottomSheet(
                 onDismissRequest = { urlListPrompt = null },
-                title = { Text("Pilih Tautan Terminal (${urls.size})", fontWeight = FontWeight.Bold) },
-                text = {
+                containerColor = DevSurface,
+                contentColor = DevOnSurface
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 20.dp)
+                        .padding(bottom = 28.dp)
+                ) {
+                    Text(
+                        text = "Extracted URLs (${urls.size})",
+                        fontWeight = FontWeight.ExtraBold,
+                        fontSize = 18.sp,
+                        color = DevOnSurface
+                    )
+                    Spacer(modifier = Modifier.height(12.dp))
                     Column(
                         modifier = Modifier
                             .fillMaxWidth()
+                            .heightIn(max = 360.dp)
                             .verticalScroll(rememberScrollState()),
                         verticalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
                         urls.forEach { url ->
                             Surface(
-                                color = Color(0xFF1E1E1E),
-                                shape = RoundedCornerShape(8.dp),
+                                color = DevSurfaceVariant,
+                                shape = RoundedCornerShape(14.dp),
+                                border = BorderStroke(1.dp, DevBorder),
                                 modifier = Modifier.fillMaxWidth()
                             ) {
                                 Row(
                                     modifier = Modifier
                                         .fillMaxWidth()
-                                        .padding(8.dp),
+                                        .padding(12.dp),
                                     verticalAlignment = Alignment.CenterVertically,
                                     horizontalArrangement = Arrangement.SpaceBetween
                                 ) {
@@ -1298,18 +1358,18 @@ fun TerminalScreen(
                                             .padding(end = 8.dp),
                                         maxLines = 2
                                     )
-                                    Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
                                         IconButton(
                                             onClick = {
                                                 clipboardManager.setText(AnnotatedString(url))
-                                                Toast.makeText(context, "URL disalin", Toast.LENGTH_SHORT).show()
+                                                Toast.makeText(context, "URL copied", Toast.LENGTH_SHORT).show()
                                             },
-                                            modifier = Modifier.size(28.dp)
+                                            modifier = Modifier.size(32.dp)
                                         ) {
                                             Icon(
                                                 imageVector = Icons.Default.ContentCopy,
-                                                contentDescription = "Salin",
-                                                tint = Color.LightGray,
+                                                contentDescription = "Copy",
+                                                tint = DevOnSurfaceVariant,
                                                 modifier = Modifier.size(16.dp)
                                             )
                                         }
@@ -1320,356 +1380,371 @@ fun TerminalScreen(
                                                     val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url))
                                                     context.startActivity(intent)
                                                 } catch (e: Exception) {
-                                                    Toast.makeText(context, "Gagal membuka link: ${e.message}", Toast.LENGTH_SHORT).show()
+                                                    Toast.makeText(context, "Failed to open link: ${e.message}", Toast.LENGTH_SHORT).show()
                                                 }
                                             },
-                                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
-                                            shape = RoundedCornerShape(4.dp),
+                                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
+                                            shape = RoundedCornerShape(50),
                                             colors = ButtonDefaults.buttonColors(containerColor = DevPrimary)
                                         ) {
-                                            Text("Buka", fontSize = 11.sp, color = Color.Black)
+                                            Text("Open", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = DevOnPrimary)
                                         }
                                     }
                                 }
                             }
                         }
-                    }
-                },
-                confirmButton = {
-                    TextButton(onClick = { urlListPrompt = null }) {
-                        Text("Tutup")
                     }
                 }
-            )
+            }
         }
 
-        // Dialog Kelola Sesi DevBox & Pembersih Latar Belakang (Orphan Processes)
+        // 2026 M3 ModalBottomSheet: Session & Orphan Process Manager
         if (showSessionManagerDialog) {
-            AlertDialog(
+            ModalBottomSheet(
                 onDismissRequest = { showSessionManagerDialog = false },
-                title = {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(
-                            imageVector = Icons.Default.Layers,
-                            contentDescription = null,
-                            tint = DevPrimary,
-                            modifier = Modifier.size(20.dp)
-                        )
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text("Manajer Sesi & Latar Belakang", fontWeight = FontWeight.Bold, fontSize = 16.sp)
-                    }
-                },
-                text = {
-                    Column(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .verticalScroll(rememberScrollState())
+                containerColor = DevSurface,
+                contentColor = DevOnSurface
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 20.dp)
+                        .padding(bottom = 28.dp)
+                        .verticalScroll(rememberScrollState())
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
-                        // Seksi 1: Sesi Aktif
-                        Text(
-                            text = "SESI AKTIF (${TerminalSessionManager.sessions.size})",
-                            fontSize = 11.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = DevPrimary
-                        )
-                        Spacer(modifier = Modifier.height(6.dp))
-
-                        TerminalSessionManager.sessions.forEachIndexed { idx, s ->
-                            Surface(
-                                color = if (idx == activeIndex) Color(0xFF1E281E) else Color(0xFF181818),
-                                shape = RoundedCornerShape(6.dp),
-                                border = BorderStroke(1.dp, if (idx == activeIndex) DevPrimary else Color.DarkGray),
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(vertical = 3.dp)
-                                    .clickable {
-                                        TerminalSessionManager.activeIndex.intValue = idx
-                                        showSessionManagerDialog = false
-                                    }
-                            ) {
-                                Row(
-                                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.SpaceBetween
-                                ) {
-                                    Column(modifier = Modifier.weight(1f)) {
-                                        Row(verticalAlignment = Alignment.CenterVertically) {
-                                            Text(
-                                                text = "${idx + 1}. ${s.name}",
-                                                fontSize = 12.sp,
-                                                fontWeight = FontWeight.Bold,
-                                                color = if (idx == activeIndex) DevPrimary else Color.White
-                                            )
-                                            if (s.isAgentRunning && s.activeAgentName != null) {
-                                                Spacer(modifier = Modifier.width(6.dp))
-                                                Text(
-                                                    text = "• ${s.activeAgentName}",
-                                                    fontSize = 10.sp,
-                                                    color = Color(0xFF00E676),
-                                                    fontWeight = FontWeight.SemiBold
-                                                )
-                                            }
-                                        }
-                                        Text(
-                                            text = "Dir: ${s.getDisplayDir()}",
-                                            fontSize = 10.sp,
-                                            color = DevOnSurfaceVariant
-                                        )
-                                    }
-                                    if (TerminalSessionManager.sessions.size > 1) {
-                                        IconButton(
-                                            onClick = {
-                                                TerminalSessionManager.closeSession(idx)
-                                            },
-                                            modifier = Modifier.size(24.dp)
-                                        ) {
-                                            Icon(
-                                                imageVector = Icons.Default.Close,
-                                                contentDescription = "Tutup Sesi",
-                                                tint = Color.Red,
-                                                modifier = Modifier.size(14.dp)
-                                            )
-                                        }
-                                    }
-                                }
-                            }
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(
+                                imageVector = Icons.Default.Layers,
+                                contentDescription = null,
+                                tint = DevPrimary,
+                                modifier = Modifier.size(22.dp)
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text("Session & Process Manager", fontWeight = FontWeight.ExtraBold, fontSize = 18.sp, color = DevOnSurface)
                         }
-
-                        Spacer(modifier = Modifier.height(14.dp))
-
-                        // Seksi 2: Sesi Latar Belakang Lama (Orphan Processes)
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
+                        Button(
+                            onClick = {
+                                TerminalSessionManager.createNewSession()
+                                showSessionManagerDialog = false
+                            },
+                            colors = ButtonDefaults.buttonColors(containerColor = DevPrimary),
+                            shape = RoundedCornerShape(50),
+                            contentPadding = PaddingValues(horizontal = 14.dp, vertical = 6.dp)
                         ) {
-                            Text(
-                                text = "SESI USANG BACKGROUND (${orphanProcesses.size})",
-                                fontSize = 11.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = if (orphanProcesses.isNotEmpty()) Color(0xFFFF9800) else Color.Gray
-                            )
-                            if (orphanProcesses.isNotEmpty()) {
-                                TextButton(
-                                    onClick = {
-                                        coroutineScope.launch {
-                                            isCleaningOrphans = true
-                                            val activeIds = TerminalSessionManager.sessions.map { it.id }
-                                            val activePids = TerminalSessionManager.sessions.mapNotNull { it.getProcessPid() }
-                                            val killed = ChrootManager.killOrphanChrootProcesses(activeIds, activePids)
-                                            orphanProcesses = emptyList()
-                                            isCleaningOrphans = false
-                                            Toast.makeText(context, "$killed sesi latar belakang berhasil dimatikan", Toast.LENGTH_SHORT).show()
-                                        }
-                                    },
-                                    enabled = !isCleaningOrphans,
-                                    contentPadding = PaddingValues(horizontal = 6.dp, vertical = 2.dp)
-                                ) {
-                                    Text("Matikan Semua", fontSize = 11.sp, color = Color(0xFFFF9800), fontWeight = FontWeight.Bold)
-                                }
-                            }
+                            Text("+ New Shell", color = DevOnPrimary, fontWeight = FontWeight.Bold, fontSize = 12.sp)
                         }
-                        Spacer(modifier = Modifier.height(4.dp))
+                    }
 
-                        if (orphanProcesses.isEmpty()) {
-                            Text(
-                                text = "✓ Tidak ada sesi usang di latar belakang (RAM bersih)",
-                                fontSize = 11.sp,
-                                color = Color(0xFF81C784)
-                            )
-                        } else {
-                            orphanProcesses.forEach { orphan ->
-                                Row(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .padding(vertical = 2.dp),
-                                    horizontalArrangement = Arrangement.SpaceBetween,
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
+                    Spacer(modifier = Modifier.height(16.dp))
+
+                    Text(
+                        text = "ACTIVE SESSIONS (${TerminalSessionManager.sessions.size})",
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = DevPrimary
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    TerminalSessionManager.sessions.forEachIndexed { idx, s ->
+                        val isSelected = idx == activeIndex
+                        Surface(
+                            color = if (isSelected) DevPrimaryContainer else DevSurfaceVariant,
+                            shape = RoundedCornerShape(14.dp),
+                            border = BorderStroke(1.dp, if (isSelected) DevPrimary else DevBorder),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 4.dp)
+                                .clickable {
+                                    TerminalSessionManager.activeIndex.intValue = idx
+                                    showSessionManagerDialog = false
+                                }
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Text(
+                                            text = "${idx + 1}. ${s.name}",
+                                            fontSize = 13.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            color = if (isSelected) DevPrimary else DevOnSurface
+                                        )
+                                        if (s.isAgentRunning && s.activeAgentName != null) {
+                                            Spacer(modifier = Modifier.width(6.dp))
+                                            Text(
+                                                text = "• ${s.activeAgentName}",
+                                                fontSize = 10.sp,
+                                                color = DevPrimary,
+                                                fontWeight = FontWeight.Bold
+                                            )
+                                        }
+                                    }
                                     Text(
-                                        text = "PID ${orphan.pid}: ${orphan.name}",
-                                        fontFamily = FontFamily.Monospace,
-                                        fontSize = 11.sp,
-                                        color = Color(0xFFFFCC80)
-                                    )
-                                    Text(
-                                        text = "${orphan.memoryKb / 1024} MB",
-                                        fontFamily = FontFamily.Monospace,
+                                        text = "Dir: ${s.getDisplayDir()}",
                                         fontSize = 11.sp,
                                         color = DevOnSurfaceVariant
                                     )
                                 }
-                            }
-                        }
-                    }
-                },
-                confirmButton = {
-                    TextButton(
-                        onClick = {
-                            TerminalSessionManager.createNewSession()
-                            showSessionManagerDialog = false
-                        }
-                    ) {
-                        Text("+ Tambah Sesi", color = DevPrimary, fontWeight = FontWeight.Bold)
-                    }
-                },
-                dismissButton = {
-                    TextButton(onClick = { showSessionManagerDialog = false }) {
-                        Text("Tutup")
-                    }
-                }
-            )
-        }
-
-        // Dialog Antigravity CLI Agent Hub (Konektor & Akses Cepat Output/Link Agent)
-        if (showAgentHubDialog) {
-            AlertDialog(
-                onDismissRequest = { showAgentHubDialog = false },
-                icon = {
-                    Icon(Icons.Default.SmartToy, contentDescription = null, tint = DevPrimary, modifier = Modifier.size(28.dp))
-                },
-                title = {
-                    Text(
-                        text = "Antigravity Agent Hub",
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 16.sp,
-                        color = Color.White
-                    )
-                },
-                text = {
-                    Column(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .heightIn(max = 420.dp)
-                    ) {
-                        Text(
-                            text = "Respon & Tautan Terakhir:",
-                            fontSize = 12.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = DevPrimary
-                        )
-                        Spacer(modifier = Modifier.height(6.dp))
-
-                        if (isLoadingAgentInfo) {
-                            Box(modifier = Modifier.fillMaxWidth().height(120.dp), contentAlignment = Alignment.Center) {
-                                CircularProgressIndicator(color = DevPrimary, modifier = Modifier.size(28.dp))
-                            }
-                        } else {
-                            Surface(
-                                color = Color(0xFF14171E),
-                                shape = RoundedCornerShape(8.dp),
-                                border = BorderStroke(1.dp, Color(0xFF2C3240)),
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .weight(1f, fill = false)
-                                    .verticalScroll(rememberScrollState())
-                                    .padding(2.dp)
-                            ) {
-                                Text(
-                                    text = agentLastResponse ?: "Belum ada riwayat percakapan.",
-                                    color = Color(0xFFE0E0E0),
-                                    fontFamily = FontFamily.Monospace,
-                                    fontSize = 11.sp,
-                                    modifier = Modifier.padding(10.dp)
-                                )
-                            }
-
-                            if (agentLastUrls.isNotEmpty()) {
-                                Spacer(modifier = Modifier.height(8.dp))
-                                Text(
-                                    text = "Tautan yang Ditemukan (${agentLastUrls.size}):",
-                                    fontSize = 11.sp,
-                                    fontWeight = FontWeight.SemiBold,
-                                    color = DevSecondary
-                                )
-                                Spacer(modifier = Modifier.height(4.dp))
-                                agentLastUrls.forEach { url ->
-                                    Row(
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .clickable {
-                                                try {
-                                                    val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url))
-                                                    context.startActivity(intent)
-                                                } catch (e: Exception) {
-                                                    Toast.makeText(context, "Gagal membuka: ${e.message}", Toast.LENGTH_SHORT).show()
-                                                }
-                                            }
-                                            .padding(vertical = 3.dp),
-                                        verticalAlignment = Alignment.CenterVertically
+                                if (TerminalSessionManager.sessions.size > 1) {
+                                    IconButton(
+                                        onClick = {
+                                            TerminalSessionManager.closeSession(idx)
+                                        },
+                                        modifier = Modifier.size(28.dp)
                                     ) {
-                                        Icon(Icons.Default.Link, contentDescription = null, tint = DevPrimary, modifier = Modifier.size(14.dp))
-                                        Spacer(modifier = Modifier.width(6.dp))
-                                        Text(
-                                            text = url,
-                                            fontSize = 11.sp,
-                                            color = DevPrimary,
-                                            maxLines = 1,
-                                            overflow = TextOverflow.Ellipsis
+                                        Icon(
+                                            imageVector = Icons.Default.Close,
+                                            contentDescription = "Close Session",
+                                            tint = DevError,
+                                            modifier = Modifier.size(16.dp)
                                         )
                                     }
                                 }
                             }
+                        }
+                    }
 
-                            Spacer(modifier = Modifier.height(10.dp))
+                    Spacer(modifier = Modifier.height(16.dp))
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "ORPHAN PROCESSES (${orphanProcesses.size})",
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = if (orphanProcesses.isNotEmpty()) DevWarning else DevOnSurfaceVariant
+                        )
+                        if (orphanProcesses.isNotEmpty()) {
+                            TextButton(
+                                onClick = {
+                                    coroutineScope.launch {
+                                        isCleaningOrphans = true
+                                        val activeIds = TerminalSessionManager.sessions.map { it.id }
+                                        val activePids = TerminalSessionManager.sessions.mapNotNull { it.getProcessPid() }
+                                        val killed = ChrootManager.killOrphanChrootProcesses(activeIds, activePids)
+                                        orphanProcesses = emptyList()
+                                        isCleaningOrphans = false
+                                        Toast.makeText(context, "$killed orphan processes terminated", Toast.LENGTH_SHORT).show()
+                                    }
+                                },
+                                enabled = !isCleaningOrphans,
+                                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)
+                            ) {
+                                Text("Kill All", fontSize = 12.sp, color = DevWarning, fontWeight = FontWeight.Bold)
+                            }
+                        }
+                    }
+                    Spacer(modifier = Modifier.height(4.dp))
+
+                    if (orphanProcesses.isEmpty()) {
+                        Text(
+                            text = "✓ Zero orphan background processes (Memory clean)",
+                            fontSize = 12.sp,
+                            color = DevPrimary
+                        )
+                    } else {
+                        orphanProcesses.forEach { orphan ->
                             Row(
-                                modifier = Modifier.fillMaxWidth(),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(vertical = 3.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween,
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
-                                OutlinedTextField(
-                                    value = agentQuickPrompt,
-                                    onValueChange = { agentQuickPrompt = it },
-                                    placeholder = { Text("Ketik prompt ke agent...", fontSize = 11.sp) },
-                                    singleLine = true,
-                                    modifier = Modifier.weight(1f)
+                                Text(
+                                    text = "PID ${orphan.pid}: ${orphan.name}",
+                                    fontFamily = FontFamily.Monospace,
+                                    fontSize = 11.sp,
+                                    color = DevWarning
                                 )
-                                Spacer(modifier = Modifier.width(6.dp))
-                                IconButton(
-                                    onClick = {
-                                        if (agentQuickPrompt.isNotBlank()) {
-                                            val s = TerminalSessionManager.getActiveSession()
-                                            s.sendText(agentQuickPrompt.trim() + "\r")
-                                            agentQuickPrompt = ""
-                                            showAgentHubDialog = false
-                                            Toast.makeText(context, "Prompt terkirim ke sesi aktif", Toast.LENGTH_SHORT).show()
+                                Text(
+                                    text = "${orphan.memoryKb / 1024} MB",
+                                    fontFamily = FontFamily.Monospace,
+                                    fontSize = 11.sp,
+                                    color = DevOnSurfaceVariant
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // 2026 M3 ModalBottomSheet: Antigravity CLI Agent Hub
+        if (showAgentHubDialog) {
+            ModalBottomSheet(
+                onDismissRequest = { showAgentHubDialog = false },
+                containerColor = DevSurface,
+                contentColor = DevOnSurface
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 20.dp)
+                        .padding(bottom = 28.dp)
+                        .heightIn(max = 480.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Icons.Default.SmartToy, contentDescription = null, tint = DevPrimary, modifier = Modifier.size(24.dp))
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                text = "Antigravity Agent Hub",
+                                fontWeight = FontWeight.ExtraBold,
+                                fontSize = 18.sp,
+                                color = DevOnSurface
+                            )
+                        }
+                        TextButton(
+                            onClick = {
+                                val resp = agentLastResponse
+                                if (!resp.isNullOrBlank()) {
+                                    clipboardManager.setText(AnnotatedString(resp))
+                                    Toast.makeText(context, "Response copied to clipboard", Toast.LENGTH_SHORT).show()
+                                }
+                            }
+                        ) {
+                            Icon(Icons.Default.ContentCopy, contentDescription = null, tint = DevPrimary, modifier = Modifier.size(14.dp))
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text("Copy Output", color = DevPrimary, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    Text(
+                        text = "Latest Agent Response & Links:",
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = DevOnSurfaceVariant
+                    )
+                    Spacer(modifier = Modifier.height(6.dp))
+
+                    if (isLoadingAgentInfo) {
+                        Box(modifier = Modifier.fillMaxWidth().height(120.dp), contentAlignment = Alignment.Center) {
+                            CircularProgressIndicator(color = DevPrimary, modifier = Modifier.size(28.dp))
+                        }
+                    } else {
+                        Surface(
+                            color = DevCanvasDeep,
+                            shape = RoundedCornerShape(14.dp),
+                            border = BorderStroke(1.dp, DevBorder),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .weight(1f, fill = false)
+                                .verticalScroll(rememberScrollState())
+                        ) {
+                            Text(
+                                text = agentLastResponse ?: "No conversation transcript found yet.",
+                                color = DevOnSurface,
+                                fontFamily = FontFamily.Monospace,
+                                fontSize = 11.sp,
+                                modifier = Modifier.padding(12.dp)
+                            )
+                        }
+
+                        if (agentLastUrls.isNotEmpty()) {
+                            Spacer(modifier = Modifier.height(8.dp))
+                            Text(
+                                text = "Detected Links (${agentLastUrls.size}):",
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = DevPrimary
+                            )
+                            Spacer(modifier = Modifier.height(4.dp))
+                            agentLastUrls.forEach { url ->
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clickable {
+                                            try {
+                                                val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url))
+                                                context.startActivity(intent)
+                                            } catch (e: Exception) {
+                                                Toast.makeText(context, "Failed to open: ${e.message}", Toast.LENGTH_SHORT).show()
+                                            }
                                         }
-                                    }
+                                        .padding(vertical = 3.dp),
+                                    verticalAlignment = Alignment.CenterVertically
                                 ) {
-                                    Icon(Icons.Default.Send, contentDescription = "Kirim", tint = DevPrimary)
+                                    Icon(Icons.Default.Link, contentDescription = null, tint = DevPrimary, modifier = Modifier.size(14.dp))
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Text(
+                                        text = url,
+                                        fontSize = 11.sp,
+                                        color = DevPrimary,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                }
+                            }
+                        }
+
+                        Spacer(modifier = Modifier.height(12.dp))
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            OutlinedTextField(
+                                value = agentQuickPrompt,
+                                onValueChange = { agentQuickPrompt = it },
+                                placeholder = { Text("Send quick prompt to active PTY...", fontSize = 12.sp) },
+                                singleLine = true,
+                                shape = RoundedCornerShape(50),
+                                colors = OutlinedTextFieldDefaults.colors(
+                                    focusedBorderColor = DevPrimary,
+                                    unfocusedBorderColor = DevBorder
+                                ),
+                                modifier = Modifier.weight(1f)
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Surface(
+                                onClick = {
+                                    if (agentQuickPrompt.isNotBlank()) {
+                                        val s = TerminalSessionManager.getActiveSession()
+                                        s.sendText(agentQuickPrompt.trim() + "\r")
+                                        agentQuickPrompt = ""
+                                        showAgentHubDialog = false
+                                        Toast.makeText(context, "Prompt sent to active shell", Toast.LENGTH_SHORT).show()
+                                    }
+                                },
+                                color = DevPrimary,
+                                shape = CircleShape,
+                                modifier = Modifier.size(44.dp)
+                            ) {
+                                Box(contentAlignment = Alignment.Center) {
+                                    Icon(Icons.Default.Send, contentDescription = "Send", tint = DevOnPrimary, modifier = Modifier.size(18.dp))
                                 }
                             }
                         }
                     }
-                },
-                confirmButton = {
-                    TextButton(
-                        onClick = {
-                            val resp = agentLastResponse
-                            if (!resp.isNullOrBlank()) {
-                                clipboardManager.setText(AnnotatedString(resp))
-                                Toast.makeText(context, "Respon disalin ke clipboard", Toast.LENGTH_SHORT).show()
-                            }
-                        }
-                    ) {
-                        Icon(Icons.Default.ContentCopy, contentDescription = null, modifier = Modifier.size(14.dp))
-                        Spacer(modifier = Modifier.width(4.dp))
-                        Text("Salin Respon", color = DevPrimary, fontSize = 12.sp)
-                    }
-                },
-                dismissButton = {
-                    TextButton(onClick = { showAgentHubDialog = false }) {
-                        Text("Tutup", color = Color.Gray, fontSize = 12.sp)
-                    }
                 }
-            )
+            }
         }
 
-        // Comprehensive Mobile Extra Keys Panel (2 Scrollable Rows for FlorisBoard / Mobile Terminal)
+        HorizontalDivider(thickness = 1.dp, color = DevBorder)
+
+        // Tactile Mobile Extra Keys Dock (#141414 + #252824 + #7DFF4C)
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .background(TerminalBackground)
-                .padding(vertical = 4.dp),
+                .background(DevBackground)
+                .padding(vertical = 5.dp),
             verticalArrangement = Arrangement.spacedBy(4.dp)
         ) {
             // Row 1: Essential Modifiers, Navigation & Line Controls
@@ -1681,13 +1756,11 @@ fun TerminalScreen(
                 horizontalArrangement = Arrangement.spacedBy(4.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                // ESC
                 TerminalModifierKey(label = "ESC") {
                     TerminalSessionManager.getActiveSession().sendBytes(byteArrayOf(27))
                 }
 
-                // Tombol Cepat Tempel (PASTE) langsung dari baris tombol bantuan
-                TerminalModifierKey(label = "PASTE", isSignal = true) {
+                TerminalModifierKey(label = "PASTE", highlight = true) {
                     val clip = clipboardManager.getText()?.text
                     if (!clip.isNullOrEmpty()) {
                         if (clip.length > 2000 || clip.count { it == '\n' } > 50) {
@@ -1696,11 +1769,10 @@ fun TerminalScreen(
                             TerminalSessionManager.getActiveSession().pasteText(clip)
                         }
                     } else {
-                        Toast.makeText(context, "Clipboard kosong", Toast.LENGTH_SHORT).show()
+                        Toast.makeText(context, "Clipboard is empty", Toast.LENGTH_SHORT).show()
                     }
                 }
 
-                // TAB / SHIFT+TAB (Backtab untuk navigasi mundur di TUI agy/fzf/nano)
                 TerminalModifierKey(label = if (isShiftActive) "⇧TAB" else "TAB", highlight = isShiftActive) {
                     val cur = TerminalSessionManager.getActiveSession()
                     if (isShiftActive) {
@@ -1711,85 +1783,69 @@ fun TerminalScreen(
                     }
                 }
 
-                // Sticky CTRL
                 TerminalToggleKey(label = "CTRL", isActive = isCtrlActive) {
                     isCtrlActive = !isCtrlActive
                 }
 
-                // Quick Ctrl+C (Interrupt/Hentikan proses yang looping/hang)
                 TerminalModifierKey(label = "Ctrl+C", isSignal = true) {
                     autoScrollEnabled = true
                     TerminalSessionManager.getActiveSession().cancelActiveProcess()
                 }
 
-                // Sticky ALT
                 TerminalToggleKey(label = "ALT", isActive = isAltActive) {
                     isAltActive = !isAltActive
                 }
 
-                // Sticky SHIFT
                 TerminalToggleKey(label = "SHIFT", isActive = isShiftActive) {
                     isShiftActive = !isShiftActive
                 }
 
-                // Dedicated ENTER
                 TerminalModifierKey(label = "ENTER", highlight = true) {
                     autoScrollEnabled = true
                     TerminalSessionManager.getActiveSession().sendText("\r")
                 }
 
-                // Backspace (⌫)
                 TerminalModifierKey(label = "⌫") {
                     TerminalSessionManager.getActiveSession().sendBytes(byteArrayOf(127))
                 }
 
-                // Delete forward (DEL)
                 TerminalModifierKey(label = "DEL") {
                     TerminalSessionManager.getActiveSession().sendText("\u001B[3~")
                 }
 
-                // Arrow Left ◀
                 TerminalModifierKey(label = "◀") {
                     sendArrowLeft()
                 }
 
-                // Arrow Down ▼ (Memilih menu agy)
                 TerminalModifierKey(label = "▼") {
                     sendArrowDown()
                 }
 
-                // Arrow Up ▲ (Memilih menu agy)
                 TerminalModifierKey(label = "▲") {
                     sendArrowUp()
                 }
 
-                // Arrow Right ▶
                 TerminalModifierKey(label = "▶") {
                     sendArrowRight()
                 }
 
-                // HOME
                 TerminalModifierKey(label = "HOME") {
                     TerminalSessionManager.getActiveSession().sendText("\u001B[H")
                 }
 
-                // END
                 TerminalModifierKey(label = "END") {
                     TerminalSessionManager.getActiveSession().sendText("\u001B[F")
                 }
 
-                // PGUP
                 TerminalModifierKey(label = "PGUP") {
                     TerminalSessionManager.getActiveSession().sendText("\u001B[5~")
                 }
 
-                // PGDN
                 TerminalModifierKey(label = "PGDN") {
                     TerminalSessionManager.getActiveSession().sendText("\u001B[6~")
                 }
             }
 
-            // Row 2: Tombol Fungsi F1 - F12 & Simbol Shell Pemrograman (Hanya tampil saat keyboard tertutup untuk hemat ruang layar)
             if (!isImeVisible) {
                 Row(
                     modifier = Modifier
@@ -1799,7 +1855,6 @@ fun TerminalScreen(
                     horizontalArrangement = Arrangement.spacedBy(4.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    // Tombol Fungsi F1 - F12 (Standar VT100/XTerm untuk mc, htop, nano, dsb.)
                     val functionKeys = listOf(
                         "F1" to "\u001BOP",
                         "F2" to "\u001BOQ",
@@ -1820,7 +1875,6 @@ fun TerminalScreen(
                         }
                     }
 
-                    // Shell & Programming Symbols
                     val symbols = listOf(
                         "~", "/", "-", "_", "|", "$", "=", ":", ";",
                         "&", "*", "\\", "\"", "'", "`", "<", ">", "!",
@@ -1845,21 +1899,30 @@ fun TerminalModifierKey(
     onClick: () -> Unit
 ) {
     val containerBg = when {
-        isSignal -> Color(0xFF3E1214)
-        highlight -> DevPrimary.copy(alpha = 0.25f)
-        else -> Color(0xFF1E1E1E)
+        isSignal -> Color(0xFF361515)
+        highlight -> DevPrimaryContainer
+        else -> DevSurfaceVariant
     }
 
     val textColor = when {
-        isSignal -> Color(0xFFFF7B72)
+        isSignal -> DevError
         highlight -> DevPrimary
-        else -> Color.White
+        else -> DevOnSurface
     }
 
     Box(
         modifier = Modifier
-            .clip(RoundedCornerShape(6.dp))
+            .clip(RoundedCornerShape(8.dp))
             .background(containerBg)
+            .border(
+                width = 1.dp,
+                color = when {
+                    isSignal -> DevError.copy(alpha = 0.4f)
+                    highlight -> DevPrimary.copy(alpha = 0.45f)
+                    else -> DevBorder
+                },
+                shape = RoundedCornerShape(8.dp)
+            )
             .clickable {
                 onClick()
             }
@@ -1882,13 +1945,18 @@ fun TerminalToggleKey(
     isActive: Boolean,
     onClick: () -> Unit
 ) {
-    val containerBg = if (isActive) DevPrimary else Color(0xFF1E1E1E)
-    val textColor = if (isActive) Color.Black else Color.White
+    val containerBg = if (isActive) DevPrimary else DevSurfaceVariant
+    val textColor = if (isActive) DevOnPrimary else DevOnSurface
 
     Box(
         modifier = Modifier
-            .clip(RoundedCornerShape(6.dp))
+            .clip(RoundedCornerShape(8.dp))
             .background(containerBg)
+            .border(
+                width = 1.dp,
+                color = if (isActive) DevPrimary else DevBorder,
+                shape = RoundedCornerShape(8.dp)
+            )
             .clickable {
                 onClick()
             }
@@ -2167,8 +2235,8 @@ fun TerminalCanvas(
                             val pt = GridPoint(lineIdx, bgCol)
                             val isSelected = hasSelection && selMin != null && selMax != null && pt >= selMin && pt <= selMax
                             val runBg = when {
-                                isSelected -> Color(0x6638BDF8)
-                                isCursor -> Color(0xFF61AFEF)
+                                isSelected -> Color(0x4D7DFF4C)
+                                isCursor -> Color(0xFF7DFF4C)
                                 else -> cell.bgColor
                             }
 
@@ -2182,8 +2250,8 @@ fun TerminalCanvas(
                                 val nextPt = GridPoint(lineIdx, bgCol)
                                 val nextIsSelected = hasSelection && selMin != null && selMax != null && nextPt >= selMin && nextPt <= selMax
                                 val nextBg = when {
-                                    nextIsSelected -> Color(0x6638BDF8)
-                                    nextIsCursor -> Color(0xFF61AFEF)
+                                    nextIsSelected -> Color(0x4D7DFF4C)
+                                    nextIsCursor -> Color(0xFF7DFF4C)
                                     else -> nextCell.bgColor
                                 }
                                 if (nextBg == runBg) {
@@ -2256,7 +2324,7 @@ fun TerminalCanvas(
                         // Kursor di luar batas kolom karakter
                         if (isCursorVisible && (lineIdx - historyCount) == cursorRow && cursorCol >= maxCols) {
                             drawRect(
-                                color = Color(0xFF61AFEF),
+                                color = Color(0xFF7DFF4C),
                                 topLeft = Offset((maxCols - 1) * charWidth, yTop),
                                 size = Size(charWidth, charHeight)
                             )
@@ -2354,13 +2422,13 @@ fun TerminalCanvas(
                         indication = null,
                         onClick = {} // Konsumsi sentuhan agar tidak memicu tap deselect di Canvas
                     ),
-                shape = RoundedCornerShape(12.dp),
-                color = Color(0xFF1E222D),
+                shape = RoundedCornerShape(50),
+                color = DevSurface,
                 border = BorderStroke(1.dp, DevPrimary.copy(alpha = 0.8f)),
                 shadowElevation = 8.dp
             ) {
                 Row(
-                    modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp),
+                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     TextButton(
@@ -2371,7 +2439,7 @@ fun TerminalCanvas(
                                 val text = getSelectedText(start, end)
                                 if (text.isNotEmpty()) {
                                     clipboardManager.setText(AnnotatedString(text))
-                                    Toast.makeText(context, "Teks disalin (${text.length} karakter)", Toast.LENGTH_SHORT).show()
+                                    Toast.makeText(context, "Copied (${text.length} chars)", Toast.LENGTH_SHORT).show()
                                 }
                             }
                             selectionStart = null
@@ -2382,7 +2450,7 @@ fun TerminalCanvas(
                     ) {
                         Icon(Icons.Default.ContentCopy, contentDescription = null, tint = DevPrimary, modifier = Modifier.size(15.dp))
                         Spacer(modifier = Modifier.width(4.dp))
-                        Text("Salin", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                        Text("Copy", color = DevOnSurface, fontSize = 12.sp, fontWeight = FontWeight.Bold)
                     }
 
                     val clipText = clipboardManager.getText()?.text
@@ -2400,7 +2468,7 @@ fun TerminalCanvas(
                             },
                             contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp)
                         ) {
-                            Text("Tempel", color = Color.White, fontSize = 12.sp)
+                            Text("Paste", color = DevOnSurface, fontSize = 12.sp)
                         }
                     }
 
@@ -2413,7 +2481,7 @@ fun TerminalCanvas(
                         },
                         contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp)
                     ) {
-                        Text("Semua", color = Color.White, fontSize = 12.sp)
+                        Text("All", color = DevOnSurface, fontSize = 12.sp)
                     }
 
                     IconButton(
@@ -2429,9 +2497,9 @@ fun TerminalCanvas(
                                             putExtra(Intent.EXTRA_TEXT, text)
                                             type = "text/plain"
                                         }
-                                        context.startActivity(Intent.createChooser(sendIntent, "Bagikan Teks"))
+                                        context.startActivity(Intent.createChooser(sendIntent, "Share Text"))
                                     } catch (e: Exception) {
-                                        Toast.makeText(context, "Gagal membagikan: ${e.message}", Toast.LENGTH_SHORT).show()
+                                        Toast.makeText(context, "Share failed: ${e.message}", Toast.LENGTH_SHORT).show()
                                     }
                                 }
                             }
@@ -2441,17 +2509,16 @@ fun TerminalCanvas(
                         },
                         modifier = Modifier.size(32.dp)
                     ) {
-                        Icon(Icons.Default.Share, contentDescription = "Bagikan", tint = DevPrimary, modifier = Modifier.size(15.dp))
+                        Icon(Icons.Default.Share, contentDescription = "Share", tint = DevPrimary, modifier = Modifier.size(15.dp))
                     }
 
                     IconButton(
                         onClick = {
-                            // Menutup menu saja tanpa menghapus highlight seleksi atau posisi pin
                             showSelectionMenu = false
                         },
                         modifier = Modifier.size(28.dp)
                     ) {
-                        Icon(Icons.Default.Close, contentDescription = "Tutup Menu", tint = Color.Gray, modifier = Modifier.size(14.dp))
+                        Icon(Icons.Default.Close, contentDescription = "Close Menu", tint = DevOnSurfaceVariant, modifier = Modifier.size(14.dp))
                     }
                 }
             }
@@ -2485,8 +2552,8 @@ fun TerminalCanvas(
                         indication = null,
                         onClick = {}
                     ),
-                shape = RoundedCornerShape(12.dp),
-                color = Color(0xFF1E222D),
+                shape = RoundedCornerShape(50),
+                color = DevSurface,
                 border = BorderStroke(1.dp, DevPrimary.copy(alpha = 0.8f)),
                 shadowElevation = 8.dp
             ) {
@@ -2502,11 +2569,11 @@ fun TerminalCanvas(
                         }
                         pasteMenuOffset = null
                     },
-                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp)
+                    contentPadding = PaddingValues(horizontal = 14.dp, vertical = 6.dp)
                 ) {
                     Icon(Icons.Default.ContentPaste, contentDescription = null, tint = DevPrimary, modifier = Modifier.size(16.dp))
                     Spacer(modifier = Modifier.width(6.dp))
-                    Text("Tempel", color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                    Text("Paste", color = DevOnSurface, fontSize = 13.sp, fontWeight = FontWeight.Bold)
                 }
             }
         }
@@ -2591,15 +2658,15 @@ private fun SelectionHandle(
             val cy = 12.dp.toPx()
             val r = visualPinRadius.toPx()
 
-            // Glowing touch halo
+            // Glowing touch halo (#7DFF4C)
             drawCircle(
-                color = Color(0x4438BDF8),
+                color = Color(0x447DFF4C),
                 radius = r + 4.dp.toPx(),
                 center = Offset(cx, cy)
             )
-            // Pin head
+            // Pin head (#7DFF4C)
             drawCircle(
-                color = Color(0xFF38BDF8),
+                color = Color(0xFF7DFF4C),
                 radius = r,
                 center = Offset(cx, cy)
             )
@@ -2610,7 +2677,7 @@ private fun SelectionHandle(
                 lineTo(cx + 3.dp.toPx(), cy - 2.dp.toPx())
                 close()
             }
-            drawPath(path, color = Color(0xFF38BDF8))
+            drawPath(path, color = Color(0xFF7DFF4C))
         }
     }
 }

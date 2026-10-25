@@ -97,10 +97,19 @@ import com.arbdev.devbox.data.ChrootProcessInfo
 import com.arbdev.devbox.data.ChrootState
 import com.arbdev.devbox.service.KeepAliveService
 import com.arbdev.devbox.terminal.TerminalSessionManager
+import com.arbdev.devbox.ui.theme.DevBackground
+import com.arbdev.devbox.ui.theme.DevBorder
+import com.arbdev.devbox.ui.theme.DevCanvasDeep
 import com.arbdev.devbox.ui.theme.DevError
+import com.arbdev.devbox.ui.theme.DevOnPrimary
+import com.arbdev.devbox.ui.theme.DevOnPrimaryContainer
+import com.arbdev.devbox.ui.theme.DevOnSurface
+import com.arbdev.devbox.ui.theme.DevOnSurfaceVariant
 import com.arbdev.devbox.ui.theme.DevPrimary
+import com.arbdev.devbox.ui.theme.DevPrimaryContainer
 import com.arbdev.devbox.ui.theme.DevSecondary
 import com.arbdev.devbox.ui.theme.DevSuccess
+import com.arbdev.devbox.ui.theme.DevSurface
 import com.arbdev.devbox.ui.theme.DevSurfaceVariant
 import com.arbdev.devbox.ui.theme.DevWarning
 import com.arbdev.devbox.updater.UpdateInfo
@@ -186,35 +195,55 @@ fun DashboardScreen(
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .background(MaterialTheme.colorScheme.background)
+            .background(DevBackground)
             .verticalScroll(rememberScrollState())
-            .padding(20.dp)
+            .padding(horizontal = 18.dp, vertical = 16.dp)
     ) {
-        // Top Header
+        // 2026 Google Expressive Top Header
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
             Column {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        text = "DevBox",
+                        fontSize = 26.sp,
+                        fontWeight = FontWeight.ExtraBold,
+                        color = DevOnSurface
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Surface(
+                        color = DevPrimaryContainer,
+                        shape = RoundedCornerShape(50),
+                        border = BorderStroke(1.dp, DevPrimary.copy(alpha = 0.4f))
+                    ) {
+                        Text(
+                            text = "v${com.arbdev.devbox.BuildConfig.VERSION_NAME}",
+                            fontSize = 10.sp,
+                            fontFamily = FontFamily.Monospace,
+                            fontWeight = FontWeight.Bold,
+                            color = DevPrimary,
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
+                        )
+                    }
+                }
+                Spacer(modifier = Modifier.height(2.dp))
                 Text(
-                    text = "DevBox",
-                    fontSize = 28.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = MaterialTheme.colorScheme.onBackground
-                )
-                Text(
-                    text = "Standalone Linux Container & AI Agent CLI",
-                    fontSize = 13.sp,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                    text = "Linux Container Engine • AI Agent Runtime",
+                    fontSize = 12.sp,
+                    color = DevOnSurfaceVariant
                 )
             }
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                // In-App Update Icon Button with Changelog Dialog
-                IconButton(
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                Surface(
                     onClick = {
                         scope.launch {
-                            Toast.makeText(context, "Memeriksa pembaruan...", Toast.LENGTH_SHORT).show()
+                            Toast.makeText(context, "Checking for updates...", Toast.LENGTH_SHORT).show()
                             val res = UpdateManager.checkForUpdates(context, force = true)
                             if (res.isSuccess) {
                                 val info = res.getOrNull()
@@ -223,27 +252,40 @@ fun DashboardScreen(
                                 }
                             }
                         }
-                    }
+                    },
+                    color = DevSurfaceVariant,
+                    shape = CircleShape,
+                    modifier = Modifier.size(38.dp)
                 ) {
-                    Icon(
-                        imageVector = Icons.Default.SystemUpdate,
-                        contentDescription = "Cek Pembaruan",
-                        tint = DevPrimary
-                    )
+                    Box(contentAlignment = Alignment.Center) {
+                        Icon(
+                            imageVector = Icons.Default.SystemUpdate,
+                            contentDescription = "Check Updates",
+                            tint = DevPrimary,
+                            modifier = Modifier.size(18.dp)
+                        )
+                    }
                 }
 
-                // Refresh Button
-                IconButton(onClick = { refreshState() }) {
-                    Icon(
-                        imageVector = Icons.Default.Refresh,
-                        contentDescription = "Segarkan",
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
+                Surface(
+                    onClick = { refreshState() },
+                    color = DevSurfaceVariant,
+                    shape = CircleShape,
+                    modifier = Modifier.size(38.dp)
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
+                        Icon(
+                            imageVector = Icons.Default.Refresh,
+                            contentDescription = "Refresh",
+                            tint = DevOnSurfaceVariant,
+                            modifier = Modifier.size(18.dp)
+                        )
+                    }
                 }
             }
         }
 
-        Spacer(modifier = Modifier.height(14.dp))
+        Spacer(modifier = Modifier.height(16.dp))
 
         // In-App Update Notification Card
         when (val status = updateStatus) {
@@ -261,12 +303,13 @@ fun DashboardScreen(
             is UpdateStatus.Downloading -> {
                 Card(
                     modifier = Modifier.fillMaxWidth(),
-                    colors = CardDefaults.cardColors(containerColor = Color(0xFF141414)),
-                    shape = RoundedCornerShape(12.dp)
+                    colors = CardDefaults.cardColors(containerColor = DevSurface),
+                    shape = RoundedCornerShape(18.dp),
+                    border = BorderStroke(1.dp, DevPrimary.copy(alpha = 0.4f))
                 ) {
-                    Column(modifier = Modifier.padding(14.dp)) {
+                    Column(modifier = Modifier.padding(16.dp)) {
                         Text(
-                            text = "Mengunduh Pembaruan (${status.progressPercent}%)",
+                            text = "Downloading Update (${status.progressPercent}%)",
                             fontSize = 13.sp,
                             fontWeight = FontWeight.Bold,
                             color = DevPrimary
@@ -274,8 +317,12 @@ fun DashboardScreen(
                         Spacer(modifier = Modifier.height(8.dp))
                         LinearProgressIndicator(
                             progress = { status.progressPercent / 100f },
-                            modifier = Modifier.fillMaxWidth(),
-                            color = DevPrimary
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(6.dp)
+                                .clip(RoundedCornerShape(50)),
+                            color = DevPrimary,
+                            trackColor = DevSurfaceVariant
                         )
                     }
                 }
@@ -284,25 +331,27 @@ fun DashboardScreen(
             is UpdateStatus.ReadyToInstall -> {
                 Card(
                     modifier = Modifier.fillMaxWidth(),
-                    colors = CardDefaults.cardColors(containerColor = Color(0xFF141414)),
-                    shape = RoundedCornerShape(12.dp)
+                    colors = CardDefaults.cardColors(containerColor = DevPrimaryContainer),
+                    shape = RoundedCornerShape(18.dp),
+                    border = BorderStroke(1.dp, DevPrimary)
                 ) {
                     Row(
-                        modifier = Modifier.padding(14.dp),
+                        modifier = Modifier.padding(16.dp),
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Text(
-                            text = "Pembaruan Siap Dipasang",
+                            text = "Update Ready to Install",
                             fontSize = 13.sp,
                             fontWeight = FontWeight.Bold,
-                            color = DevSuccess
+                            color = DevPrimary
                         )
                         Button(
                             onClick = { UpdateManager.installApk(context, status.apkFile) },
-                            colors = ButtonDefaults.buttonColors(containerColor = DevSuccess)
+                            colors = ButtonDefaults.buttonColors(containerColor = DevPrimary),
+                            shape = RoundedCornerShape(50)
                         ) {
-                            Text("Pasang APK", color = Color.Black, fontWeight = FontWeight.Bold)
+                            Text("Install APK", color = DevOnPrimary, fontWeight = FontWeight.Bold)
                         }
                     }
                 }
@@ -318,28 +367,41 @@ fun DashboardScreen(
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(bottom = 12.dp),
-                    colors = CardDefaults.cardColors(containerColor = DevSurfaceVariant)
+                    colors = CardDefaults.cardColors(containerColor = DevPrimaryContainer),
+                    shape = RoundedCornerShape(14.dp),
+                    border = BorderStroke(1.dp, DevPrimary.copy(alpha = 0.4f))
                 ) {
-                    Text(
-                        text = msg,
+                    Row(
                         modifier = Modifier.padding(12.dp),
-                        fontSize = 13.sp,
-                        color = MaterialTheme.colorScheme.onSurface
-                    )
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(14.dp),
+                            color = DevPrimary,
+                            strokeWidth = 2.dp
+                        )
+                        Spacer(modifier = Modifier.width(10.dp))
+                        Text(
+                            text = msg,
+                            fontSize = 12.sp,
+                            color = DevOnPrimaryContainer,
+                            fontWeight = FontWeight.Medium
+                        )
+                    }
                 }
             }
         }
 
-        // Sesi Usang di Background Banner (Jika Ada)
+        // Orphan Processes Alert Card
         AnimatedVisibility(visible = orphanProcesses.isNotEmpty()) {
             val totalRamMb = orphanProcesses.sumOf { it.memoryKb } / 1024
             Card(
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(bottom = 12.dp),
-                colors = CardDefaults.cardColors(containerColor = Color(0xFF231602)),
-                shape = RoundedCornerShape(14.dp),
-                border = BorderStroke(1.dp, Color(0xFFFF9800).copy(alpha = 0.7f))
+                colors = CardDefaults.cardColors(containerColor = Color(0xFF211A0B)),
+                shape = RoundedCornerShape(18.dp),
+                border = BorderStroke(1.dp, DevWarning.copy(alpha = 0.6f))
             ) {
                 Row(
                     modifier = Modifier.padding(14.dp),
@@ -353,24 +415,25 @@ fun DashboardScreen(
                         Icon(
                             imageVector = Icons.Default.Warning,
                             contentDescription = null,
-                            tint = Color(0xFFFF9800),
+                            tint = DevWarning,
                             modifier = Modifier.size(20.dp)
                         )
                         Spacer(modifier = Modifier.width(10.dp))
                         Column {
                             Text(
-                                text = "${orphanProcesses.size} Sesi Usang di Background (~${totalRamMb} MB)",
+                                text = "${orphanProcesses.size} Orphan Processes (~${totalRamMb} MB)",
                                 fontWeight = FontWeight.Bold,
                                 fontSize = 13.sp,
-                                color = Color.White
+                                color = DevOnSurface
                             )
                             Text(
-                                text = "Sisa force close lama yang memakan RAM. Bersihkan agar HP tidak lag.",
+                                text = "Detached background processes found. Kill to free RAM.",
                                 fontSize = 11.sp,
-                                color = Color(0xFFB0BEC5)
+                                color = DevOnSurfaceVariant
                             )
                         }
                     }
+                    Spacer(modifier = Modifier.width(8.dp))
                     Button(
                         onClick = {
                             scope.launch {
@@ -381,11 +444,11 @@ fun DashboardScreen(
                                 orphanProcesses = emptyList()
                                 isCleaningOrphans = false
                                 refreshState()
-                                Toast.makeText(context, "$killed sesi lama berhasil dibersihkan", Toast.LENGTH_SHORT).show()
+                                Toast.makeText(context, "$killed orphan processes terminated", Toast.LENGTH_SHORT).show()
                             }
                         },
-                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFF9800)),
-                        shape = RoundedCornerShape(8.dp),
+                        colors = ButtonDefaults.buttonColors(containerColor = DevWarning),
+                        shape = RoundedCornerShape(50),
                         enabled = !isCleaningOrphans
                     ) {
                         if (isCleaningOrphans) {
@@ -395,15 +458,19 @@ fun DashboardScreen(
                                 strokeWidth = 2.dp
                             )
                         } else {
-                            Text("Bersihkan", color = Color.Black, fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                            Text("Kill All", color = Color.Black, fontWeight = FontWeight.Bold, fontSize = 12.sp)
                         }
                     }
                 }
             }
         }
 
-        // Status Card dengan Proteksi Flash State Loading
-        StatusCard(state = state, isLoading = isInitialLoading || isRefreshing)
+        // Hero Container Status Card (24.dp Expressive Squircle)
+        StatusCard(
+            state = state,
+            isLoading = isInitialLoading || isRefreshing,
+            onOpenTerminal = { onNavigateToTerminal(null) }
+        )
 
         // ROOTFS SETUP OPTIONS IF NOT INSTALLED
         if (!state.isRootfsExists && state.isRootGranted) {
@@ -411,69 +478,76 @@ fun DashboardScreen(
 
             Card(
                 modifier = Modifier.fillMaxWidth(),
-                colors = CardDefaults.cardColors(containerColor = Color(0xFF101010)),
-                shape = RoundedCornerShape(16.dp),
+                colors = CardDefaults.cardColors(containerColor = DevSurface),
+                shape = RoundedCornerShape(20.dp),
                 border = BorderStroke(1.dp, DevWarning.copy(alpha = 0.5f))
             ) {
-                Column(modifier = Modifier.padding(16.dp)) {
+                Column(modifier = Modifier.padding(18.dp)) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Icon(Icons.Default.Folder, contentDescription = null, tint = DevWarning)
                         Spacer(modifier = Modifier.width(8.dp))
                         Text(
-                            text = "Pemasangan Rootfs Mandiri",
-                            fontSize = 15.sp,
+                            text = "Rootfs Provisioning",
+                            fontSize = 16.sp,
                             fontWeight = FontWeight.Bold,
-                            color = Color.White
+                            color = DevOnSurface
                         )
                     }
 
                     Spacer(modifier = Modifier.height(6.dp))
 
                     Text(
-                        text = "Direktori target (${ChrootManager.activeRootfs}) belum memiliki binary sistem Linux (/bin/bash). Pilih salah satu metode di bawah:",
+                        text = "Target directory (${ChrootManager.activeRootfs}) has no Linux rootfs (/bin/bash). Choose a setup method:",
                         fontSize = 12.sp,
-                        color = Color.LightGray
+                        color = DevOnSurfaceVariant
                     )
 
                     Spacer(modifier = Modifier.height(14.dp))
 
                     if (isOperating) {
                         LinearProgressIndicator(
-                            modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp),
-                            color = DevPrimary
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 6.dp)
+                                .height(6.dp)
+                                .clip(RoundedCornerShape(50)),
+                            color = DevPrimary,
+                            trackColor = DevSurfaceVariant
                         )
                     }
 
                     if (state.isSourceChrootAvailable) {
                         Card(
-                            modifier = Modifier.fillMaxWidth().padding(bottom = 12.dp),
-                            colors = CardDefaults.cardColors(containerColor = DevSuccess.copy(alpha = 0.12f)),
-                            border = BorderStroke(1.dp, DevSuccess.copy(alpha = 0.4f)),
-                            shape = RoundedCornerShape(12.dp)
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(bottom = 12.dp),
+                            colors = CardDefaults.cardColors(containerColor = DevPrimaryContainer),
+                            border = BorderStroke(1.dp, DevPrimary.copy(alpha = 0.45f)),
+                            shape = RoundedCornerShape(14.dp)
                         ) {
                             Column(modifier = Modifier.padding(12.dp)) {
                                 Text(
-                                    text = "💡 Terdeteksi Sistem Ubuntu di /data/local/ubuntu-chroot!",
+                                    text = "⚡ Existing Ubuntu Chroot Detected (/data/local/ubuntu-chroot)",
                                     fontWeight = FontWeight.Bold,
-                                    fontSize = 13.sp,
-                                    color = DevSuccess
+                                    fontSize = 12.sp,
+                                    color = DevPrimary
                                 )
                                 Spacer(modifier = Modifier.height(4.dp))
                                 Text(
-                                    text = "Kloning langsung dalam 15-20 detik tanpa kuota internet. Semua tools yang sudah Anda instal akan langsung tersedia di DevBox.",
+                                    text = "Clone locally in ~15 seconds with zero internet usage. All installed packages and CLI tools are preserved.",
                                     fontSize = 11.sp,
-                                    color = Color.LightGray
+                                    color = DevOnSurface
                                 )
                             }
                         }
                     }
 
-                    // Option 1: Clone from existing local chroot (Recommended)
+                    // Option 1: Clone from existing local chroot
                     Button(
                         onClick = {
                             scope.launch {
                                 isOperating = true
-                                actionMessage = "Menyalin direktori sistem dari /data/local/ubuntu-chroot ke ${ChrootManager.DEFAULT_ROOTFS}... (15-20 detik)"
+                                actionMessage = "Cloning /data/local/ubuntu-chroot to ${ChrootManager.DEFAULT_ROOTFS}..."
                                 val res = ChrootManager.cloneExistingChroot(
                                     sourceChroot = ChrootManager.LEGACY_ROOTFS,
                                     targetRootfs = ChrootManager.DEFAULT_ROOTFS
@@ -487,15 +561,15 @@ fun DashboardScreen(
                             }
                         },
                         enabled = !isOperating,
-                        modifier = Modifier.fillMaxWidth(),
-                        shape = RoundedCornerShape(10.dp),
+                        modifier = Modifier.fillMaxWidth().height(46.dp),
+                        shape = RoundedCornerShape(14.dp),
                         colors = ButtonDefaults.buttonColors(containerColor = DevPrimary)
                     ) {
-                        Icon(Icons.Default.ContentCopy, contentDescription = null, tint = Color.Black)
+                        Icon(Icons.Default.ContentCopy, contentDescription = null, tint = DevOnPrimary, modifier = Modifier.size(18.dp))
                         Spacer(modifier = Modifier.width(8.dp))
                         Text(
-                            text = if (state.isSourceChrootAvailable) "1. Kloning dari /data/local/ubuntu-chroot (Instan ~15s)" else "1. Kloning dari chroot lokal",
-                            color = Color.Black,
+                            text = if (state.isSourceChrootAvailable) "Clone Local Ubuntu Chroot (~15s)" else "Clone Local Chroot",
+                            color = DevOnPrimary,
                             fontWeight = FontWeight.Bold,
                             fontSize = 12.sp
                         )
@@ -509,8 +583,8 @@ fun DashboardScreen(
                             showInstallDialog = true
                             isInstalling = true
                             installProgress = 0f
-                            installStatusText = "Mempersiapkan pengunduhan..."
-                            installLogs = listOf("[INIT] Mempersiapkan instalasi Ubuntu Base 24.04 ARM64...")
+                            installStatusText = "Preparing download..."
+                            installLogs = listOf("[INIT] Preparing Ubuntu Base 24.04 ARM64 installation...")
                             installFinished = false
                             installSuccess = false
 
@@ -529,50 +603,51 @@ fun DashboardScreen(
                                 installFinished = true
                                 installSuccess = res.isSuccess
                                 if (res.isSuccess) {
-                                    installStatusText = "Instalasi selesai!"
+                                    installStatusText = "Installation complete!"
                                     installProgress = 1f
                                 } else {
-                                    installStatusText = "Gagal: ${res.exceptionOrNull()?.message ?: "Terjadi kesalahan"}"
+                                    installStatusText = "Failed: ${res.exceptionOrNull()?.message ?: "Unknown error"}"
                                 }
                                 refreshState()
                             }
                         },
                         enabled = !isOperating && !isInstalling,
-                        modifier = Modifier.fillMaxWidth(),
-                        shape = RoundedCornerShape(10.dp)
+                        modifier = Modifier.fillMaxWidth().height(46.dp),
+                        shape = RoundedCornerShape(14.dp),
+                        border = BorderStroke(1.dp, DevPrimary.copy(alpha = 0.5f))
                     ) {
-                        Icon(Icons.Default.CloudDownload, contentDescription = null, tint = DevSecondary)
+                        Icon(Icons.Default.CloudDownload, contentDescription = null, tint = DevPrimary, modifier = Modifier.size(18.dp))
                         Spacer(modifier = Modifier.width(8.dp))
-                        Text("2. Unduh Ubuntu Base 24.04 ARM64 (Resmi Canonical 29 MB)", fontSize = 12.sp)
+                        Text("Download Ubuntu 24.04 ARM64 (Official 29 MB)", color = DevOnSurface, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
                     }
 
                     Spacer(modifier = Modifier.height(8.dp))
 
-                    // Option 3: Change rootfs path / use existing path directly
+                    // Option 3: Custom Rootfs Path
                     OutlinedButton(
                         onClick = {
                             tempPathInput = ChrootManager.activeRootfs
                             showCustomPathDialog = true
                         },
                         enabled = !isOperating,
-                        modifier = Modifier.fillMaxWidth(),
-                        shape = RoundedCornerShape(10.dp)
+                        modifier = Modifier.fillMaxWidth().height(46.dp),
+                        shape = RoundedCornerShape(14.dp),
+                        border = BorderStroke(1.dp, DevBorder)
                     ) {
-                        Icon(Icons.Default.Folder, contentDescription = null, tint = Color.White)
+                        Icon(Icons.Default.Folder, contentDescription = null, tint = DevOnSurfaceVariant, modifier = Modifier.size(18.dp))
                         Spacer(modifier = Modifier.width(8.dp))
-                        Text("3. Gunakan Path Rootfs Kustom Lain", fontSize = 12.sp)
+                        Text("Set Custom Rootfs Path", color = DevOnSurface, fontSize = 12.sp)
                     }
 
-                    Spacer(modifier = Modifier.height(8.dp))
+                    Spacer(modifier = Modifier.height(6.dp))
 
-                    // View Error Logs Button
                     TextButton(
                         onClick = { onNavigateToLogs() },
                         modifier = Modifier.align(Alignment.End)
                     ) {
-                        Icon(Icons.Default.BugReport, contentDescription = null, tint = DevWarning, modifier = Modifier.size(16.dp))
+                        Icon(Icons.Default.BugReport, contentDescription = null, tint = DevPrimary, modifier = Modifier.size(16.dp))
                         Spacer(modifier = Modifier.width(6.dp))
-                        Text("Buka Log Error & Diagnostik", color = DevWarning, fontSize = 12.sp)
+                        Text("Open Diagnostics & Logs", color = DevPrimary, fontSize = 12.sp)
                     }
                 }
             }
@@ -580,7 +655,7 @@ fun DashboardScreen(
 
         Spacer(modifier = Modifier.height(16.dp))
 
-        // Quick Primary Launchers
+        // Quick Action Pill Bar
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.spacedBy(10.dp)
@@ -588,69 +663,160 @@ fun DashboardScreen(
             Button(
                 onClick = { onNavigateToTerminal(null) },
                 modifier = Modifier
-                    .weight(1f)
-                    .height(48.dp),
-                shape = RoundedCornerShape(12.dp),
+                    .weight(1.2f)
+                    .height(50.dp),
+                shape = RoundedCornerShape(16.dp),
                 colors = ButtonDefaults.buttonColors(containerColor = DevPrimary)
             ) {
-                Icon(Icons.Default.Terminal, contentDescription = null, tint = Color.Black)
+                Icon(Icons.Default.Terminal, contentDescription = null, tint = DevOnPrimary, modifier = Modifier.size(18.dp))
                 Spacer(modifier = Modifier.width(6.dp))
-                Text("Terminal", color = Color.Black, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                Text("Terminal", color = DevOnPrimary, fontWeight = FontWeight.ExtraBold, fontSize = 13.sp)
             }
 
-            Button(
+            Surface(
                 onClick = { onNavigateToIde() },
                 modifier = Modifier
                     .weight(1f)
-                    .height(48.dp),
-                shape = RoundedCornerShape(12.dp),
-                colors = ButtonDefaults.buttonColors(containerColor = DevSecondary)
+                    .height(50.dp),
+                shape = RoundedCornerShape(16.dp),
+                color = DevPrimaryContainer,
+                border = BorderStroke(1.dp, DevPrimary.copy(alpha = 0.45f))
             ) {
-                Icon(Icons.Default.Code, contentDescription = null, tint = Color.Black)
-                Spacer(modifier = Modifier.width(6.dp))
-                Text("Web IDE", color = Color.Black, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                Row(
+                    modifier = Modifier.fillMaxSize(),
+                    horizontalArrangement = Arrangement.Center,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(Icons.Default.Code, contentDescription = null, tint = DevPrimary, modifier = Modifier.size(18.dp))
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text("Web IDE", color = DevPrimary, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                }
             }
 
-            OutlinedButton(
+            Surface(
                 onClick = { onNavigateToLogs() },
                 modifier = Modifier
-                    .weight(1f)
-                    .height(48.dp),
-                shape = RoundedCornerShape(12.dp)
+                    .weight(0.9f)
+                    .height(50.dp),
+                shape = RoundedCornerShape(16.dp),
+                color = DevSurface,
+                border = BorderStroke(1.dp, DevBorder)
             ) {
-                Icon(Icons.Default.BugReport, contentDescription = null, tint = DevWarning)
-                Spacer(modifier = Modifier.width(6.dp))
-                Text("Log", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                Row(
+                    modifier = Modifier.fillMaxSize(),
+                    horizontalArrangement = Arrangement.Center,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(Icons.Default.BugReport, contentDescription = null, tint = DevOnSurfaceVariant, modifier = Modifier.size(18.dp))
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text("Logs", color = DevOnSurface, fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
+                }
             }
         }
 
-        Spacer(modifier = Modifier.height(20.dp))
+        Spacer(modifier = Modifier.height(22.dp))
 
-        // Container Services Controls
+        // 2x2 Bento Grid System Telemetry
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text = "System Telemetry",
+                fontSize = 15.sp,
+                fontWeight = FontWeight.Bold,
+                color = DevOnSurface
+            )
+            Surface(
+                onClick = {
+                    tempPathInput = ChrootManager.activeRootfs
+                    showCustomPathDialog = true
+                },
+                color = DevSurfaceVariant,
+                shape = RoundedCornerShape(50)
+            ) {
+                Text(
+                    text = ChrootManager.activeRootfs,
+                    fontSize = 10.sp,
+                    fontFamily = FontFamily.Monospace,
+                    color = DevPrimary,
+                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
+                )
+            }
+        }
+
+        Spacer(modifier = Modifier.height(10.dp))
+
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            BentoMetricTile(
+                title = "Available RAM",
+                value = "${state.ramAvailableMb} MB",
+                subtitle = if (state.ramAvailableMb > 700) "Optimal" else "High Pressure",
+                accentColor = if (state.ramAvailableMb > 450) DevPrimary else DevWarning,
+                modifier = Modifier.weight(1f)
+            )
+            BentoMetricTile(
+                title = "Swap / ZRAM",
+                value = "${state.swapUsedMb} MB",
+                subtitle = "Active Swap",
+                accentColor = DevPrimary,
+                modifier = Modifier.weight(1f)
+            )
+        }
+
+        Spacer(modifier = Modifier.height(10.dp))
+
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            BentoMetricTile(
+                title = "Container PIDs",
+                value = "${state.activeProcesses}",
+                subtitle = if (orphanProcesses.isEmpty()) "0 Orphans" else "${orphanProcesses.size} Orphans",
+                accentColor = if (orphanProcesses.isEmpty()) DevPrimary else DevWarning,
+                modifier = Modifier.weight(1f)
+            )
+            BentoMetricTile(
+                title = "PTY Sessions",
+                value = "${TerminalSessionManager.sessions.size}",
+                subtitle = "Interactive Shells",
+                accentColor = DevPrimary,
+                modifier = Modifier.weight(1f)
+            )
+        }
+
+        Spacer(modifier = Modifier.height(22.dp))
+
+        // Services & Runtime Controls
         Text(
-            text = "Layanan & Kontrol Container",
-            fontSize = 16.sp,
-            fontWeight = FontWeight.SemiBold,
-            color = MaterialTheme.colorScheme.onBackground
+            text = "Services & Runtime",
+            fontSize = 15.sp,
+            fontWeight = FontWeight.Bold,
+            color = DevOnSurface
         )
 
         Spacer(modifier = Modifier.height(10.dp))
 
         Card(
             modifier = Modifier.fillMaxWidth(),
-            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-            shape = RoundedCornerShape(16.dp)
+            colors = CardDefaults.cardColors(containerColor = DevSurface),
+            shape = RoundedCornerShape(20.dp),
+            border = BorderStroke(1.dp, DevBorder)
         ) {
             Column(modifier = Modifier.padding(16.dp)) {
-                // Chroot Mount Toggle
                 ControlRow(
                     icon = Icons.Default.Dns,
-                    title = "Mount Chroot Filesystem",
-                    subtitle = if (state.isMounted) "Proc, Sys, Dev & SDCard terpasang" else "Unmounted / Nonaktif",
+                    title = "Filesystem Mounts",
+                    subtitle = if (state.isMounted) "/proc, /sys, /dev/pts & /sdcard mounted" else "Unmounted / Standby",
                     isChecked = state.isMounted,
                     onCheckedChange = { enable ->
                         scope.launch {
-                            actionMessage = if (enable) "Memasang mount container..." else "Membersihkan mount container..."
+                            actionMessage = if (enable) "Mounting container filesystems..." else "Unmounting container..."
                             if (enable) ChrootManager.mountAll() else ChrootManager.unmountAll()
                             refreshState()
                             actionMessage = null
@@ -660,15 +826,14 @@ fun DashboardScreen(
 
                 Spacer(modifier = Modifier.height(14.dp))
 
-                // Code Server Toggle
                 ControlRow(
                     icon = Icons.Default.Code,
-                    title = "Code-Server (Port 8080)",
-                    subtitle = if (state.isCodeServerRunning) "Aktif di http://127.0.0.1:8080" else "Nonaktif",
+                    title = "Code-Server Web IDE",
+                    subtitle = if (state.isCodeServerRunning) "Listening on 127.0.0.1:8080" else "Stopped",
                     isChecked = state.isCodeServerRunning,
                     onCheckedChange = { enable ->
                         scope.launch {
-                            actionMessage = if (enable) "Menyalakan Code-Server..." else "Mematikan Code-Server..."
+                            actionMessage = if (enable) "Starting Code-Server..." else "Stopping Code-Server..."
                             ChrootManager.toggleCodeServer(enable)
                             refreshState()
                             actionMessage = null
@@ -678,11 +843,10 @@ fun DashboardScreen(
 
                 Spacer(modifier = Modifier.height(14.dp))
 
-                // WakeLock Toggle
                 ControlRow(
                     icon = Icons.Default.PowerSettingsNew,
                     title = "Background CPU WakeLock",
-                    subtitle = if (wakeLockActive) "CPU aktif saat layar mati (notifikasi status bar aktif)" else "Hemat baterai (CPU sleep)",
+                    subtitle = if (wakeLockActive) "Keeps container alive when screen is off" else "Battery saver (CPU may sleep)",
                     isChecked = wakeLockActive,
                     onCheckedChange = { enable ->
                         if (enable) {
@@ -696,87 +860,65 @@ fun DashboardScreen(
             }
         }
 
-        Spacer(modifier = Modifier.height(20.dp))
+        Spacer(modifier = Modifier.height(24.dp))
 
-        // System Telemetry Card
+        // Danger Zone / Power Actions
         Text(
-            text = "Telemetri Sistem & Jalur Rootfs",
-            fontSize = 16.sp,
-            fontWeight = FontWeight.SemiBold,
-            color = MaterialTheme.colorScheme.onBackground
+            text = "System & Power",
+            fontSize = 15.sp,
+            fontWeight = FontWeight.Bold,
+            color = DevOnSurface
         )
 
         Spacer(modifier = Modifier.height(10.dp))
 
-        Card(
+        Row(
             modifier = Modifier.fillMaxWidth(),
-            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-            shape = RoundedCornerShape(16.dp)
+            horizontalArrangement = Arrangement.spacedBy(10.dp)
         ) {
-            Column(modifier = Modifier.padding(16.dp)) {
-                MetricRow(label = "RAM Tersedia", value = "${state.ramAvailableMb} MB")
-                Spacer(modifier = Modifier.height(8.dp))
-                MetricRow(label = "Swap Terpakai", value = "${state.swapUsedMb} MB")
-                Spacer(modifier = Modifier.height(8.dp))
-                MetricRow(label = "Proses Container", value = "${state.activeProcesses} proses")
-                Spacer(modifier = Modifier.height(8.dp))
-                MetricRow(label = "Sesi Terminal Aktif", value = "${TerminalSessionManager.sessions.size} sesi")
-                Spacer(modifier = Modifier.height(8.dp))
-                MetricRow(
-                    label = "Sesi Background Usang",
-                    value = if (orphanProcesses.isEmpty()) "Bersih (0)" else "${orphanProcesses.size} proses (${orphanProcesses.sumOf { it.memoryKb } / 1024} MB)"
-                )
-                Spacer(modifier = Modifier.height(8.dp))
-                MetricRow(label = "Jalur Rootfs Aktif", value = ChrootManager.activeRootfs)
+            OutlinedButton(
+                onClick = { showUninstallDialog = true },
+                modifier = Modifier
+                    .weight(1f)
+                    .height(48.dp),
+                shape = RoundedCornerShape(14.dp),
+                colors = ButtonDefaults.outlinedButtonColors(contentColor = DevError),
+                border = BorderStroke(1.dp, DevError.copy(alpha = 0.4f))
+            ) {
+                Icon(Icons.Default.DeleteSweep, contentDescription = null, tint = DevError, modifier = Modifier.size(18.dp))
+                Spacer(modifier = Modifier.width(6.dp))
+                Text("Wipe Rootfs", fontWeight = FontWeight.SemiBold, fontSize = 12.sp)
+            }
+
+            Button(
+                onClick = { showExitConfirmationDialog = true },
+                modifier = Modifier
+                    .weight(1f)
+                    .height(48.dp),
+                shape = RoundedCornerShape(14.dp),
+                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2D1616))
+            ) {
+                Icon(Icons.Default.PowerSettingsNew, contentDescription = null, tint = DevError, modifier = Modifier.size(18.dp))
+                Spacer(modifier = Modifier.width(6.dp))
+                Text("Shutdown & Exit", color = DevError, fontWeight = FontWeight.Bold, fontSize = 12.sp)
             }
         }
 
-        Spacer(modifier = Modifier.height(28.dp))
-
-        // Tombol Uninstall Rootfs (Bebaskan 2-5 GB memori HP sebelum uninstall APK)
-        OutlinedButton(
-            onClick = { showUninstallDialog = true },
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(52.dp),
-            shape = RoundedCornerShape(12.dp),
-            colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFFFF5252)),
-            border = BorderStroke(1.dp, Color(0xFFFF5252).copy(alpha = 0.5f))
-        ) {
-            Icon(Icons.Default.DeleteSweep, contentDescription = null, tint = Color(0xFFFF5252))
-            Spacer(modifier = Modifier.width(8.dp))
-            Text("Hapus Rootfs Total (Bebaskan Memori)", fontWeight = FontWeight.SemiBold)
-        }
-
         Spacer(modifier = Modifier.height(12.dp))
-
-        // Exit & Stop Container Button
-        OutlinedButton(
-            onClick = {
-                showExitConfirmationDialog = true
-            },
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(52.dp),
-            shape = RoundedCornerShape(12.dp),
-            colors = ButtonDefaults.outlinedButtonColors(contentColor = DevError),
-            border = BorderStroke(1.dp, DevError.copy(alpha = 0.5f))
-        ) {
-            Icon(Icons.Default.PowerSettingsNew, contentDescription = null, tint = DevError)
-            Spacer(modifier = Modifier.width(8.dp))
-            Text("Matikan DevBox & Keluar Total", fontWeight = FontWeight.SemiBold)
-        }
     }
 
-    // Dialog Konfirmasi Keluar Total
+    // Shutdown & Exit Confirmation Dialog
     if (showExitConfirmationDialog) {
         AlertDialog(
             onDismissRequest = { if (!isExiting) showExitConfirmationDialog = false },
+            containerColor = DevSurface,
+            titleContentColor = DevOnSurface,
+            textContentColor = DevOnSurfaceVariant,
             title = {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Icon(Icons.Default.PowerSettingsNew, contentDescription = null, tint = DevError)
                     Spacer(modifier = Modifier.width(8.dp))
-                    Text("Matikan DevBox & Keluar Total", fontSize = 16.sp)
+                    Text("Shutdown DevBox & Exit", fontSize = 16.sp, fontWeight = FontWeight.Bold)
                 }
             },
             text = {
@@ -788,15 +930,15 @@ fun DashboardScreen(
                         CircularProgressIndicator(color = DevError, modifier = Modifier.size(36.dp))
                         Spacer(modifier = Modifier.height(12.dp))
                         Text(
-                            text = "Menghentikan container & menutup background service...",
+                            text = "Terminating container processes & unmounting filesystems...",
                             fontSize = 13.sp,
-                            color = Color.White
+                            color = DevOnSurface
                         )
                     }
                 } else {
                     Text(
-                        text = "Apakah Anda yakin ingin mematikan semua proses container Linux, melepas mountpoint, dan menghentikan background service DevBox?",
-                        color = Color.LightGray,
+                        text = "Stop all Linux container processes, unmount filesystems, and close background services?",
+                        color = DevOnSurfaceVariant,
                         fontSize = 13.sp
                     )
                 }
@@ -812,23 +954,24 @@ fun DashboardScreen(
                                 (context as? Activity)?.finishAffinity()
                             }
                         },
-                        colors = ButtonDefaults.buttonColors(containerColor = DevError)
+                        colors = ButtonDefaults.buttonColors(containerColor = DevError),
+                        shape = RoundedCornerShape(50)
                     ) {
-                        Text("Matikan & Keluar", color = Color.White, fontWeight = FontWeight.Bold)
+                        Text("Shutdown & Exit", color = DevOnPrimary, fontWeight = FontWeight.Bold)
                     }
                 }
             },
             dismissButton = {
                 if (!isExiting) {
                     TextButton(onClick = { showExitConfirmationDialog = false }) {
-                        Text("Batal", color = Color.Gray)
+                        Text("Cancel", color = DevOnSurfaceVariant)
                     }
                 }
             }
         )
     }
 
-    // Dialog Konfirmasi Hapus Rootfs (Uninstall)
+    // Wipe Rootfs Confirmation Dialog
     if (showUninstallDialog) {
         AlertDialog(
             onDismissRequest = {
@@ -838,33 +981,36 @@ fun DashboardScreen(
                     uninstallLogs = emptyList()
                 }
             },
+            containerColor = DevSurface,
+            titleContentColor = DevOnSurface,
+            textContentColor = DevOnSurfaceVariant,
             title = {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     when {
                         isUninstalling -> {
                             CircularProgressIndicator(
                                 modifier = Modifier.size(20.dp),
-                                color = Color(0xFFFF5252),
+                                color = DevError,
                                 strokeWidth = 2.5.dp
                             )
                             Spacer(modifier = Modifier.width(8.dp))
-                            Text("Menghapus Rootfs...", color = Color(0xFFFF5252), fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                            Text("Wiping Rootfs...", color = DevError, fontSize = 16.sp, fontWeight = FontWeight.Bold)
                         }
                         uninstallFinished -> {
                             if (uninstallSuccess) {
-                                Icon(Icons.Default.CheckCircle, contentDescription = null, tint = DevSuccess)
+                                Icon(Icons.Default.CheckCircle, contentDescription = null, tint = DevPrimary)
                                 Spacer(modifier = Modifier.width(8.dp))
-                                Text("Rootfs Berhasil Dihapus", color = DevSuccess, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                                Text("Rootfs Wiped Clean", color = DevPrimary, fontSize = 16.sp, fontWeight = FontWeight.Bold)
                             } else {
-                                Icon(Icons.Default.Error, contentDescription = null, tint = Color(0xFFFF5252))
+                                Icon(Icons.Default.Error, contentDescription = null, tint = DevError)
                                 Spacer(modifier = Modifier.width(8.dp))
-                                Text("Gagal Menghapus Rootfs", color = Color(0xFFFF5252), fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                                Text("Wipe Failed", color = DevError, fontSize = 16.sp, fontWeight = FontWeight.Bold)
                             }
                         }
                         else -> {
-                            Icon(Icons.Default.Warning, contentDescription = null, tint = Color(0xFFFF5252))
+                            Icon(Icons.Default.Warning, contentDescription = null, tint = DevError)
                             Spacer(modifier = Modifier.width(8.dp))
-                            Text("Hapus Rootfs & Bersihkan Memori", color = Color(0xFFFF5252), fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                            Text("Wipe Rootfs & Free Storage", color = DevError, fontSize = 16.sp, fontWeight = FontWeight.Bold)
                         }
                     }
                 }
@@ -881,27 +1027,27 @@ fun DashboardScreen(
                     Column(modifier = Modifier.fillMaxWidth()) {
                         Text(
                             text = when {
-                                isUninstalling -> "Sedang menghentikan proses, melepas mountpoint, dan menghapus seluruh file Linux. Mohon jangan menutup aplikasi..."
-                                uninstallSuccess -> "Seluruh file sistem Linux di ${ChrootManager.activeRootfs} telah dibersihkan tanpa sisa. Ruang penyimpanan HP 2-5 GB telah dibebaskan."
-                                else -> "Terjadi kendala saat menghapus rootfs. Periksa riwayat log eksekusi root di bawah ini:"
+                                isUninstalling -> "Stopping processes, unmounting filesystems, and removing Linux files. Please wait..."
+                                uninstallSuccess -> "All Linux rootfs files at ${ChrootManager.activeRootfs} have been removed."
+                                else -> "An error occurred while removing rootfs. Check execution log below:"
                             },
                             fontSize = 12.sp,
-                            color = Color.LightGray
+                            color = DevOnSurfaceVariant
                         )
                         Spacer(modifier = Modifier.height(10.dp))
                         Box(
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .heightIn(min = 120.dp, max = 220.dp)
-                                .background(Color(0xFF0D1117), RoundedCornerShape(8.dp))
+                                .background(DevCanvasDeep, RoundedCornerShape(10.dp))
                                 .border(
                                     1.dp,
                                     when {
-                                        isUninstalling -> Color(0xFFFF5252).copy(alpha = 0.5f)
-                                        uninstallSuccess -> DevSuccess.copy(alpha = 0.6f)
-                                        else -> Color(0xFFFF5252)
+                                        isUninstalling -> DevError.copy(alpha = 0.5f)
+                                        uninstallSuccess -> DevPrimary.copy(alpha = 0.6f)
+                                        else -> DevError
                                     },
-                                    RoundedCornerShape(8.dp)
+                                    RoundedCornerShape(10.dp)
                                 )
                                 .padding(8.dp)
                         ) {
@@ -913,10 +1059,10 @@ fun DashboardScreen(
                                         fontSize = 11.sp,
                                         lineHeight = 15.sp,
                                         color = when {
-                                            line.contains("SUCCESS", ignoreCase = true) || line.contains("selesai", ignoreCase = true) || line.contains("berhasil", ignoreCase = true) -> Color(0xFF81C784)
-                                            line.contains("GAGAL", ignoreCase = true) || line.contains("ERROR", ignoreCase = true) || line.contains("PERINGATAN", ignoreCase = true) -> Color(0xFFFF8A80)
-                                            line.startsWith("[") -> Color(0xFF80D8FF)
-                                            else -> Color(0xFFECEFF1)
+                                            line.contains("SUCCESS", ignoreCase = true) || line.contains("selesai", ignoreCase = true) || line.contains("berhasil", ignoreCase = true) -> DevPrimary
+                                            line.contains("GAGAL", ignoreCase = true) || line.contains("ERROR", ignoreCase = true) || line.contains("PERINGATAN", ignoreCase = true) -> DevError
+                                            line.startsWith("[") -> DevOnPrimaryContainer
+                                            else -> DevOnSurface
                                         }
                                     )
                                 }
@@ -927,30 +1073,30 @@ fun DashboardScreen(
                     if (ChrootManager.activeRootfs == ChrootManager.LEGACY_ROOTFS) {
                         Column {
                             Text(
-                                text = "🛡️ PROTEKSI CHROOT TERMUX AKTIF",
-                                fontSize = 14.sp,
+                                text = "🛡️ TERMUX CHROOT PROTECTION ACTIVE",
+                                fontSize = 13.sp,
                                 fontWeight = FontWeight.Bold,
-                                color = DevSuccess
+                                color = DevPrimary
                             )
                             Spacer(modifier = Modifier.height(6.dp))
                             Text(
-                                text = "Jalur saat ini terhubung ke: /data/local/ubuntu-chroot (Milik Termux).",
+                                text = "Active path is linked to: /data/local/ubuntu-chroot (Termux).",
                                 fontSize = 12.sp,
-                                color = Color.White
+                                color = DevOnSurface
                             )
                             Spacer(modifier = Modifier.height(8.dp))
                             Text(
-                                text = "Demi keamanan data Anda, DevBox TIDAK AKAN menghapus sistem Linux Termux ini. Tindakan ini hanya akan mematikan proses DevBox, melepas mountpoint, dan membersihkan file cache/bridge DevBox secara bersih tanpa merusak data Termux.",
+                                text = "For safety, DevBox will NOT delete your Termux Linux directory. This will only stop DevBox processes, unmount filesystems, and clean temporary bridge files.",
                                 fontSize = 12.sp,
-                                color = Color(0xFF80D8FF)
+                                color = DevOnPrimaryContainer
                             )
                         }
                     } else {
                         Column {
                             Text(
-                                text = "PERINGATAN KERAS: Tindakan ini akan menghentikan container, melepas mountpoint, dan MENGHAPUS SELURUH FILE SISTEM di:",
+                                text = "WARNING: This will stop the container, unmount all filesystems, and PERMANENTLY DELETE all files in:",
                                 fontSize = 13.sp,
-                                color = Color.White
+                                color = DevOnSurface
                             )
                             Spacer(modifier = Modifier.height(6.dp))
                             Text(
@@ -962,7 +1108,7 @@ fun DashboardScreen(
                             )
                             Spacer(modifier = Modifier.height(8.dp))
                             Text(
-                                text = "Tindakan ini akan mengosongkan 2-5 GB penyimpanan internal HP Anda. Lakukan ini jika ingin mencopot (uninstall) aplikasi DevBox secara bersih. Data di dalam container TIDAK DAPAT dipulihkan.",
+                                text = "This frees 2–5 GB of internal storage. Container data cannot be recovered once wiped.",
                                 fontSize = 12.sp,
                                 color = Color(0xFFFFB4AB)
                             )
@@ -972,9 +1118,7 @@ fun DashboardScreen(
             },
             confirmButton = {
                 when {
-                    isUninstalling -> {
-                        // Tidak ada tombol confirm saat proses berjalan
-                    }
+                    isUninstalling -> {}
                     uninstallFinished -> {
                         Button(
                             onClick = {
@@ -983,10 +1127,11 @@ fun DashboardScreen(
                                 uninstallLogs = emptyList()
                             },
                             colors = ButtonDefaults.buttonColors(
-                                containerColor = if (uninstallSuccess) DevSuccess else DevSurfaceVariant
-                            )
+                                containerColor = if (uninstallSuccess) DevPrimary else DevSurfaceVariant
+                            ),
+                            shape = RoundedCornerShape(50)
                         ) {
-                            Text("Tutup", color = if (uninstallSuccess) Color.Black else Color.White, fontWeight = FontWeight.Bold)
+                            Text("Close", color = if (uninstallSuccess) DevOnPrimary else DevOnSurface, fontWeight = FontWeight.Bold)
                         }
                     }
                     else -> {
@@ -996,7 +1141,7 @@ fun DashboardScreen(
                                     isUninstalling = true
                                     uninstallFinished = false
                                     uninstallSuccess = false
-                                    uninstallLogs = listOf("Memulai proses penghapusan rootfs...")
+                                    uninstallLogs = listOf("Starting rootfs wipe...")
                                     val res = ChrootManager.uninstallRootfs(ChrootManager.activeRootfs) { line ->
                                         uninstallLogs = (uninstallLogs + line).takeLast(80)
                                     }
@@ -1006,18 +1151,17 @@ fun DashboardScreen(
                                     refreshState()
                                 }
                             },
-                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFF5252))
+                            colors = ButtonDefaults.buttonColors(containerColor = DevError),
+                            shape = RoundedCornerShape(50)
                         ) {
-                            Text("Hapus Total Sekarang", color = Color.White, fontWeight = FontWeight.Bold)
+                            Text("Wipe Now", color = DevOnPrimary, fontWeight = FontWeight.Bold)
                         }
                     }
                 }
             },
             dismissButton = {
                 when {
-                    isUninstalling -> {
-                        // Dismiss dinonaktifkan saat sedang menghapus
-                    }
+                    isUninstalling -> {}
                     uninstallFinished -> {
                         if (!uninstallSuccess && uninstallLogs.isNotEmpty()) {
                             OutlinedButton(
@@ -1025,18 +1169,19 @@ fun DashboardScreen(
                                     val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
                                     val clip = ClipData.newPlainText("DevBox Uninstall Log", uninstallLogs.joinToString("\n"))
                                     clipboard?.setPrimaryClip(clip)
-                                    Toast.makeText(context, "Log error disalin ke clipboard", Toast.LENGTH_SHORT).show()
-                                }
+                                    Toast.makeText(context, "Log copied to clipboard", Toast.LENGTH_SHORT).show()
+                                },
+                                shape = RoundedCornerShape(50)
                             ) {
                                 Icon(Icons.Default.ContentCopy, contentDescription = null, modifier = Modifier.size(16.dp))
                                 Spacer(modifier = Modifier.width(6.dp))
-                                Text("Salin Log")
+                                Text("Copy Log")
                             }
                         }
                     }
                     else -> {
                         TextButton(onClick = { showUninstallDialog = false }) {
-                            Text("Batal", color = Color.Gray)
+                            Text("Cancel", color = DevOnSurfaceVariant)
                         }
                     }
                 }
@@ -1044,7 +1189,7 @@ fun DashboardScreen(
         )
     }
 
-    // Dialog Instalasi Ubuntu Base Resmi (Download & Ekstraksi)
+    // Ubuntu 24.04 Download & Extraction Dialog
     if (showInstallDialog) {
         AlertDialog(
             onDismissRequest = {
@@ -1055,38 +1200,41 @@ fun DashboardScreen(
                     installProgress = 0f
                 }
             },
+            containerColor = DevSurface,
+            titleContentColor = DevOnSurface,
+            textContentColor = DevOnSurfaceVariant,
             title = {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     when {
                         isInstalling -> {
                             CircularProgressIndicator(
                                 modifier = Modifier.size(20.dp),
-                                color = DevSecondary,
+                                color = DevPrimary,
                                 strokeWidth = 2.5.dp
                             )
                             Spacer(modifier = Modifier.width(8.dp))
                             Text(
-                                if (installProgress < 1f && !installStatusText.startsWith("Mengekstrak")) "Mengunduh Ubuntu Base..." else "Mengekstrak Rootfs...",
-                                color = DevSecondary,
+                                if (installProgress < 1f && !installStatusText.startsWith("Mengekstrak")) "Downloading Ubuntu 24.04..." else "Extracting Rootfs...",
+                                color = DevPrimary,
                                 fontSize = 16.sp,
                                 fontWeight = FontWeight.Bold
                             )
                         }
                         installFinished -> {
                             if (installSuccess) {
-                                Icon(Icons.Default.CheckCircle, contentDescription = null, tint = DevSuccess)
+                                Icon(Icons.Default.CheckCircle, contentDescription = null, tint = DevPrimary)
                                 Spacer(modifier = Modifier.width(8.dp))
-                                Text("Instalasi Berhasil", color = DevSuccess, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                                Text("Installation Complete", color = DevPrimary, fontSize = 16.sp, fontWeight = FontWeight.Bold)
                             } else {
-                                Icon(Icons.Default.Error, contentDescription = null, tint = Color(0xFFFF5252))
+                                Icon(Icons.Default.Error, contentDescription = null, tint = DevError)
                                 Spacer(modifier = Modifier.width(8.dp))
-                                Text("Instalasi Gagal", color = Color(0xFFFF5252), fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                                Text("Installation Failed", color = DevError, fontSize = 16.sp, fontWeight = FontWeight.Bold)
                             }
                         }
                         else -> {
-                            Icon(Icons.Default.CloudDownload, contentDescription = null, tint = DevSecondary)
+                            Icon(Icons.Default.CloudDownload, contentDescription = null, tint = DevPrimary)
                             Spacer(modifier = Modifier.width(8.dp))
-                            Text("Unduh Ubuntu Base 24.04", color = DevSecondary, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                            Text("Ubuntu Base 24.04", color = DevPrimary, fontSize = 16.sp, fontWeight = FontWeight.Bold)
                         }
                     }
                 }
@@ -1101,9 +1249,9 @@ fun DashboardScreen(
 
                 Column(modifier = Modifier.fillMaxWidth()) {
                     Text(
-                        text = if (installStatusText.isNotBlank()) installStatusText else "Menyiapkan Ubuntu 24.04 ARM64 resmi dari Canonical...",
+                        text = if (installStatusText.isNotBlank()) installStatusText else "Preparing official Canonical Ubuntu 24.04 ARM64...",
                         fontSize = 12.sp,
-                        color = Color.White
+                        color = DevOnSurface
                     )
                     Spacer(modifier = Modifier.height(10.dp))
 
@@ -1114,15 +1262,15 @@ fun DashboardScreen(
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .height(6.dp)
-                                    .clip(RoundedCornerShape(3.dp)),
-                                color = DevSecondary,
+                                    .clip(RoundedCornerShape(50)),
+                                color = DevPrimary,
                                 trackColor = DevSurfaceVariant
                             )
                             Spacer(modifier = Modifier.height(4.dp))
                             Text(
                                 text = "${(installProgress * 100).toInt()}%",
                                 fontSize = 11.sp,
-                                color = DevSecondary,
+                                color = DevPrimary,
                                 fontWeight = FontWeight.Bold,
                                 modifier = Modifier.align(Alignment.End)
                             )
@@ -1131,8 +1279,8 @@ fun DashboardScreen(
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .height(6.dp)
-                                    .clip(RoundedCornerShape(3.dp)),
-                                color = DevSecondary,
+                                    .clip(RoundedCornerShape(50)),
+                                color = DevPrimary,
                                 trackColor = DevSurfaceVariant
                             )
                         }
@@ -1143,15 +1291,15 @@ fun DashboardScreen(
                         modifier = Modifier
                             .fillMaxWidth()
                             .heightIn(min = 140.dp, max = 220.dp)
-                            .background(Color(0xFF0D1117), RoundedCornerShape(8.dp))
+                            .background(DevCanvasDeep, RoundedCornerShape(10.dp))
                             .border(
                                 1.dp,
                                 when {
-                                    isInstalling -> DevSecondary.copy(alpha = 0.5f)
-                                    installSuccess -> DevSuccess.copy(alpha = 0.6f)
-                                    else -> Color(0xFFFF5252).copy(alpha = 0.6f)
+                                    isInstalling -> DevPrimary.copy(alpha = 0.5f)
+                                    installSuccess -> DevPrimary.copy(alpha = 0.7f)
+                                    else -> DevError.copy(alpha = 0.6f)
                                 },
-                                RoundedCornerShape(8.dp)
+                                RoundedCornerShape(10.dp)
                             )
                             .padding(8.dp)
                     ) {
@@ -1163,10 +1311,10 @@ fun DashboardScreen(
                                     fontSize = 11.sp,
                                     lineHeight = 15.sp,
                                     color = when {
-                                        line.contains("BERHASIL", ignoreCase = true) || line.contains("SUCCESS", ignoreCase = true) -> Color(0xFF81C784)
-                                        line.contains("GAGAL", ignoreCase = true) || line.contains("FAILED", ignoreCase = true) || line.contains("ERROR", ignoreCase = true) -> Color(0xFFFF8A80)
-                                        line.startsWith("[") -> Color(0xFF80D8FF)
-                                        else -> Color(0xFFECEFF1)
+                                        line.contains("BERHASIL", ignoreCase = true) || line.contains("SUCCESS", ignoreCase = true) -> DevPrimary
+                                        line.contains("GAGAL", ignoreCase = true) || line.contains("FAILED", ignoreCase = true) || line.contains("ERROR", ignoreCase = true) -> DevError
+                                        line.startsWith("[") -> DevOnPrimaryContainer
+                                        else -> DevOnSurface
                                     }
                                 )
                             }
@@ -1176,9 +1324,7 @@ fun DashboardScreen(
             },
             confirmButton = {
                 when {
-                    isInstalling -> {
-                        // Tidak ada tombol confirm saat proses instalasi berjalan
-                    }
+                    isInstalling -> {}
                     installFinished -> {
                         Button(
                             onClick = {
@@ -1188,19 +1334,18 @@ fun DashboardScreen(
                                 installProgress = 0f
                             },
                             colors = ButtonDefaults.buttonColors(
-                                containerColor = if (installSuccess) DevSuccess else DevSurfaceVariant
-                            )
+                                containerColor = if (installSuccess) DevPrimary else DevSurfaceVariant
+                            ),
+                            shape = RoundedCornerShape(50)
                         ) {
-                            Text("Tutup", color = if (installSuccess) Color.Black else Color.White, fontWeight = FontWeight.Bold)
+                            Text("Close", color = if (installSuccess) DevOnPrimary else DevOnSurface, fontWeight = FontWeight.Bold)
                         }
                     }
                 }
             },
             dismissButton = {
                 when {
-                    isInstalling -> {
-                        // Dismiss dinonaktifkan demi integritas file
-                    }
+                    isInstalling -> {}
                     installFinished -> {
                         if (!installSuccess && installLogs.isNotEmpty()) {
                             OutlinedButton(
@@ -1208,12 +1353,13 @@ fun DashboardScreen(
                                     val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
                                     val clip = ClipData.newPlainText("DevBox Install Log", installLogs.joinToString("\n"))
                                     clipboard?.setPrimaryClip(clip)
-                                    Toast.makeText(context, "Log error disalin ke clipboard", Toast.LENGTH_SHORT).show()
-                                }
+                                    Toast.makeText(context, "Log copied to clipboard", Toast.LENGTH_SHORT).show()
+                                },
+                                shape = RoundedCornerShape(50)
                             ) {
                                 Icon(Icons.Default.ContentCopy, contentDescription = null, modifier = Modifier.size(16.dp))
                                 Spacer(modifier = Modifier.width(6.dp))
-                                Text("Salin Log")
+                                Text("Copy Log")
                             }
                         }
                     }
@@ -1226,13 +1372,16 @@ fun DashboardScreen(
     if (showCustomPathDialog) {
         AlertDialog(
             onDismissRequest = { showCustomPathDialog = false },
-            title = { Text("Ubah Jalur Rootfs Target") },
+            containerColor = DevSurface,
+            titleContentColor = DevOnSurface,
+            textContentColor = DevOnSurfaceVariant,
+            title = { Text("Target Rootfs Path", fontWeight = FontWeight.Bold) },
             text = {
                 Column {
                     Text(
-                        text = "Masukkan path absolut direktori rootfs di perangkat Anda:",
+                        text = "Enter the absolute rootfs directory path on your device:",
                         fontSize = 13.sp,
-                        color = Color.LightGray
+                        color = DevOnSurfaceVariant
                     )
                     Spacer(modifier = Modifier.height(8.dp))
                     OutlinedTextField(
@@ -1240,10 +1389,11 @@ fun DashboardScreen(
                         onValueChange = { tempPathInput = it },
                         modifier = Modifier.fillMaxWidth(),
                         singleLine = true,
-                        textStyle = androidx.compose.ui.text.TextStyle(fontFamily = FontFamily.Monospace, fontSize = 12.sp),
+                        shape = RoundedCornerShape(12.dp),
+                        textStyle = androidx.compose.ui.text.TextStyle(fontFamily = FontFamily.Monospace, fontSize = 12.sp, color = DevOnSurface),
                         colors = OutlinedTextFieldDefaults.colors(
                             focusedBorderColor = DevPrimary,
-                            unfocusedBorderColor = Color.DarkGray
+                            unfocusedBorderColor = DevBorder
                         )
                     )
                 }
@@ -1257,38 +1407,42 @@ fun DashboardScreen(
                             refreshState()
                             showCustomPathDialog = false
                         } else {
-                            Toast.makeText(context, "Path harus diawali dengan /", Toast.LENGTH_SHORT).show()
+                            Toast.makeText(context, "Path must start with /", Toast.LENGTH_SHORT).show()
                         }
                     },
-                    colors = ButtonDefaults.buttonColors(containerColor = DevPrimary)
+                    colors = ButtonDefaults.buttonColors(containerColor = DevPrimary),
+                    shape = RoundedCornerShape(50)
                 ) {
-                    Text("Terapkan", color = Color.Black, fontWeight = FontWeight.Bold)
+                    Text("Apply", color = DevOnPrimary, fontWeight = FontWeight.Bold)
                 }
             },
             dismissButton = {
                 TextButton(onClick = { showCustomPathDialog = false }) {
-                    Text("Batal", color = Color.White)
+                    Text("Cancel", color = DevOnSurfaceVariant)
                 }
             }
         )
     }
 
-    // Dialog Changelog Versi Terbaru / Saat Ini
+    // Current Release Notes Dialog
     if (showCurrentChangelogDialog) {
         val info = UpdateManager.lastCheckedInfo
         AlertDialog(
             onDismissRequest = { showCurrentChangelogDialog = false },
+            containerColor = DevSurface,
+            titleContentColor = DevOnSurface,
+            textContentColor = DevOnSurfaceVariant,
             title = {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Icon(
                         imageVector = Icons.Default.CheckCircle,
                         contentDescription = null,
-                        tint = DevSuccess,
+                        tint = DevPrimary,
                         modifier = Modifier.size(22.dp)
                     )
                     Spacer(modifier = Modifier.width(8.dp))
                     Text(
-                        text = "Versi Terbaru (${info?.latestVersion ?: "v${com.arbdev.devbox.BuildConfig.VERSION_NAME}"})",
+                        text = "Up to Date (${info?.latestVersion ?: "v${com.arbdev.devbox.BuildConfig.VERSION_NAME}"})",
                         fontWeight = FontWeight.Bold,
                         fontSize = 16.sp
                     )
@@ -1301,31 +1455,31 @@ fun DashboardScreen(
                         .verticalScroll(rememberScrollState())
                 ) {
                     Text(
-                        text = "Aplikasi Anda sudah menggunakan rilis paling mutakhir.",
+                        text = "You are running the latest version of DevBox.",
                         fontSize = 12.sp,
-                        color = Color.LightGray
+                        color = DevOnSurfaceVariant
                     )
                     Spacer(modifier = Modifier.height(10.dp))
                     Surface(
-                        color = Color(0xFF101010),
-                        shape = RoundedCornerShape(8.dp),
-                        border = BorderStroke(1.dp, Color.DarkGray),
+                        color = DevCanvasDeep,
+                        shape = RoundedCornerShape(12.dp),
+                        border = BorderStroke(1.dp, DevBorder),
                         modifier = Modifier.fillMaxWidth()
                     ) {
                         Column(modifier = Modifier.padding(12.dp)) {
                             Text(
-                                text = "Catatan Rilis (Changelog):",
+                                text = "Release Notes:",
                                 fontSize = 11.sp,
                                 fontWeight = FontWeight.Bold,
                                 color = DevPrimary
                             )
                             Spacer(modifier = Modifier.height(6.dp))
                             Text(
-                                text = info?.releaseNotes?.ifBlank { "Pembaruan kestabilan dan optimalisasi container DevBox." }
-                                    ?: "Pembaruan kestabilan dan optimalisasi container DevBox.",
+                                text = info?.releaseNotes?.ifBlank { "Container stability and UI/UX improvements." }
+                                    ?: "Container stability and UI/UX improvements.",
                                 fontSize = 11.sp,
                                 fontFamily = FontFamily.Monospace,
-                                color = Color(0xFFE0E0E0),
+                                color = DevOnSurface,
                                 lineHeight = 16.sp
                             )
                         }
@@ -1334,7 +1488,7 @@ fun DashboardScreen(
             },
             confirmButton = {
                 TextButton(onClick = { showCurrentChangelogDialog = false }) {
-                    Text("Tutup", color = DevPrimary, fontWeight = FontWeight.Bold)
+                    Text("Close", color = DevPrimary, fontWeight = FontWeight.Bold)
                 }
             }
         )
@@ -1350,11 +1504,11 @@ fun UpdateBannerCard(
 
     Card(
         modifier = Modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(containerColor = Color(0xFF0F1E14)),
-        shape = RoundedCornerShape(14.dp),
-        border = BorderStroke(1.dp, DevSuccess.copy(alpha = 0.6f))
+        colors = CardDefaults.cardColors(containerColor = DevPrimaryContainer),
+        shape = RoundedCornerShape(20.dp),
+        border = BorderStroke(1.dp, DevPrimary.copy(alpha = 0.6f))
     ) {
-        Column(modifier = Modifier.padding(14.dp)) {
+        Column(modifier = Modifier.padding(16.dp)) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -1363,55 +1517,54 @@ fun UpdateBannerCard(
                 Column(modifier = Modifier.weight(1f)) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Surface(
-                            color = DevSuccess.copy(alpha = 0.2f),
-                            shape = RoundedCornerShape(4.dp)
+                            color = DevPrimary.copy(alpha = 0.2f),
+                            shape = RoundedCornerShape(50)
                         ) {
                             Text(
-                                text = "UPDATE TERSEDIA",
+                                text = "UPDATE AVAILABLE",
                                 fontSize = 9.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = DevSuccess,
-                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                fontWeight = FontWeight.ExtraBold,
+                                color = DevPrimary,
+                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp)
                             )
                         }
-                        Spacer(modifier = Modifier.width(6.dp))
+                        Spacer(modifier = Modifier.width(8.dp))
                         Text(
                             text = info.latestVersion,
-                            fontSize = 14.sp,
+                            fontSize = 15.sp,
                             fontWeight = FontWeight.Bold,
-                            color = Color.White
+                            color = DevOnSurface
                         )
                     }
                     Spacer(modifier = Modifier.height(4.dp))
                     Text(
-                        text = "Versi saat ini: ${info.currentVersion} • Ukuran: ${"%.1f".format(info.apkSizeMb)} MB",
+                        text = "Current: ${info.currentVersion} • ${"%.1f".format(info.apkSizeMb)} MB",
                         fontSize = 11.sp,
-                        color = Color.LightGray
+                        color = DevOnSurfaceVariant
                     )
                 }
                 Button(
                     onClick = onUpdateClick,
-                    colors = ButtonDefaults.buttonColors(containerColor = DevSuccess),
-                    shape = RoundedCornerShape(8.dp)
+                    colors = ButtonDefaults.buttonColors(containerColor = DevPrimary),
+                    shape = RoundedCornerShape(50)
                 ) {
                     Icon(
                         imageVector = Icons.Default.CloudDownload,
                         contentDescription = null,
-                        tint = Color.Black,
+                        tint = DevOnPrimary,
                         modifier = Modifier.size(16.dp)
                     )
-                    Spacer(modifier = Modifier.width(4.dp))
-                    Text("Perbarui", color = Color.Black, fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text("Update", color = DevOnPrimary, fontWeight = FontWeight.Bold, fontSize = 12.sp)
                 }
             }
 
             Spacer(modifier = Modifier.height(6.dp))
 
-            // Tombol Toggle Changelog
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .clip(RoundedCornerShape(6.dp))
+                    .clip(RoundedCornerShape(8.dp))
                     .clickable { showChangelog = !showChangelog }
                     .padding(vertical = 4.dp),
                 verticalAlignment = Alignment.CenterVertically
@@ -1419,41 +1572,40 @@ fun UpdateBannerCard(
                 Icon(
                     imageVector = if (showChangelog) Icons.Default.ArrowDropUp else Icons.Default.ArrowDropDown,
                     contentDescription = null,
-                    tint = DevSuccess,
+                    tint = DevPrimary,
                     modifier = Modifier.size(20.dp)
                 )
                 Spacer(modifier = Modifier.width(4.dp))
                 Text(
-                    text = if (showChangelog) "Sembunyikan Catatan Rilis (Changelog)" else "Lihat Catatan Rilis (Changelog)",
+                    text = if (showChangelog) "Hide Release Notes" else "View Release Notes",
                     fontSize = 11.sp,
                     fontWeight = FontWeight.SemiBold,
-                    color = DevSuccess
+                    color = DevPrimary
                 )
             }
 
-            // Konten Changelog
             AnimatedVisibility(visible = showChangelog) {
                 Surface(
-                    color = Color(0xFF09140C),
-                    shape = RoundedCornerShape(8.dp),
-                    border = BorderStroke(1.dp, DevSuccess.copy(alpha = 0.25f)),
+                    color = DevCanvasDeep,
+                    shape = RoundedCornerShape(12.dp),
+                    border = BorderStroke(1.dp, DevPrimary.copy(alpha = 0.25f)),
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(top = 6.dp)
                 ) {
-                    Column(modifier = Modifier.padding(10.dp)) {
+                    Column(modifier = Modifier.padding(12.dp)) {
                         Text(
-                            text = "Apa yang Baru di ${info.latestVersion}:",
+                            text = "What's new in ${info.latestVersion}:",
                             fontSize = 11.sp,
                             fontWeight = FontWeight.Bold,
-                            color = DevSuccess
+                            color = DevPrimary
                         )
                         Spacer(modifier = Modifier.height(4.dp))
                         Text(
-                            text = info.releaseNotes.ifBlank { "Tidak ada catatan rilis rinci yang disertakan." },
+                            text = info.releaseNotes.ifBlank { "Bug fixes and performance improvements." },
                             fontSize = 11.sp,
                             fontFamily = FontFamily.Monospace,
-                            color = Color(0xFFD0E0D4),
+                            color = DevOnSurface,
                             lineHeight = 16.sp
                         )
                     }
@@ -1464,72 +1616,190 @@ fun UpdateBannerCard(
 }
 
 @Composable
-fun StatusCard(state: ChrootState, isLoading: Boolean = false) {
-    val (statusColor, statusTitle, statusDesc) = when {
-        isLoading -> Triple(
+fun StatusCard(
+    state: ChrootState,
+    isLoading: Boolean = false,
+    onOpenTerminal: () -> Unit = {}
+) {
+    val (statusColor, badgeText, statusTitle, statusDesc) = when {
+        isLoading -> listOf(
             DevPrimary,
-            "Memeriksa Status Container & Root...",
-            "Sedang memverifikasi izin Superuser (su) dan integritas container DevBox."
+            "VERIFYING",
+            "Checking Container Engine...",
+            "Inspecting root access (su) and Linux rootfs integrity."
         )
-        !state.isRootGranted -> Triple(
+        !state.isRootGranted -> listOf(
             DevError,
-            "Akses Root Tidak Terdeteksi",
-            "Aplikasi membutuhkan izin Superuser (su). Periksa Magisk/KernelSU."
+            "NO ROOT",
+            "Root Access Required",
+            "Grant Superuser (su) permission in Magisk or KernelSU."
         )
-        !state.isRootfsExists -> Triple(
+        !state.isRootfsExists -> listOf(
             DevWarning,
-            "Rootfs Belum Terpasang",
-            "Direktori ${ChrootManager.activeRootfs} belum memiliki binary sistem Linux (/bin/bash)."
+            "UNINSTALLED",
+            "Rootfs Not Installed",
+            "No /bin/bash found in ${ChrootManager.activeRootfs}."
         )
-        state.isMounted -> Triple(
-            DevSuccess,
-            "Container DevBox Aktif",
-            "Rootfs berjalan normal dan siap digunakan."
-        )
-        else -> Triple(
+        state.isMounted -> listOf(
             DevPrimary,
-            "Container DevBox Siap (Standby)",
-            "Rootfs terverifikasi. Masuk ke Terminal untuk memulai sesi."
+            "RUNNING",
+            "Ubuntu Container Active",
+            "Filesystems mounted and ready for PTY sessions."
+        )
+        else -> listOf(
+            DevPrimary,
+            "STANDBY",
+            "Container Ready",
+            "Rootfs verified. Open Terminal to auto-mount and start."
         )
     }
 
+    val accent = statusColor as Color
+    val badge = badgeText as String
+    val title = statusTitle as String
+    val desc = statusDesc as String
+
+    val infiniteTransition = rememberInfiniteTransition(label = "heroStatusPulse")
+    val pulseAlpha by infiniteTransition.animateFloat(
+        initialValue = 0.35f,
+        targetValue = 1.0f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(900, easing = LinearEasing),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "heroPulseAlpha"
+    )
+
     Card(
         modifier = Modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-        shape = RoundedCornerShape(16.dp)
+        colors = CardDefaults.cardColors(containerColor = DevSurface),
+        shape = RoundedCornerShape(24.dp),
+        border = BorderStroke(1.dp, accent.copy(alpha = 0.38f))
     ) {
-        Row(
-            modifier = Modifier.padding(16.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            if (isLoading) {
-                CircularProgressIndicator(
-                    modifier = Modifier.size(14.dp),
-                    color = DevPrimary,
-                    strokeWidth = 2.dp
+        Column(modifier = Modifier.padding(18.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Surface(
+                    color = accent.copy(alpha = 0.14f),
+                    shape = RoundedCornerShape(50),
+                    border = BorderStroke(1.dp, accent.copy(alpha = 0.4f))
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        if (isLoading) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(10.dp),
+                                color = accent,
+                                strokeWidth = 1.8.dp
+                            )
+                        } else {
+                            Box(
+                                modifier = Modifier
+                                    .size(8.dp)
+                                    .clip(CircleShape)
+                                    .background(accent.copy(alpha = if (state.isMounted) pulseAlpha else 1f))
+                            )
+                        }
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(
+                            text = badge,
+                            fontSize = 10.sp,
+                            fontFamily = FontFamily.Monospace,
+                            fontWeight = FontWeight.ExtraBold,
+                            color = accent
+                        )
+                    }
+                }
+
+                if (state.isRootfsExists && state.isRootGranted) {
+                    Surface(
+                        onClick = onOpenTerminal,
+                        color = DevPrimaryContainer,
+                        shape = RoundedCornerShape(50),
+                        border = BorderStroke(1.dp, DevPrimary.copy(alpha = 0.4f))
+                    ) {
+                        Text(
+                            text = "Open Shell →",
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = DevPrimary,
+                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 5.dp)
+                        )
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(12.dp))
+
+            Text(
+                text = title,
+                fontSize = 18.sp,
+                fontWeight = FontWeight.ExtraBold,
+                color = DevOnSurface
+            )
+            Spacer(modifier = Modifier.height(4.dp))
+            Text(
+                text = desc,
+                fontSize = 12.sp,
+                color = DevOnSurfaceVariant
+            )
+        }
+    }
+}
+
+@Composable
+fun BentoMetricTile(
+    title: String,
+    value: String,
+    subtitle: String,
+    accentColor: Color,
+    modifier: Modifier = Modifier
+) {
+    Card(
+        modifier = modifier,
+        colors = CardDefaults.cardColors(containerColor = DevSurface),
+        shape = RoundedCornerShape(18.dp),
+        border = BorderStroke(1.dp, DevBorder)
+    ) {
+        Column(modifier = Modifier.padding(14.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = title,
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Medium,
+                    color = DevOnSurfaceVariant
                 )
-            } else {
                 Box(
                     modifier = Modifier
-                        .size(12.dp)
+                        .size(7.dp)
                         .clip(CircleShape)
-                        .background(statusColor)
+                        .background(accentColor)
                 )
             }
-            Spacer(modifier = Modifier.width(12.dp))
-            Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    text = statusTitle,
-                    fontSize = 16.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = MaterialTheme.colorScheme.onSurface
-                )
-                Text(
-                    text = statusDesc,
-                    fontSize = 12.sp,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            }
+            Spacer(modifier = Modifier.height(8.dp))
+            Text(
+                text = value,
+                fontSize = 20.sp,
+                fontFamily = FontFamily.Monospace,
+                fontWeight = FontWeight.ExtraBold,
+                color = DevOnSurface
+            )
+            Spacer(modifier = Modifier.height(2.dp))
+            Text(
+                text = subtitle,
+                fontSize = 10.sp,
+                color = accentColor,
+                fontWeight = FontWeight.SemiBold
+            )
         }
     }
 }
@@ -1551,24 +1821,33 @@ fun ControlRow(
             modifier = Modifier.weight(1f),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Icon(
-                imageVector = icon,
-                contentDescription = null,
-                tint = DevPrimary,
-                modifier = Modifier.size(24.dp)
-            )
+            Surface(
+                color = if (isChecked) DevPrimaryContainer else DevSurfaceVariant,
+                shape = RoundedCornerShape(12.dp),
+                border = BorderStroke(1.dp, if (isChecked) DevPrimary.copy(alpha = 0.4f) else DevBorder),
+                modifier = Modifier.size(40.dp)
+            ) {
+                Box(contentAlignment = Alignment.Center) {
+                    Icon(
+                        imageVector = icon,
+                        contentDescription = null,
+                        tint = if (isChecked) DevPrimary else DevOnSurfaceVariant,
+                        modifier = Modifier.size(20.dp)
+                    )
+                }
+            }
             Spacer(modifier = Modifier.width(12.dp))
             Column {
                 Text(
                     text = title,
                     fontSize = 14.sp,
-                    fontWeight = FontWeight.Medium,
-                    color = MaterialTheme.colorScheme.onSurface
+                    fontWeight = FontWeight.SemiBold,
+                    color = DevOnSurface
                 )
                 Text(
                     text = subtitle,
-                    fontSize = 12.sp,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                    fontSize = 11.sp,
+                    color = if (isChecked) DevPrimary.copy(alpha = 0.85f) else DevOnSurfaceVariant
                 )
             }
         }
@@ -1576,31 +1855,12 @@ fun ControlRow(
             checked = isChecked,
             onCheckedChange = onCheckedChange,
             colors = SwitchDefaults.colors(
-                checkedThumbColor = Color.Black,
-                checkedTrackColor = DevPrimary
+                checkedThumbColor = DevOnPrimary,
+                checkedTrackColor = DevPrimary,
+                uncheckedThumbColor = DevOnSurfaceVariant,
+                uncheckedTrackColor = DevSurfaceVariant,
+                uncheckedBorderColor = DevBorder
             )
-        )
-    }
-}
-
-@Composable
-fun MetricRow(label: String, value: String) {
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.SpaceBetween,
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Text(
-            text = label,
-            fontSize = 13.sp,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
-        )
-        Text(
-            text = value,
-            fontSize = 13.sp,
-            fontFamily = FontFamily.Monospace,
-            fontWeight = FontWeight.SemiBold,
-            color = MaterialTheme.colorScheme.onSurface
         )
     }
 }

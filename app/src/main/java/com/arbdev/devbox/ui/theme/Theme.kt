@@ -23,6 +23,13 @@ private val DarkColorScheme = darkColorScheme(
     onSurface = DevOnSurface,
     surfaceVariant = DevSurfaceVariant,
     onSurfaceVariant = DevOnSurfaceVariant,
+    surfaceContainerLowest = DevCanvasDeep,
+    surfaceContainerLow = DevBackground,
+    surfaceContainer = DevSurface,
+    surfaceContainerHigh = DevSurfaceVariant,
+    surfaceContainerHighest = DevBorder,
+    outline = DevBorder,
+    outlineVariant = DevBorder,
     error = DevError,
     onError = DevOnError
 )

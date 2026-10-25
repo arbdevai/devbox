@@ -5,47 +5,47 @@
     android:viewportWidth="108"
     android:viewportHeight="108">
     <group>
-        <!-- Container Box Corner Brackets -->
+        <!-- Container Box Corner Brackets (#7DFF4C) -->
         <path
             android:fillColor="#00000000"
-            android:strokeColor="#39C5CF"
+            android:strokeColor="#7DFF4C"
             android:strokeWidth="2.5"
             android:strokeLineCap="round"
             android:strokeLineJoin="round"
             android:pathData="M 21,29 L 21,23 L 27,23" />
         <path
             android:fillColor="#00000000"
-            android:strokeColor="#39C5CF"
+            android:strokeColor="#7DFF4C"
             android:strokeWidth="2.5"
             android:strokeLineCap="round"
             android:strokeLineJoin="round"
             android:pathData="M 81,23 L 87,23 L 87,29" />
         <path
             android:fillColor="#00000000"
-            android:strokeColor="#39C5CF"
+            android:strokeColor="#7DFF4C"
             android:strokeWidth="2.5"
             android:strokeLineCap="round"
             android:strokeLineJoin="round"
             android:pathData="M 21,79 L 21,85 L 27,85" />
         <path
             android:fillColor="#00000000"
-            android:strokeColor="#39C5CF"
+            android:strokeColor="#7DFF4C"
             android:strokeWidth="2.5"
             android:strokeLineCap="round"
             android:strokeLineJoin="round"
             android:pathData="M 81,85 L 87,85 L 87,79" />
 
-        <!-- Terminal Console Main Body -->
+        <!-- Terminal Console Main Body (#141414) -->
         <path
-            android:fillColor="#090D13"
-            android:strokeColor="#39C5CF"
+            android:fillColor="#141414"
+            android:strokeColor="#7DFF4C"
             android:strokeWidth="2"
             android:pathData="M 31,31 h 46 a 7,7 0 0 1 7,7 v 30 a 7,7 0 0 1 -7,7 h -46 a 7,7 0 0 1 -7,-7 v -30 a 7,7 0 0 1 7,-7 z" />
 
         <!-- Terminal Title Bar Divider -->
         <path
             android:fillColor="#00000000"
-            android:strokeColor="#21262D"
+            android:strokeColor="#2D312B"
             android:strokeWidth="1.5"
             android:pathData="M 24,42 L 84,42" />
 
@@ -57,13 +57,13 @@
             android:fillColor="#FFBD2E"
             android:pathData="M 37,37 A 2,2 0 1 1 37,37.01" />
         <path
-            android:fillColor="#27C93F"
+            android:fillColor="#7DFF4C"
             android:pathData="M 43,37 A 2,2 0 1 1 43,37.01" />
 
         <!-- Command Prompt Chevron: > -->
         <path
             android:fillColor="#00000000"
-            android:strokeColor="#39C5CF"
+            android:strokeColor="#7DFF4C"
             android:strokeWidth="3.2"
             android:strokeLineCap="round"
             android:strokeLineJoin="round"
@@ -72,7 +72,7 @@
         <!-- Blinking Terminal Cursor: _ -->
         <path
             android:fillColor="#00000000"
-            android:strokeColor="#58A6FF"
+            android:strokeColor="#98FF6E"
             android:strokeWidth="3.2"
             android:strokeLineCap="round"
             android:pathData="M 47,62 L 57,62" />
@@ -80,13 +80,13 @@
         <!-- Secondary Code Indicators -->
         <path
             android:fillColor="#00000000"
-            android:strokeColor="#484F58"
+            android:strokeColor="#485046"
             android:strokeWidth="2"
             android:strokeLineCap="round"
             android:pathData="M 64,54 L 74,54" />
         <path
             android:fillColor="#00000000"
-            android:strokeColor="#30363D"
+            android:strokeColor="#343A32"
             android:strokeWidth="2"
             android:strokeLineCap="round"
             android:pathData="M 64,59 L 71,59" />
