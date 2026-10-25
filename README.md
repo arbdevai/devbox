@@ -16,22 +16,22 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/arbdevai/devbox/releases/latest"><strong>⬇️ Download Latest APK (v1.0.82)</strong></a>
+  <a href="https://github.com/arbdevai/devbox/releases/latest"><strong>Download Latest APK (v1.0.82)</strong></a>
   &nbsp;•&nbsp;
-  <a href="https://arbdevai.github.io/devbox/"><strong>🌐 Interactive Web Showcase</strong></a>
+  <a href="https://arbdevai.github.io/devbox/"><strong>Interactive Web Showcase</strong></a>
   &nbsp;•&nbsp;
-  <a href="#-interface-showcase-v1082"><strong>📱 Screenshots</strong></a>
+  <a href="#interface-showcase-v1082"><strong>Screenshots</strong></a>
   &nbsp;•&nbsp;
-  <a href="#-system-architecture"><strong>🏗️ Architecture</strong></a>
+  <a href="#system-architecture"><strong>Architecture</strong></a>
   &nbsp;•&nbsp;
-  <a href="#-quick-start--installation"><strong>🚀 Quick Start</strong></a>
+  <a href="#quick-start--installation"><strong>Quick Start</strong></a>
 </p>
 
 </div>
 
 ---
 
-## ⚡ Why DevBox?
+## Why DevBox?
 
 Running full Linux environments and modern **Ink/React-based TUI AI Agents** (`agy`, `claude`, `gemini`) inside legacy **Termux + PRoot/Chroot** setups suffers from three critical engineering bottlenecks on mobile hardware:
 
@@ -43,7 +43,7 @@ Running full Linux environments and modern **Ink/React-based TUI AI Agents** (`a
 
 ---
 
-## 📱 Interface Showcase (`v1.0.82`)
+## Interface Showcase (`v1.0.82`)
 
 > Designed with the **2026 Google Material 3 Expressive** dark palette — **Neon Acid Green (`#7DFF4C`)** accents over **Carbon Matte Black (`#141414`)** and elevated olive-slate surfaces (`#1C1E1B`).
 
@@ -86,7 +86,7 @@ Running full Linux environments and modern **Ink/React-based TUI AI Agents** (`a
 
 ---
 
-## 🔥 Core Engineering Highlights
+## Core Engineering Highlights
 
 ### 1. Hardware-Accelerated 2D VT100/XTerm PTY Engine
 - **Full 2D Character Cell Grid (`TerminalGridBuffer`)**: Complete primary + alternate screen buffer (`?1049h` / `?1049l`, `?47h`, `?1047h`) with scrollback history, regional scrolling (`DECSTBM`), and cursor save/restore (`DECSC`/`DECRC`).
@@ -106,7 +106,7 @@ Running full Linux environments and modern **Ink/React-based TUI AI Agents** (`a
 
 ---
 
-## 🆚 DevBox vs. Legacy Termux + PRoot/Chroot
+## DevBox vs. Legacy Termux + PRoot/Chroot
 
 | Capability | Legacy Termux + PRoot/Chroot | **DevBox (v1.0.82)** |
 | :--- | :--- | :--- |
@@ -119,7 +119,7 @@ Running full Linux environments and modern **Ink/React-based TUI AI Agents** (`a
 
 ---
 
-## 🏗️ System Architecture
+## System Architecture
 
 ```mermaid
 flowchart LR
@@ -158,7 +158,7 @@ flowchart LR
 
 ---
 
-## 🎨 2026 Material 3 Expressive Color Tokens
+## 2026 Material 3 Expressive Color Tokens
 
 | Token Role | Hex Code | Preview | Usage |
 | :--- | :--- | :--- | :--- |
@@ -171,7 +171,7 @@ flowchart LR
 
 ---
 
-## 🚀 Quick Start & Installation
+## Quick Start & Installation
 
 ### Prerequisites
 - **Device**: Android 8.0+ (`arm64-v8a`)
@@ -200,7 +200,7 @@ agy --dangerously-skip-permissions
 
 ---
 
-## 🛠️ Building from Source
+## Building from Source
 
 ```bash
 # Clone the repository
@@ -216,7 +216,7 @@ cd devbox
 
 ---
 
-## 📂 Project Structure
+## Project Structure
 
 ```text
 devbox/

@@ -42,13 +42,13 @@
   <!-- Feature Pills Bottom Left -->
   <g transform="translate(64, 294)">
     <rect x="0" y="0" width="148" height="36" rx="18" fill="#1C1E1B" stroke="#2D312B" stroke-width="1.2"/>
-    <text x="74" y="23" text-anchor="middle" fill="#E3E5E0" font-family="monospace" font-size="13" font-weight="600">⚡ Native PTY</text>
+    <text x="74" y="23" text-anchor="middle" fill="#E3E5E0" font-family="monospace" font-size="13" font-weight="600">Native PTY</text>
 
     <rect x="160" y="0" width="176" height="36" rx="18" fill="#1C1E1B" stroke="#2D312B" stroke-width="1.2"/>
-    <text x="248" y="23" text-anchor="middle" fill="#E3E5E0" font-family="monospace" font-size="13" font-weight="600">🛡️ 0-Orphan Reaper</text>
+    <text x="248" y="23" text-anchor="middle" fill="#E3E5E0" font-family="monospace" font-size="13" font-weight="600">0-Orphan Reaper</text>
 
     <rect x="348" y="0" width="166" height="36" rx="18" fill="#1C1E1B" stroke="#2D312B" stroke-width="1.2"/>
-    <text x="431" y="23" text-anchor="middle" fill="#E3E5E0" font-family="monospace" font-size="13" font-weight="600">🤖 AI CLI Ready</text>
+    <text x="431" y="23" text-anchor="middle" fill="#E3E5E0" font-family="monospace" font-size="13" font-weight="600">AI CLI Ready</text>
 
     <rect x="526" y="0" width="154" height="36" rx="18" fill="#1B3712" stroke="#7DFF4C" stroke-width="1.2"/>
     <text x="603" y="23" text-anchor="middle" fill="#7DFF4C" font-family="monospace" font-size="13" font-weight="700">#7DFF4C • #141414</text>
