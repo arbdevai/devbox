@@ -102,6 +102,9 @@ class TerminalGridBuffer(
         private set
     var isAutoWrap: Boolean = true
         private set
+    @Volatile
+    var isSynchronizedUpdate: Boolean = false
+        private set
     private var wrapPending: Boolean = false
     private var utf8Remainder = ByteArray(0)
 
@@ -164,6 +167,7 @@ class TerminalGridBuffer(
             isSgrMouseMode = false
             isApplicationCursorKeys = false
             isAutoWrap = true
+            isSynchronizedUpdate = false
             wrapPending = false
             scrollTop = 0
             scrollBottom = (maxRows - 1).coerceAtLeast(0)
@@ -615,7 +619,15 @@ class TerminalGridBuffer(
     }
 
     private fun handleCsiCommand(command: Char) {
-        // Abaikan sequence CSI dengan intermediate byte (misal \x1b[0 q, \x1b[?2026$p)
+        // Tangani Synchronized Output mode query / status (\x1b[?2026$p)
+        if (csiIntermediate == '$' && command == 'p' && isCsiPrivate && csiParams.toString() == "2026") {
+            // Mode 2026 didukung: kirim DECRPM respon (\x1b[?2026;1$y jika aktif, \x1b[?2026;2$y jika nonaktif)
+            val state = if (isSynchronizedUpdate) 1 else 2
+            onSendResponse?.invoke("\u001B[?2026;$state\$y")
+            return
+        }
+
+        // Abaikan sequence CSI dengan intermediate byte lain (misal \x1b[0 q)
         // atau prefix ekstensi modern ('>', '<', '=' seperti \x1b[>4;2m, \x1b[>1u, \x1b[<1u)
         // agar tidak disalahartikan sebagai perintah standar ('m', 'u', 'p', 'q', dll.)
         if (csiIntermediate != '\u0000' || csiPrefix in charArrayOf('>', '<', '=')) {
@@ -834,6 +846,10 @@ class TerminalGridBuffer(
                             1000, 1002 -> isMouseTrackingEnabled = true
                             1006 -> isSgrMouseMode = true
                             2004 -> isBracketedPasteMode = true
+                            2026 -> {
+                                // DECSET 2026: Begin Synchronized Output (TUI atomic render)
+                                isSynchronizedUpdate = true
+                            }
                         }
                     }
                 }
@@ -867,6 +883,11 @@ class TerminalGridBuffer(
                             1000, 1002 -> isMouseTrackingEnabled = false
                             1006 -> isSgrMouseMode = false
                             2004 -> isBracketedPasteMode = false
+                            2026 -> {
+                                // DECRST 2026: End Synchronized Output (Flush atomic frame seketika ke UI)
+                                isSynchronizedUpdate = false
+                                notifyUpdate(forceImmediate = true)
+                            }
                         }
                     }
                 }
@@ -1142,10 +1163,16 @@ class TerminalGridBuffer(
         }
     }
 
-    private fun notifyUpdate() {
+    private fun notifyUpdate(forceImmediate: Boolean = false) {
+        if (isSynchronizedUpdate && !forceImmediate) {
+            // Sedang di dalam batch Synchronized Output (DECSET 2026), jangan picu recompose parsial
+            hasPendingUpdate = true
+            return
+        }
+
         val now = System.currentTimeMillis()
         val elapsed = now - lastNotifyTime
-        if (elapsed >= 16L) { // Maksimum ~60 FPS (anti-freeze UI saat AI streaming cepat)
+        if (forceImmediate || elapsed >= 16L) { // Maksimum ~60 FPS (anti-freeze UI saat AI streaming cepat)
             lastNotifyTime = now
             hasPendingUpdate = false
             notifyHandler.removeCallbacks(notifyRunnable)
