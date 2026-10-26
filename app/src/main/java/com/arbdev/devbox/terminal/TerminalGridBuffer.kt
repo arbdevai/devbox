@@ -23,6 +23,7 @@ data class TerminalCell(
     var isBold: Boolean = false,
     var isUnderline: Boolean = false,
     var isDim: Boolean = false,
+    var isInverse: Boolean = false,
     var isWide: Boolean = false,
     var isWideContinuation: Boolean = false,
     var hyperlinkUrl: String? = null
@@ -35,6 +36,7 @@ data class TerminalCell(
         isBold = false
         isUnderline = false
         isDim = false
+        isInverse = false
         isWide = false
         isWideContinuation = false
         hyperlinkUrl = null
@@ -48,6 +50,7 @@ data class TerminalCell(
         isBold = other.isBold
         isUnderline = other.isUnderline
         isDim = other.isDim
+        isInverse = other.isInverse
         isWide = other.isWide
         isWideContinuation = other.isWideContinuation
         hyperlinkUrl = other.hyperlinkUrl
@@ -115,6 +118,7 @@ class TerminalGridBuffer(
         private set
     var onTitleChanged: ((String) -> Unit)? = null
     var onClipboardCopy: ((String) -> Unit)? = null
+    var onClipboardRequest: (() -> String?)? = null
     var onBell: (() -> Unit)? = null
     var onSendResponse: ((String) -> Unit)? = null
     var onCwdChanged: ((String) -> Unit)? = null
@@ -130,6 +134,7 @@ class TerminalGridBuffer(
     private var isBold = false
     private var isUnderline = false
     private var isDim = false
+    private var isInverse = false
 
     // State Machine untuk Parser
     private enum class ParserState {
@@ -527,21 +532,28 @@ class TerminalGridBuffer(
         val colsLimit = target[0].size
 
         cursorRow = cursorRow.coerceIn(0, rowsLimit - 1)
-        if (cursorCol >= colsLimit) {
+        val charWidth = if (isWide) 2 else 1
+
+        // 1. VT100 DECAWM Delayed Auto-Wrap:
+        // Jika kursor berada di status wrapPending dari karakter sebelumnya,
+        // baru wrap ke kolom 0 baris baru saat karakter cetak berikutnya tiba.
+        if (wrapPending) {
+            wrapPending = false
             if (isAutoWrap) {
                 cursorCol = 0
                 newline()
                 cursorRow = cursorRow.coerceIn(0, rowsLimit - 1)
-            } else {
-                cursorCol = colsLimit - 1
             }
         }
-        if (isWide && cursorCol == colsLimit - 1 && isAutoWrap) {
-            target[cursorRow][cursorCol].reset()
+
+        // Jika karakter lebar (2 sel di layar) tidak muat di kolom paling kanan, wrap ke baris baru
+        if (isWide && cursorCol >= colsLimit - 1 && isAutoWrap) {
+            target[cursorRow][cursorCol.coerceIn(0, colsLimit - 1)].reset()
             cursorCol = 0
             newline()
             cursorRow = cursorRow.coerceIn(0, rowsLimit - 1)
         }
+
         val safeRow = cursorRow.coerceIn(0, rowsLimit - 1)
         val safeCol = cursorCol.coerceIn(0, colsLimit - 1)
         val cell = target[safeRow][safeCol]
@@ -552,17 +564,27 @@ class TerminalGridBuffer(
         cell.isBold = isBold
         cell.isUnderline = isUnderline
         cell.isDim = isDim
+        cell.isInverse = isInverse
         cell.isWide = isWide
         cell.isWideContinuation = false
         cell.hyperlinkUrl = currentHyperlinkUrl
-        cursorCol = safeCol + 1
 
         // Jika karakter lebar (2 sel di layar), tandai sel berikutnya sebagai continuation
-        if (isWide && cursorCol < colsLimit) {
-            val contCell = target[safeRow][cursorCol]
+        if (isWide && safeCol + 1 < colsLimit) {
+            val contCell = target[safeRow][safeCol + 1]
             contCell.reset()
             contCell.isWideContinuation = true
-            cursorCol++
+        }
+
+        // Majukan kursor; jika mencapai batas kanan margin, pasang flag wrapPending (delayed wrap)
+        if (safeCol + charWidth >= colsLimit) {
+            cursorCol = colsLimit - 1
+            if (isAutoWrap) {
+                wrapPending = true
+            }
+        } else {
+            cursorCol = safeCol + charWidth
+            wrapPending = false
         }
     }
 
@@ -638,6 +660,11 @@ class TerminalGridBuffer(
         }
 
         val params = parseCsiParams(csiParams.toString())
+
+        // Batalkan pending wrap VT100 saat ada instruksi kursor/edit
+        if (command in charArrayOf('H', 'f', 'A', 'B', 'C', 'D', 'E', 'F', 'G', 'd', 'J', 'K', 'X', '@', 'P', 'L', 'M')) {
+            wrapPending = false
+        }
 
         when (command) {
             // SGR (Select Graphic Rendition - Warna & Gaya)
@@ -953,8 +980,10 @@ class TerminalGridBuffer(
                 1 -> isBold = true
                 2 -> isDim = true
                 4 -> isUnderline = true
+                7 -> isInverse = true
                 22 -> { isBold = false; isDim = false }
                 24 -> isUnderline = false
+                27 -> isInverse = false
                 in 30..37 -> currentFg = ansi16Color(p - 30)
                 39 -> currentFg = defaultFg
                 in 40..47 -> currentBg = ansi16Color(p - 40)
@@ -992,6 +1021,7 @@ class TerminalGridBuffer(
         isBold = false
         isUnderline = false
         isDim = false
+        isInverse = false
     }
 
     private fun resetScreen() {
@@ -1045,7 +1075,17 @@ class TerminalGridBuffer(
                 // Clipboard Protocol (OSC 52)
                 val dataIdx = payload.indexOf(';')
                 val base64Data = if (dataIdx != -1) payload.substring(dataIdx + 1) else payload
-                if (base64Data.isNotEmpty() && base64Data != "?") {
+                if (base64Data == "?" || payload.endsWith(";?") || payload == "?") {
+                    // Query Read Clipboard (Micro editor, Neovim, tmux Ctrl+V / Paste)
+                    try {
+                        val clipText = onClipboardRequest?.invoke() ?: ""
+                        val b64 = android.util.Base64.encodeToString(
+                            clipText.toByteArray(StandardCharsets.UTF_8),
+                            android.util.Base64.NO_WRAP
+                        )
+                        onSendResponse?.invoke("\u001B]52;c;$b64\u0007")
+                    } catch (_: Exception) {}
+                } else if (base64Data.isNotEmpty()) {
                     try {
                         val bytes = android.util.Base64.decode(base64Data, android.util.Base64.DEFAULT)
                         val decoded = String(bytes, StandardCharsets.UTF_8)
@@ -1238,7 +1278,7 @@ class TerminalGridBuffer(
         cursorColIdx: Int
     ) {
         var lastNonSpace = maxCols - 1
-        while (lastNonSpace >= 0 && line[lastNonSpace].char == ' ' && line[lastNonSpace].bgColor == Color.Transparent && !line[lastNonSpace].isWideContinuation) {
+        while (lastNonSpace >= 0 && line[lastNonSpace].char == ' ' && line[lastNonSpace].bgColor == Color.Transparent && !line[lastNonSpace].isInverse && !line[lastNonSpace].isWideContinuation) {
             lastNonSpace--
         }
         val endCol = (lastNonSpace + 1).coerceAtMost(maxCols)
@@ -1252,8 +1292,21 @@ class TerminalGridBuffer(
             }
 
             val isCursorHere = (isCursorVisible && rowIdx == cursorRow && col == cursorColIdx)
-            val fg = if (isCursorHere) Color(0xFF062100) else cell.fgColor
-            val bg = if (isCursorHere) Color(0xFF7DFF4C) else cell.bgColor
+            val rawFg = if (cell.isDim) cell.fgColor.copy(alpha = 0.6f) else cell.fgColor
+            val invBg = if (cell.isInverse) {
+                if (cell.fgColor == Color.Transparent || cell.fgColor == Color(0xFFC9D1D9)) Color(0xFFC9D1D9)
+                else cell.fgColor
+            } else {
+                cell.bgColor
+            }
+            val invFg = if (cell.isInverse) {
+                if (cell.bgColor == Color.Transparent) Color(0xFF0D1117)
+                else cell.bgColor
+            } else {
+                rawFg
+            }
+            val fg = if (isCursorHere) Color(0xFF062100) else invFg
+            val bg = if (isCursorHere) Color(0xFF7DFF4C) else invBg
             val bold = cell.isBold
             val underline = cell.isUnderline
 
@@ -1265,8 +1318,21 @@ class TerminalGridBuffer(
                     continue
                 }
                 val curCursor = (isCursorVisible && rowIdx == cursorRow && col == cursorColIdx)
-                val curFg = if (curCursor) Color(0xFF062100) else curCell.fgColor
-                val curBg = if (curCursor) Color(0xFF7DFF4C) else curCell.bgColor
+                val curRawFg = if (curCell.isDim) curCell.fgColor.copy(alpha = 0.6f) else curCell.fgColor
+                val curInvBg = if (curCell.isInverse) {
+                    if (curCell.fgColor == Color.Transparent || curCell.fgColor == Color(0xFFC9D1D9)) Color(0xFFC9D1D9)
+                    else curCell.fgColor
+                } else {
+                    curCell.bgColor
+                }
+                val curInvFg = if (curCell.isInverse) {
+                    if (curCell.bgColor == Color.Transparent) Color(0xFF0D1117)
+                    else curCell.bgColor
+                } else {
+                    curRawFg
+                }
+                val curFg = if (curCursor) Color(0xFF062100) else curInvFg
+                val curBg = if (curCursor) Color(0xFF7DFF4C) else curInvBg
                 if (curFg != fg || curBg != bg || curCell.isBold != bold || curCell.isUnderline != underline) {
                     break
                 }
@@ -1365,7 +1431,7 @@ class TerminalGridBuffer(
             if (isAltBuffer) return maxRows - 1
             var last = cursorRow
             for (r in maxRows - 1 downTo cursorRow + 1) {
-                if (activeGrid[r].any { it.char != ' ' || it.bgColor != Color.Transparent || it.isWideContinuation }) {
+                if (activeGrid[r].any { it.char != ' ' || it.bgColor != Color.Transparent || it.isInverse || it.isWideContinuation }) {
                     last = r
                     break
                 }

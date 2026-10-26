@@ -52,6 +52,7 @@ class NativeTerminalSession(
     private val mainHandler = Handler(Looper.getMainLooper())
 
     var onClipboardCopy: ((String) -> Unit)? = null
+    var onClipboardRequest: (() -> String?)? = null
     var onBell: (() -> Unit)? = null
 
     init {
@@ -101,6 +102,9 @@ class NativeTerminalSession(
             mainHandler.post {
                 onClipboardCopy?.invoke(text)
             }
+        }
+        buffer.onClipboardRequest = {
+            onClipboardRequest?.invoke()
         }
         buffer.onBell = {
             mainHandler.post {

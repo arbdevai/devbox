@@ -1078,14 +1078,13 @@ BRIDGE_EOF
 
             # 9. Konfigurasi Git Safe Directory otomatis (Cegah dubious ownership error pada prompt)
             mkdir -p "${'$'}rf/etc" 2>/dev/null || true
-            if ! grep -q '\[safe\]' "${'$'}rf/etc/gitconfig" 2>/dev/null; then
-                printf '\n[safe]\n\tdirectory = *\n' >> "${'$'}rf/etc/gitconfig" 2>/dev/null || true
+            if [ -f "${'$'}rf/home/coder/.gitconfig" ]; then
+                sed -i 's/\\tdirectory = \*/\tdirectory = */g' "${'$'}rf/home/coder/.gitconfig" 2>/dev/null || true
             fi
-            if [ -f "${'$'}rf/home/coder/.gitconfig" ] && ! grep -q 'directory = \*' "${'$'}rf/home/coder/.gitconfig" 2>/dev/null; then
-                if ! grep -q '\[safe\]' "${'$'}rf/home/coder/.gitconfig" 2>/dev/null; then
-                    printf '\n[safe]\n\tdirectory = *\n' >> "${'$'}rf/home/coder/.gitconfig" 2>/dev/null || true
-                else
-                    sed -i '/\[safe\]/a \\tdirectory = *' "${'$'}rf/home/coder/.gitconfig" 2>/dev/null || true
+            if [ -x "${'$'}rf/usr/bin/git" ]; then
+                chroot "${'$'}rf" /usr/bin/git config --system --add safe.directory "*" 2>/dev/null || true
+                if [ -d "${'$'}rf/home/coder" ]; then
+                    chroot "${'$'}rf" su - coder -c "git config --global --add safe.directory '*'" 2>/dev/null || true
                 fi
             fi
 

@@ -209,6 +209,9 @@ fun TerminalScreen(
             clipboardManager.setText(AnnotatedString(text))
             Toast.makeText(context, "Disalin via terminal (OSC 52)", Toast.LENGTH_SHORT).show()
         }
+        activeSession.onClipboardRequest = {
+            clipboardManager.getText()?.text ?: ""
+        }
         activeSession.onBell = {
             hapticFeedback.performHapticFeedback(HapticFeedbackType.LongPress)
         }
@@ -2234,10 +2237,16 @@ fun TerminalCanvas(
                             val isCursor = (isCursorVisible && (lineIdx - historyCount) == cursorRow && bgCol == cursorCol)
                             val pt = GridPoint(lineIdx, bgCol)
                             val isSelected = hasSelection && selMin != null && selMax != null && pt >= selMin && pt <= selMax
+                            val invBg = if (cell.isInverse) {
+                                if (cell.fgColor == Color.Transparent || cell.fgColor == Color(0xFFC9D1D9)) Color(0xFFC9D1D9)
+                                else cell.fgColor
+                            } else {
+                                cell.bgColor
+                            }
                             val runBg = when {
                                 isSelected -> Color(0x4D7DFF4C)
                                 isCursor -> Color(0xFF7DFF4C)
-                                else -> cell.bgColor
+                                else -> invBg
                             }
 
                             val step = if (cell.isWide) 2 else 1
@@ -2249,10 +2258,16 @@ fun TerminalCanvas(
                                 val nextIsCursor = (isCursorVisible && (lineIdx - historyCount) == cursorRow && bgCol == cursorCol)
                                 val nextPt = GridPoint(lineIdx, bgCol)
                                 val nextIsSelected = hasSelection && selMin != null && selMax != null && nextPt >= selMin && nextPt <= selMax
+                                val nextInvBg = if (nextCell.isInverse) {
+                                    if (nextCell.fgColor == Color.Transparent || nextCell.fgColor == Color(0xFFC9D1D9)) Color(0xFFC9D1D9)
+                                    else nextCell.fgColor
+                                } else {
+                                    nextCell.bgColor
+                                }
                                 val nextBg = when {
                                     nextIsSelected -> Color(0x4D7DFF4C)
                                     nextIsCursor -> Color(0xFF7DFF4C)
-                                    else -> nextCell.bgColor
+                                    else -> nextInvBg
                                 }
                                 if (nextBg == runBg) {
                                     val nextStep = if (nextCell.isWide) 2 else 1
@@ -2284,10 +2299,17 @@ fun TerminalCanvas(
                             val pt = GridPoint(lineIdx, col)
                             val isSelected = hasSelection && selMin != null && selMax != null && pt >= selMin && pt <= selMax
                             val isCursor = (isCursorVisible && (lineIdx - historyCount) == cursorRow && col == cursorCol)
+                            val rawFg = if (cell.isDim) cell.fgColor.copy(alpha = 0.6f) else cell.fgColor
+                            val invFg = if (cell.isInverse) {
+                                if (cell.bgColor == Color.Transparent) Color(0xFF0D1117)
+                                else cell.bgColor
+                            } else {
+                                rawFg
+                            }
                             val fg = when {
                                 isSelected -> Color.White
                                 isCursor -> Color.Black
-                                else -> cell.fgColor
+                                else -> invFg
                             }
                             val isBold = cell.isBold || isSelected
                             val isUnderline = cell.isUnderline || cell.hyperlinkUrl != null
