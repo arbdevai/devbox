@@ -1076,7 +1076,20 @@ BRIDGE_EOF
             chown -h 1000:1000 "${'$'}rf/home/coder/storage"/* 2>/dev/null || true
             chown 1000:1000 "${'$'}rf/home/coder/storage" 2>/dev/null || true
 
-            # 9. Pasang paket sudo & eza resmi di background jika belum terinstal
+            # 9. Konfigurasi Git Safe Directory otomatis (Cegah dubious ownership error pada prompt)
+            mkdir -p "${'$'}rf/etc" 2>/dev/null || true
+            if ! grep -q '\[safe\]' "${'$'}rf/etc/gitconfig" 2>/dev/null; then
+                printf '\n[safe]\n\tdirectory = *\n' >> "${'$'}rf/etc/gitconfig" 2>/dev/null || true
+            fi
+            if [ -f "${'$'}rf/home/coder/.gitconfig" ] && ! grep -q 'directory = \*' "${'$'}rf/home/coder/.gitconfig" 2>/dev/null; then
+                if ! grep -q '\[safe\]' "${'$'}rf/home/coder/.gitconfig" 2>/dev/null; then
+                    printf '\n[safe]\n\tdirectory = *\n' >> "${'$'}rf/home/coder/.gitconfig" 2>/dev/null || true
+                else
+                    sed -i '/\[safe\]/a \\tdirectory = *' "${'$'}rf/home/coder/.gitconfig" 2>/dev/null || true
+                fi
+            fi
+
+            # 10. Pasang paket sudo & eza resmi di background jika belum terinstal
             if [ -x "${'$'}rf/usr/bin/apt-get" ]; then
                 if [ ! -x "${'$'}rf/usr/bin/sudo" ] || [ ! -x "${'$'}rf/usr/bin/eza" ]; then
                     ( chroot "${'$'}rf" /usr/bin/apt-get update -qq && chroot "${'$'}rf" /usr/bin/apt-get install -y -qq sudo ca-certificates eza ) >/dev/null 2>&1 &
@@ -1237,7 +1250,7 @@ devbox_prompt() {
     fi
 
     if git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
-        branch="${'$'}(git symbolic-ref --quiet --short HEAD 2>/dev/null)"
+        branch="${'$'}(git symbolic-ref --quiet --short HEAD 2>/dev/null || git describe --tags --exact-match 2>/dev/null || git rev-parse --short HEAD 2>/dev/null)"
         [[ -n "${'$'}branch" ]] || branch='DETACHED'
         branch="  ${'$'}{branch}"
     fi
