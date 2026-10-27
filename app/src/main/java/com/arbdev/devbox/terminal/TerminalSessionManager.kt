@@ -1,5 +1,6 @@
 package com.arbdev.devbox.terminal
 
+import android.content.Context
 import android.os.Handler
 import android.os.Looper
 import androidx.compose.runtime.getValue
@@ -100,6 +101,7 @@ class NativeTerminalSession(
         }
         buffer.onClipboardCopy = { text ->
             mainHandler.post {
+                TerminalSessionManager.addToClipboardHistory(text)
                 onClipboardCopy?.invoke(text)
             }
         }
@@ -508,6 +510,36 @@ object TerminalSessionManager {
     val sessions = mutableStateListOf<NativeTerminalSession>()
     val activeIndex = mutableIntStateOf(0)
     var detectedWebPort by mutableStateOf<Int?>(null)
+    var currentTheme by mutableStateOf(TerminalTheme.DevBoxEmerald)
+    val clipboardHistory = mutableStateListOf<String>()
+
+    fun initTheme(context: Context) {
+        val prefs = context.getSharedPreferences("devbox_terminal_prefs", Context.MODE_PRIVATE)
+        val savedThemeId = prefs.getString("terminal_theme_id", "devbox_emerald") ?: "devbox_emerald"
+        currentTheme = TerminalTheme.getThemeById(savedThemeId)
+        sessions.forEach { it.buffer.setTheme(currentTheme) }
+    }
+
+    fun setGlobalTheme(context: Context, theme: TerminalTheme) {
+        currentTheme = theme
+        context.getSharedPreferences("devbox_terminal_prefs", Context.MODE_PRIVATE)
+            .edit()
+            .putString("terminal_theme_id", theme.id)
+            .apply()
+        sessions.forEach { it.buffer.setTheme(theme) }
+    }
+
+    fun addToClipboardHistory(text: String) {
+        val clean = text.trim()
+        if (clean.isBlank()) return
+        if (clipboardHistory.contains(clean)) {
+            clipboardHistory.remove(clean)
+        }
+        clipboardHistory.add(0, clean)
+        while (clipboardHistory.size > 20) {
+            clipboardHistory.removeAt(clipboardHistory.size - 1)
+        }
+    }
 
     fun getActiveSession(): NativeTerminalSession {
         if (sessions.isEmpty()) {
@@ -521,6 +553,7 @@ object TerminalSessionManager {
         val sessionNumber = sessions.size + 1
         val name = customName ?: "Sesi $sessionNumber"
         val newSession = NativeTerminalSession(initialName = name)
+        newSession.buffer.setTheme(currentTheme)
         sessions.add(newSession)
         activeIndex.intValue = sessions.size - 1
         return newSession

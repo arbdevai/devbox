@@ -34,8 +34,9 @@ class MainActivity : ComponentActivity() {
             navigationBarStyle = SystemBarStyle.dark(0xFF1C1E1B.toInt())
         )
 
-        // Inisialisasi path rootfs persisten dari SharedPreferences
+        // Inisialisasi path rootfs persisten dari SharedPreferences dan tema terminal
         ChrootManager.init(applicationContext)
+        com.arbdev.devbox.terminal.TerminalSessionManager.initTheme(applicationContext)
 
         // Otomatis bersihkan sisa APK lama, lock proses agy usang, dan set OOM score -1000
         lifecycleScope.launch(Dispatchers.IO) {

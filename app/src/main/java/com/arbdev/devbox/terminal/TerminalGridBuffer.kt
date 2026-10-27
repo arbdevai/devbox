@@ -126,15 +126,28 @@ class TerminalGridBuffer(
     var onOpenUrl: ((String) -> Unit)? = null
     var onNotify: ((String, String) -> Unit)? = null
 
-    // Current Drawing Style (Clean High-Contrast Terminal)
-    private val defaultFg = Color(0xFFC9D1D9)
-    private val defaultBg = Color.Transparent
+    // Terminal Theme & Dynamic Color System
+    var currentTheme: TerminalTheme = TerminalTheme.DevBoxEmerald
+        private set
+    private var defaultFg = currentTheme.foreground
+    private var defaultBg = currentTheme.background
     private var currentFg = defaultFg
     private var currentBg = defaultBg
     private var isBold = false
     private var isUnderline = false
     private var isDim = false
     private var isInverse = false
+
+    fun setTheme(theme: TerminalTheme) {
+        synchronized(lock) {
+            currentTheme = theme
+            defaultFg = theme.foreground
+            defaultBg = theme.background
+            currentFg = theme.foreground
+            currentBg = theme.background
+            notifyUpdate(forceImmediate = true)
+        }
+    }
 
     // State Machine untuk Parser
     private enum class ParserState {
@@ -1060,15 +1073,28 @@ class TerminalGridBuffer(
                 onTitleChanged?.invoke(payload)
             }
             10 -> {
-                // Query Foreground Color (OSC 10;?) -> dibutuhkan TUI Go/Bubbletea/Lipgloss
+                // Query Foreground Color (OSC 10;?) -> TUI async theme detection
                 if (payload == "?") {
-                    onSendResponse?.invoke("\u001B]10;rgb:c9c9/d1d1/d9d9\u0007")
+                    val r = (currentTheme.foreground.red * 255).toInt().coerceIn(0, 255)
+                    val g = (currentTheme.foreground.green * 255).toInt().coerceIn(0, 255)
+                    val b = (currentTheme.foreground.blue * 255).toInt().coerceIn(0, 255)
+                    val rHex = String.format("%02x%02x", r, r)
+                    val gHex = String.format("%02x%02x", g, g)
+                    val bHex = String.format("%02x%02x", b, b)
+                    onSendResponse?.invoke("\u001B]10;rgb:$rHex/$gHex/$bHex\u0007")
                 }
             }
             11 -> {
-                // Query Background Color (OSC 11;?) -> dibutuhkan agy / Bubbletea agar tidak timeout 2 detik saat start
+                // Query Background Color (OSC 11;?) -> TUI async theme detection
                 if (payload == "?") {
-                    onSendResponse?.invoke("\u001B]11;rgb:0d0d/1111/1717\u0007")
+                    val bg = if (currentTheme.background == Color.Transparent) Color(0xFF0D1117) else currentTheme.background
+                    val r = (bg.red * 255).toInt().coerceIn(0, 255)
+                    val g = (bg.green * 255).toInt().coerceIn(0, 255)
+                    val b = (bg.blue * 255).toInt().coerceIn(0, 255)
+                    val rHex = String.format("%02x%02x", r, r)
+                    val gHex = String.format("%02x%02x", g, g)
+                    val bHex = String.format("%02x%02x", b, b)
+                    onSendResponse?.invoke("\u001B]11;rgb:$rHex/$gHex/$bHex\u0007")
                 }
             }
             52 -> {
@@ -1147,25 +1173,8 @@ class TerminalGridBuffer(
     }
 
     private fun ansi16Color(index: Int): Color {
-        return when (index.coerceIn(0, 15)) {
-            0 -> Color(0xFF141414) // Black
-            1 -> Color(0xFFFF6B6B) // Red
-            2 -> Color(0xFF7DFF4C) // Green (#7DFF4C)
-            3 -> Color(0xFFFFD166) // Yellow
-            4 -> Color(0xFFA8FF82) // Accent Lime
-            5 -> Color(0xFFC678DD) // Magenta
-            6 -> Color(0xFF73F59F) // Mint/Emerald
-            7 -> Color(0xFFE3E5E0) // Light Gray (Default)
-            8 -> Color(0xFF5C635A) // Dark Gray
-            9 -> Color(0xFFFF8585) // Bright Red
-            10 -> Color(0xFF98FF6E) // Bright Green
-            11 -> Color(0xFFFFDE8A) // Bright Yellow
-            12 -> Color(0xFFB8FF99) // Bright Lime
-            13 -> Color(0xFFD896FF) // Bright Magenta
-            14 -> Color(0xFF8FFFB4) // Bright Mint
-            15 -> Color(0xFFFFFFFF) // White
-            else -> defaultFg
-        }
+        val safeIndex = index.coerceIn(0, 15)
+        return currentTheme.ansiColors.getOrElse(safeIndex) { defaultFg }
     }
 
     private fun ansi256Color(index: Int): Color {

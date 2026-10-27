@@ -22,10 +22,13 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
+import com.arbdev.devbox.terminal.TerminalTheme
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.detectDragGestures
@@ -203,10 +206,17 @@ fun TerminalScreen(
     val hapticFeedback = LocalHapticFeedback.current
     var activeUrlPrompt by remember { mutableStateOf<String?>(null) }
     var urlListPrompt by remember { mutableStateOf<List<String>?>(null) }
+    var showThemeDialog by remember { mutableStateOf(false) }
+    var showClipboardDialog by remember { mutableStateOf(false) }
+
+    LaunchedEffect(Unit) {
+        TerminalSessionManager.initTheme(context)
+    }
 
     LaunchedEffect(activeSession) {
         activeSession.onClipboardCopy = { text ->
             clipboardManager.setText(AnnotatedString(text))
+            TerminalSessionManager.addToClipboardHistory(text)
             Toast.makeText(context, "Disalin via terminal (OSC 52)", Toast.LENGTH_SHORT).show()
         }
         activeSession.onClipboardRequest = {
@@ -613,6 +623,52 @@ fun TerminalScreen(
                             text = {
                                 Row(verticalAlignment = Alignment.CenterVertically) {
                                     Icon(
+                                        imageVector = Icons.Default.Refresh,
+                                        contentDescription = null,
+                                        tint = DevPrimary,
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(10.dp))
+                                    Column {
+                                        Text("Terminal Themes & Palettes", color = DevOnSurface, fontSize = 13.sp)
+                                        Text(
+                                            text = TerminalSessionManager.currentTheme.name,
+                                            color = DevPrimary,
+                                            fontSize = 10.sp,
+                                            fontFamily = FontFamily.Monospace
+                                        )
+                                    }
+                                }
+                            },
+                            onClick = {
+                                showOverflowMenu = false
+                                showThemeDialog = true
+                            }
+                        )
+
+                        DropdownMenuItem(
+                            text = {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Icon(
+                                        imageVector = Icons.Default.ContentPaste,
+                                        contentDescription = null,
+                                        tint = DevPrimary,
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(10.dp))
+                                    Text("Clipboard History (${TerminalSessionManager.clipboardHistory.size})", color = DevOnSurface, fontSize = 13.sp)
+                                }
+                            },
+                            onClick = {
+                                showOverflowMenu = false
+                                showClipboardDialog = true
+                            }
+                        )
+
+                        DropdownMenuItem(
+                            text = {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Icon(
                                         imageVector = Icons.Default.Layers,
                                         contentDescription = null,
                                         tint = if (orphanProcesses.isNotEmpty()) DevWarning else DevPrimary,
@@ -908,10 +964,17 @@ fun TerminalScreen(
                             if (isAltActive) {
                                 targetSession.sendText("\u001B\r")
                                 isAltActive = false
+                            } else if (isShiftActive) {
+                                // Kitty Keyboard: Shift+Enter sends \u001B[13;2u (newline di prompt AI CLI)
+                                targetSession.sendText("\u001B[13;2u")
+                                isShiftActive = false
+                            } else if (isCtrlActive) {
+                                // Kitty Keyboard: Ctrl+Enter sends \u001B[13;5u
+                                targetSession.sendText("\u001B[13;5u")
+                                isCtrlActive = false
                             } else {
                                 targetSession.sendText("\r")
                             }
-                            isShiftActive = false
                         } else if (text.length > 1 && (text.contains('\n') || text.contains('\r'))) {
                             targetSession.pasteText(text)
                         } else {
@@ -1266,6 +1329,30 @@ fun TerminalScreen(
                             Text("Cancel", color = DevOnSurfaceVariant)
                         }
                     }
+                }
+            )
+        }
+
+        if (showThemeDialog) {
+            TerminalThemeDialog(
+                currentTheme = TerminalSessionManager.currentTheme,
+                onDismiss = { showThemeDialog = false },
+                onThemeSelect = { theme ->
+                    TerminalSessionManager.setGlobalTheme(context, theme)
+                }
+            )
+        }
+
+        if (showClipboardDialog) {
+            TerminalClipboardDialog(
+                history = TerminalSessionManager.clipboardHistory,
+                onDismiss = { showClipboardDialog = false },
+                onPaste = { snippet ->
+                    showClipboardDialog = false
+                    TerminalSessionManager.getActiveSession().pasteText(snippet)
+                },
+                onClear = {
+                    TerminalSessionManager.clipboardHistory.clear()
                 }
             )
         }
@@ -1763,7 +1850,11 @@ fun TerminalScreen(
                     TerminalSessionManager.getActiveSession().sendBytes(byteArrayOf(27))
                 }
 
-                TerminalModifierKey(label = "PASTE", highlight = true) {
+                TerminalModifierKey(
+                    label = "PASTE",
+                    highlight = true,
+                    onLongClick = { showClipboardDialog = true }
+                ) {
                     val clip = clipboardManager.getText()?.text
                     if (!clip.isNullOrEmpty()) {
                         if (clip.length > 2000 || clip.count { it == '\n' } > 50) {
@@ -1774,6 +1865,10 @@ fun TerminalScreen(
                     } else {
                         Toast.makeText(context, "Clipboard is empty", Toast.LENGTH_SHORT).show()
                     }
+                }
+
+                TerminalModifierKey(label = "THEME") {
+                    showThemeDialog = true
                 }
 
                 TerminalModifierKey(label = if (isShiftActive) "⇧TAB" else "TAB", highlight = isShiftActive) {
@@ -1803,9 +1898,25 @@ fun TerminalScreen(
                     isShiftActive = !isShiftActive
                 }
 
-                TerminalModifierKey(label = "ENTER", highlight = true) {
+                TerminalModifierKey(
+                    label = when {
+                        isShiftActive -> "NEWLINE"
+                        isCtrlActive -> "CTRL+↵"
+                        else -> "ENTER"
+                    },
+                    highlight = true
+                ) {
                     autoScrollEnabled = true
-                    TerminalSessionManager.getActiveSession().sendText("\r")
+                    val s = TerminalSessionManager.getActiveSession()
+                    if (isShiftActive) {
+                        s.sendText("\u001B[13;2u")
+                        isShiftActive = false
+                    } else if (isCtrlActive) {
+                        s.sendText("\u001B[13;5u")
+                        isCtrlActive = false
+                    } else {
+                        s.sendText("\r")
+                    }
                 }
 
                 TerminalModifierKey(label = "⌫") {
@@ -1894,11 +2005,13 @@ fun TerminalScreen(
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun TerminalModifierKey(
     label: String,
     highlight: Boolean = false,
     isSignal: Boolean = false,
+    onLongClick: (() -> Unit)? = null,
     onClick: () -> Unit
 ) {
     val containerBg = when {
@@ -1926,9 +2039,10 @@ fun TerminalModifierKey(
                 },
                 shape = RoundedCornerShape(8.dp)
             )
-            .clickable {
-                onClick()
-            }
+            .combinedClickable(
+                onClick = onClick,
+                onLongClick = onLongClick
+            )
             .padding(horizontal = 10.dp, vertical = 6.dp),
         contentAlignment = Alignment.Center
     ) {
@@ -2106,7 +2220,14 @@ fun TerminalCanvas(
     val selMin = if (hasSelection) minOf(selStart!!, selEnd!!) else null
     val selMax = if (hasSelection) maxOf(selStart!!, selEnd!!) else null
 
-    Box(modifier = modifier.fillMaxSize()) {
+    val activeTheme = session.buffer.currentTheme
+    val canvasBg = if (activeTheme.background == Color.Transparent) DevBackground else activeTheme.background
+
+    Box(
+        modifier = modifier
+            .fillMaxSize()
+            .background(canvasBg)
+    ) {
         Box(
             modifier = Modifier
                 .fillMaxSize()
@@ -2238,14 +2359,14 @@ fun TerminalCanvas(
                             val pt = GridPoint(lineIdx, bgCol)
                             val isSelected = hasSelection && selMin != null && selMax != null && pt >= selMin && pt <= selMax
                             val invBg = if (cell.isInverse) {
-                                if (cell.fgColor == Color.Transparent || cell.fgColor == Color(0xFFC9D1D9)) Color(0xFFC9D1D9)
+                                if (cell.fgColor == Color.Transparent || cell.fgColor == activeTheme.foreground) activeTheme.foreground
                                 else cell.fgColor
                             } else {
                                 cell.bgColor
                             }
                             val runBg = when {
-                                isSelected -> Color(0x4D7DFF4C)
-                                isCursor -> Color(0xFF7DFF4C)
+                                isSelected -> activeTheme.cursorColor.copy(alpha = 0.35f)
+                                isCursor -> activeTheme.cursorColor
                                 else -> invBg
                             }
 
@@ -2259,14 +2380,14 @@ fun TerminalCanvas(
                                 val nextPt = GridPoint(lineIdx, bgCol)
                                 val nextIsSelected = hasSelection && selMin != null && selMax != null && nextPt >= selMin && nextPt <= selMax
                                 val nextInvBg = if (nextCell.isInverse) {
-                                    if (nextCell.fgColor == Color.Transparent || nextCell.fgColor == Color(0xFFC9D1D9)) Color(0xFFC9D1D9)
+                                    if (nextCell.fgColor == Color.Transparent || nextCell.fgColor == activeTheme.foreground) activeTheme.foreground
                                     else nextCell.fgColor
                                 } else {
                                     nextCell.bgColor
                                 }
                                 val nextBg = when {
-                                    nextIsSelected -> Color(0x4D7DFF4C)
-                                    nextIsCursor -> Color(0xFF7DFF4C)
+                                    nextIsSelected -> activeTheme.cursorColor.copy(alpha = 0.35f)
+                                    nextIsCursor -> activeTheme.cursorColor
                                     else -> nextInvBg
                                 }
                                 if (nextBg == runBg) {
@@ -2301,14 +2422,14 @@ fun TerminalCanvas(
                             val isCursor = (isCursorVisible && (lineIdx - historyCount) == cursorRow && col == cursorCol)
                             val rawFg = if (cell.isDim) cell.fgColor.copy(alpha = 0.6f) else cell.fgColor
                             val invFg = if (cell.isInverse) {
-                                if (cell.bgColor == Color.Transparent) Color(0xFF0D1117)
+                                if (cell.bgColor == Color.Transparent) (if (activeTheme.background == Color.Transparent) Color(0xFF0D1117) else activeTheme.background)
                                 else cell.bgColor
                             } else {
                                 rawFg
                             }
                             val fg = when {
                                 isSelected -> Color.White
-                                isCursor -> Color.Black
+                                isCursor -> if (activeTheme.background == Color.Transparent) Color.Black else activeTheme.background
                                 else -> invFg
                             }
                             val isBold = cell.isBold || isSelected
@@ -2702,4 +2823,235 @@ private fun SelectionHandle(
             drawPath(path, color = Color(0xFF7DFF4C))
         }
     }
+}
+
+/**
+ * Dialog Pemilihan Tema & Palet Warna Terminal DevBox.
+ * Mendukung live dynamic preview dan mode hemat daya AMOLED.
+ */
+@Composable
+fun TerminalThemeDialog(
+    currentTheme: TerminalTheme,
+    onDismiss: () -> Unit,
+    onThemeSelect: (TerminalTheme) -> Unit
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Text(
+                text = "Terminal Themes & Palettes",
+                fontWeight = FontWeight.Bold,
+                fontSize = 17.sp,
+                color = DevPrimary
+            )
+        },
+        text = {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Text(
+                    text = "Pilih skema warna terminal atau aktifkan mode hemat baterai AMOLED. Efek langsung aktif seketika tanpa me-restart sesi.",
+                    fontSize = 12.sp,
+                    color = DevOnSurfaceVariant
+                )
+                Spacer(modifier = Modifier.height(4.dp))
+                TerminalTheme.ALL_THEMES.forEach { theme ->
+                    val isSelected = theme.id == currentTheme.id
+                    Surface(
+                        onClick = { onThemeSelect(theme) },
+                        color = if (isSelected) DevPrimaryContainer else DevSurfaceVariant,
+                        shape = RoundedCornerShape(10.dp),
+                        border = BorderStroke(
+                            1.dp,
+                            if (isSelected) DevPrimary else DevBorder
+                        ),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Column(modifier = Modifier.padding(12.dp)) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text = theme.name,
+                                    fontSize = 13.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = if (isSelected) DevPrimary else DevOnSurface
+                                )
+                                if (isSelected) {
+                                    Text(
+                                        text = "ACTIVE",
+                                        fontSize = 10.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        fontFamily = FontFamily.Monospace,
+                                        color = DevPrimary
+                                    )
+                                }
+                            }
+                            Spacer(modifier = Modifier.height(2.dp))
+                            Text(
+                                text = theme.description,
+                                fontSize = 11.sp,
+                                color = DevOnSurfaceVariant
+                            )
+                            Spacer(modifier = Modifier.height(8.dp))
+                            // Baris pill preview palet warna tema
+                            Row(
+                                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                val previewColors = listOf(
+                                    if (theme.background == Color.Transparent) Color(0xFF141414) else theme.background,
+                                    theme.foreground,
+                                    theme.cursorColor,
+                                    theme.ansiColors.getOrElse(1) { Color.Red },
+                                    theme.ansiColors.getOrElse(2) { Color.Green },
+                                    theme.ansiColors.getOrElse(3) { Color.Yellow },
+                                    theme.ansiColors.getOrElse(4) { Color.Blue },
+                                    theme.ansiColors.getOrElse(5) { Color.Magenta }
+                                )
+                                previewColors.forEach { color ->
+                                    Box(
+                                        modifier = Modifier
+                                            .size(width = 22.dp, height = 12.dp)
+                                            .background(color, RoundedCornerShape(3.dp))
+                                            .border(0.5.dp, Color.White.copy(alpha = 0.2f), RoundedCornerShape(3.dp))
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = onDismiss,
+                colors = ButtonDefaults.buttonColors(containerColor = DevPrimary, contentColor = DevBackground)
+            ) {
+                Text("Tutup", fontWeight = FontWeight.Bold)
+            }
+        },
+        containerColor = DevSurface,
+        shape = RoundedCornerShape(16.dp)
+    )
+}
+
+/**
+ * Dialog Riwayat Salinan Clipboard Terminal (Smart Clipboard).
+ */
+@Composable
+fun TerminalClipboardDialog(
+    history: List<String>,
+    onDismiss: () -> Unit,
+    onPaste: (String) -> Unit,
+    onClear: () -> Unit
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "Clipboard History",
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 17.sp,
+                    color = DevPrimary
+                )
+                if (history.isNotEmpty()) {
+                    IconButton(onClick = onClear, modifier = Modifier.size(24.dp)) {
+                        Icon(
+                            Icons.Default.DeleteSweep,
+                            contentDescription = "Hapus Riwayat",
+                            tint = DevError,
+                            modifier = Modifier.size(18.dp)
+                        )
+                    }
+                }
+            }
+        },
+        text = {
+            if (history.isEmpty()) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = 24.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        text = "Belum ada riwayat teks clipboard.",
+                        fontSize = 13.sp,
+                        color = DevOnSurfaceVariant
+                    )
+                }
+            } else {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Text(
+                        text = "Ketuk cuplikan teks di bawah untuk langsung menempelkannya ke sesi terminal aktif.",
+                        fontSize = 11.sp,
+                        color = DevOnSurfaceVariant
+                    )
+                    Spacer(modifier = Modifier.height(2.dp))
+                    history.forEachIndexed { index, snippet ->
+                        Surface(
+                            onClick = { onPaste(snippet) },
+                            color = DevSurfaceVariant,
+                            shape = RoundedCornerShape(8.dp),
+                            border = BorderStroke(1.dp, DevBorder),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Column(modifier = Modifier.padding(10.dp)) {
+                                Text(
+                                    text = snippet.take(150) + if (snippet.length > 150) "..." else "",
+                                    fontFamily = FontFamily.Monospace,
+                                    fontSize = 11.sp,
+                                    color = DevOnSurface,
+                                    maxLines = 3
+                                )
+                                Spacer(modifier = Modifier.height(4.dp))
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween
+                                ) {
+                                    Text(
+                                        text = "#${index + 1} • ${snippet.length} chars",
+                                        fontSize = 9.sp,
+                                        color = DevPrimary,
+                                        fontFamily = FontFamily.Monospace
+                                    )
+                                    Text(
+                                        text = "Ketuk untuk Paste ↵",
+                                        fontSize = 9.sp,
+                                        color = DevOnSurfaceVariant
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = onDismiss,
+                colors = ButtonDefaults.buttonColors(containerColor = DevSurfaceVariant, contentColor = DevOnSurface)
+            ) {
+                Text("Tutup", fontWeight = FontWeight.Bold)
+            }
+        },
+        containerColor = DevSurface,
+        shape = RoundedCornerShape(16.dp)
+    )
 }
