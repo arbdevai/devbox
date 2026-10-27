@@ -44,6 +44,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -78,6 +79,7 @@ fun WebIdeScreen() {
     var hasError by remember { mutableStateOf(false) }
     var isFullscreen by remember { mutableStateOf(false) }
     var isStartingServer by remember { mutableStateOf(false) }
+    var probeAttempt by remember { mutableIntStateOf(0) }
 
     Column(
         modifier = Modifier
@@ -188,6 +190,7 @@ fun WebIdeScreen() {
             AndroidView(
                 factory = { context ->
                     WebView(context).apply {
+                        setBackgroundColor(0xFF0D1117.toInt())
                         layoutParams = ViewGroup.LayoutParams(
                             ViewGroup.LayoutParams.MATCH_PARENT,
                             ViewGroup.LayoutParams.MATCH_PARENT
@@ -201,6 +204,11 @@ fun WebIdeScreen() {
                             loadWithOverviewMode = true
                             mixedContentMode = WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
                             cacheMode = WebSettings.LOAD_DEFAULT
+                            userAgentString = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36"
+                            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
+                                @Suppress("DEPRECATION")
+                                forceDark = WebSettings.FORCE_DARK_ON
+                            }
                         }
 
                         webChromeClient = object : WebChromeClient() {
@@ -295,14 +303,14 @@ fun WebIdeScreen() {
                             }
                             Spacer(modifier = Modifier.height(14.dp))
                             Text(
-                                text = "Code-Server Offline",
+                                text = "Code-Server Belum Aktif",
                                 fontSize = 18.sp,
                                 fontWeight = FontWeight.ExtraBold,
                                 color = DevOnSurface
                             )
                             Spacer(modifier = Modifier.height(8.dp))
                             Text(
-                                text = "Unable to connect to 127.0.0.1:8080. Start the code-server service inside your Ubuntu container.",
+                                text = "Tidak dapat terhubung ke 127.0.0.1:8080. Pastikan layanan code-server diaktifkan di dalam container DevBox.",
                                 fontSize = 12.sp,
                                 color = DevOnSurfaceVariant,
                                 textAlign = androidx.compose.ui.text.style.TextAlign.Center
@@ -312,8 +320,10 @@ fun WebIdeScreen() {
                                 onClick = {
                                     scope.launch {
                                         isStartingServer = true
+                                        probeAttempt = 0
                                         ChrootManager.toggleCodeServer(true)
-                                        for (attempt in 1..6) {
+                                        for (attempt in 1..40) {
+                                            probeAttempt = attempt
                                             kotlinx.coroutines.delay(500)
                                             val listening = try {
                                                 java.io.File("/proc/net/tcp").takeIf { it.exists() }
@@ -335,7 +345,7 @@ fun WebIdeScreen() {
                                 Icon(Icons.Default.PlayArrow, contentDescription = null, tint = DevOnPrimary)
                                 Spacer(modifier = Modifier.width(6.dp))
                                 Text(
-                                    if (isStartingServer) "Starting Code-Server..." else "Launch Code-Server",
+                                    if (isStartingServer) "Menyiapkan Code-Server ($probeAttempt/40)..." else "Jalankan Code-Server",
                                     color = DevOnPrimary,
                                     fontWeight = FontWeight.Bold
                                 )
