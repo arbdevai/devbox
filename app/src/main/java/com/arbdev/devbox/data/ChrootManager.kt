@@ -585,7 +585,7 @@ BRIDGE_EOF
 
     /**
      * Membersihkan otomatis file metadata sesi mati di /tmp/.devbox_* (Smart Auto-Clean).
-     * Mencegah penumpukan file zombie dan tabrakan alokasi nomor PTY Linux (/dev/pts/*) saat multi-sesi.
+     * Mencegah penumpukan file zombie dan tabrakan alokasi nomor PTY Linux (/dev/pts/N) saat multi-sesi.
      */
     suspend fun cleanDeadTmpSessions(rootfs: String = activeRootfs): Int = withContext(Dispatchers.IO) {
         val script = """
