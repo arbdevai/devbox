@@ -345,15 +345,15 @@ fun TerminalScreen(
         KeepAliveService.updateNotification(context)
     }
 
-    // Auto-scroll reaktif: mengikuti penambahan baris atau perubahan ukuran layar/keyboard (verticalScrollState.maxValue)
-    LaunchedEffect(
-        verticalScrollState.maxValue,
-        activeSession.buffer.version.intValue,
-        activeSession.buffer.isAltBuffer
-    ) {
-        if (autoScrollEnabled && verticalScrollState.maxValue > 0) {
-            verticalScrollState.scrollTo(verticalScrollState.maxValue)
+    // Auto-scroll reaktif: HANYA scroll saat ada penambahan baris baru (maxValue bertambah),
+    // BUKAN pada setiap pengetikan karakter / in-place rewrite agar TUI Bubbletea smooth bebas jitter
+    var previousMaxValue by remember(activeSession.id) { mutableIntStateOf(0) }
+    LaunchedEffect(verticalScrollState.maxValue) {
+        val currentMax = verticalScrollState.maxValue
+        if (autoScrollEnabled && currentMax > previousMaxValue && currentMax > 0) {
+            verticalScrollState.scrollTo(currentMax)
         }
+        previousMaxValue = currentMax
     }
 
     // Eksekusi initial command jika disediakan
@@ -2156,13 +2156,9 @@ fun TerminalCanvas(
         -fontMetrics.ascent + (charHeight - (fontMetrics.descent - fontMetrics.ascent)) / 2f
     }
 
-    // Trigger recompose saat buffer terminal diperbarui
-    val version = session.buffer.version.intValue
+    // Trigger recompose HANYA jika jumlah baris atau buffer mode berubah (bukan per karakter)
     val isAltBuffer = session.buffer.isAltBuffer
-    val lineCount = remember(version, isAltBuffer) {
-        if (isAltBuffer) session.buffer.maxRows
-        else session.buffer.getLineCount().coerceAtLeast(1)
-    }
+    val lineCount = if (isAltBuffer) session.buffer.maxRows else session.buffer.lineCountState.intValue.coerceAtLeast(1)
     val totalWidthPx = (session.buffer.maxCols * charWidth).toInt().coerceAtLeast(1)
     val totalHeightPx = (lineCount * charHeight).toInt().coerceAtLeast(1)
 
@@ -2289,7 +2285,7 @@ fun TerminalCanvas(
                                         val col = (offset.x / charWidth).toInt().coerceIn(0, session.buffer.maxCols - 1)
                                         val maxLine = (if (isAltBuffer) session.buffer.maxRows else session.buffer.getLineCount()) - 1
                                         val line = (offset.y / charHeight).toInt().coerceIn(0, maxLine.coerceAtLeast(0))
-                                        val historyCount = if (session.buffer.isAltBuffer) 0 else session.buffer.getScrollbackSnapshot().size
+                                        val historyCount = session.buffer.getScrollbackSize()
                                         val activeRow = line - historyCount
 
                                         val detectedUrl = session.buffer.getUrlAt(line, col)
@@ -2318,7 +2314,7 @@ fun TerminalCanvas(
                     val cursorRow = session.buffer.cursorRow
                     val cursorCol = session.buffer.cursorCol
                     val isCursorVisible = session.buffer.isCursorVisible
-                    val historyCount = if (session.buffer.isAltBuffer) 0 else session.buffer.getScrollbackSnapshot().size
+                    val historyCount = session.buffer.getScrollbackSize()
 
                     val selStart = selectionStart
                     val selEnd = selectionEnd

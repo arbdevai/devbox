@@ -564,6 +564,15 @@ BRIDGE_EOF
             if [ -z "${'$'}active_sids" ]; then
                 rm -f '$rootfs'/tmp/.devbox_active_agent* 2>/dev/null || true
             fi
+            # Smart Auto-Clean sisa file zombie jika PID sudah tidak ada di /proc
+            for pf in '$rootfs'/tmp/.devbox_pid_*; do
+                [ -f "${'$'}pf" ] || continue
+                cpid=${'$'}(cat "${'$'}pf" 2>/dev/null)
+                csid=${'$'}(basename "${'$'}pf" | sed 's/\.devbox_pid_//')
+                if [ -n "${'$'}cpid" ] && [ ! -d "/proc/${'$'}cpid" ]; then
+                    rm -f "$rootfs/tmp/.devbox_pid_${'$'}csid" "$rootfs/tmp/.devbox_pts_${'$'}csid" "$rootfs/tmp/.devbox_ws_${'$'}csid" "$rootfs/tmp/.devbox_cwd_${'$'}csid" "$rootfs/tmp/.devbox_active_agent_${'$'}csid" "$rootfs/home/coder/.devbox_pts_${'$'}csid" 2>/dev/null
+                fi
+            done
             echo "${'$'}count"
         """.trimIndent()
         val res = RootExecutor.execute(script)
@@ -572,6 +581,39 @@ BRIDGE_EOF
             AppLogger.i("ChrootManager", "Berhasil membersihkan $count proses agy usang milik DevBox.")
         }
         count
+    }
+
+    /**
+     * Membersihkan otomatis file metadata sesi mati di /tmp/.devbox_* (Smart Auto-Clean).
+     * Mencegah penumpukan file zombie dan tabrakan alokasi nomor PTY Linux (/dev/pts/*) saat multi-sesi.
+     */
+    suspend fun cleanDeadTmpSessions(rootfs: String = activeRootfs): Int = withContext(Dispatchers.IO) {
+        val script = """
+            cleaned=0
+            for pf in '$rootfs'/tmp/.devbox_pid_*; do
+                [ -f "${'$'}pf" ] || continue
+                pid=${'$'}(cat "${'$'}pf" 2>/dev/null)
+                sid=${'$'}(basename "${'$'}pf" | sed 's/\.devbox_pid_//')
+                if [ -n "${'$'}pid" ] && [ ! -d "/proc/${'$'}pid" ]; then
+                    rm -f "$rootfs/tmp/.devbox_pid_${'$'}sid" "$rootfs/tmp/.devbox_pts_${'$'}sid" "$rootfs/tmp/.devbox_ws_${'$'}sid" "$rootfs/tmp/.devbox_cwd_${'$'}sid" "$rootfs/tmp/.devbox_active_agent_${'$'}sid" "$rootfs/home/coder/.devbox_pts_${'$'}sid" 2>/dev/null
+                    cleaned=${'$'}((cleaned + 1))
+                fi
+            done
+            for ptsf in '$rootfs'/tmp/.devbox_pts_*; do
+                [ -f "${'$'}ptsf" ] || continue
+                sid=${'$'}(basename "${'$'}ptsf" | sed 's/\.devbox_pts_//')
+                if [ ! -f "$rootfs/tmp/.devbox_pid_${'$'}sid" ]; then
+                    rm -f "${'$'}ptsf" "$rootfs/tmp/.devbox_ws_${'$'}sid" "$rootfs/tmp/.devbox_cwd_${'$'}sid" 2>/dev/null
+                fi
+            done
+            echo "${'$'}cleaned"
+        """.trimIndent()
+        val res = RootExecutor.execute(script, silent = true)
+        val cleanedCount = res.getOrNull()?.stdout?.trim()?.toIntOrNull() ?: 0
+        if (cleanedCount > 0) {
+            AppLogger.i("ChrootManager", "Smart Auto-Clean: Berhasil membersihkan $cleanedCount sesi mati di /tmp/.")
+        }
+        cleanedCount
     }
 
     /**

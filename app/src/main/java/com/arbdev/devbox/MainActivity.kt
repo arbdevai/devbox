@@ -42,6 +42,7 @@ class MainActivity : ComponentActivity() {
         lifecycleScope.launch(Dispatchers.IO) {
             UpdateManager.cleanupOldApks(applicationContext)
             ChrootManager.cleanStaleAgyLocks()
+            ChrootManager.cleanDeadTmpSessions()
             if (!com.arbdev.devbox.data.RootExecutor.hasAppliedSystemTweaks) {
                 com.arbdev.devbox.data.RootExecutor.hasAppliedSystemTweaks = true
                 try {

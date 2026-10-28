@@ -555,6 +555,10 @@ object TerminalSessionManager {
     }
 
     fun createNewSession(customName: String? = null): NativeTerminalSession {
+        // Bersihkan sesi mati di /tmp agar alokasi PTY tidak bertabrakan saat multi-sesi
+        sessionScope.launch(Dispatchers.IO) {
+            com.arbdev.devbox.data.ChrootManager.cleanDeadTmpSessions()
+        }
         val sessionNumber = sessions.size + 1
         val name = customName ?: "Sesi $sessionNumber"
         val newSession = NativeTerminalSession(initialName = name)
@@ -575,6 +579,9 @@ object TerminalSessionManager {
             when {
                 index < current -> activeIndex.intValue = current - 1
                 index == current -> activeIndex.intValue = current.coerceAtMost(sessions.size - 1)
+            }
+            sessionScope.launch(Dispatchers.IO) {
+                com.arbdev.devbox.data.ChrootManager.cleanDeadTmpSessions()
             }
         }
     }
