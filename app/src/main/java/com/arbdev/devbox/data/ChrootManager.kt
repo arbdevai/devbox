@@ -585,16 +585,64 @@ BRIDGE_EOF
 
     /**
      * Membersihkan otomatis file metadata sesi mati di /tmp/.devbox_* (Smart Auto-Clean).
-     * Mencegah penumpukan file zombie dan tabrakan alokasi nomor PTY Linux (/dev/pts/N) saat multi-sesi.
+     * Mencegah penumpukan file zombie, tabrakan alokasi nomor PTY Linux (/dev/pts/N),
+     * dan otomatis mereap proses shell yatim piatu sisa update APK yang pipenya sudah putus.
      */
-    suspend fun cleanDeadTmpSessions(rootfs: String = activeRootfs): Int = withContext(Dispatchers.IO) {
+    suspend fun cleanDeadTmpSessions(
+        activeSessionIds: List<String> = emptyList(),
+        activePids: List<Long> = emptyList(),
+        rootfs: String = activeRootfs
+    ): Int = withContext(Dispatchers.IO) {
+        val activeSidsStr = activeSessionIds.joinToString(" ")
+        val activePidsStr = activePids.filter { it > 0 }.joinToString(" ")
         val script = """
             cleaned=0
+            active_sids="$activeSidsStr"
+            active_pids="$activePidsStr"
+
             for pf in '$rootfs'/tmp/.devbox_pid_*; do
                 [ -f "${'$'}pf" ] || continue
                 pid=${'$'}(cat "${'$'}pf" 2>/dev/null)
                 sid=${'$'}(basename "${'$'}pf" | sed 's/\.devbox_pid_//')
-                if [ -n "${'$'}pid" ] && [ ! -d "/proc/${'$'}pid" ]; then
+                is_dead=0
+
+                if [ -z "${'$'}pid" ] || [ ! -d "/proc/${'$'}pid" ]; then
+                    is_dead=1
+                else
+                    if [ -n "${'$'}active_sids" ]; then
+                        is_active_sid=0
+                        for asid in ${'$'}active_sids; do
+                            if [ "${'$'}asid" = "${'$'}sid" ]; then
+                                is_active_sid=1
+                                break
+                            fi
+                        done
+                        if [ "${'$'}is_active_sid" -eq 0 ]; then
+                            ppid=${'$'}(awk '/^PPid:/{print ${'$'}2}' "/proc/${'$'}pid/status" 2>/dev/null || echo 0)
+                            if [ "${'$'}ppid" -le 1 ] || [ ! -d "/proc/${'$'}ppid" ]; then
+                                kill -9 "${'$'}pid" 2>/dev/null || true
+                                is_dead=1
+                            else
+                                is_active_pid=0
+                                for ap in ${'$'}active_pids; do
+                                    if [ "${'$'}ap" -eq "${'$'}ppid" ] 2>/dev/null || [ "${'$'}ap" -eq "${'$'}pid" ] 2>/dev/null; then
+                                        is_active_pid=1
+                                        break
+                                    fi
+                                done
+                                if [ "${'$'}is_active_pid" -eq 0 ]; then
+                                    pppid=${'$'}(awk '/^PPid:/{print ${'$'}2}' "/proc/${'$'}ppid/status" 2>/dev/null || echo 0)
+                                    if [ "${'$'}pppid" -le 1 ] || [ ! -d "/proc/${'$'}pppid" ]; then
+                                        kill -9 "${'$'}pid" "${'$'}ppid" 2>/dev/null || true
+                                        is_dead=1
+                                    fi
+                                fi
+                            fi
+                        fi
+                    fi
+                fi
+
+                if [ "${'$'}is_dead" -eq 1 ]; then
                     rm -f "$rootfs/tmp/.devbox_pid_${'$'}sid" "$rootfs/tmp/.devbox_pts_${'$'}sid" "$rootfs/tmp/.devbox_ws_${'$'}sid" "$rootfs/tmp/.devbox_cwd_${'$'}sid" "$rootfs/tmp/.devbox_active_agent_${'$'}sid" "$rootfs/home/coder/.devbox_pts_${'$'}sid" 2>/dev/null
                     cleaned=${'$'}((cleaned + 1))
                 fi
@@ -603,7 +651,7 @@ BRIDGE_EOF
                 [ -f "${'$'}ptsf" ] || continue
                 sid=${'$'}(basename "${'$'}ptsf" | sed 's/\.devbox_pts_//')
                 if [ ! -f "$rootfs/tmp/.devbox_pid_${'$'}sid" ]; then
-                    rm -f "${'$'}ptsf" "$rootfs/tmp/.devbox_ws_${'$'}sid" "$rootfs/tmp/.devbox_cwd_${'$'}sid" 2>/dev/null
+                    rm -f "${'$'}ptsf" "$rootfs/tmp/.devbox_ws_${'$'}sid" "$rootfs/tmp/.devbox_cwd_${'$'}sid" "$rootfs/tmp/.devbox_active_agent_${'$'}sid" 2>/dev/null
                 fi
             done
             echo "${'$'}cleaned"

@@ -58,6 +58,99 @@ data class TerminalCell(
 }
 
 /**
+ * Zero-Allocation Ring Buffer untuk riwayat scrollback terminal.
+ * Mendaur ulang baris terlama saat kapasitas penuh tanpa alokasi objek baru pada heap GC Android.
+ */
+class TerminalScrollbackBuffer(val capacity: Int = 2000) : Iterable<Array<TerminalCell>> {
+    private val buffer = arrayOfNulls<Array<TerminalCell>>(capacity)
+    private var head = 0
+    var size = 0
+        private set
+
+    fun push(source: Array<TerminalCell>, cols: Int) {
+        if (size < capacity) {
+            val targetLine = Array(cols) { col ->
+                TerminalCell().apply { if (col < source.size) copyFrom(source[col]) }
+            }
+            val insertIdx = (head + size) % capacity
+            buffer[insertIdx] = targetLine
+            size++
+        } else {
+            // RECYCLE: Ambil baris terlama langsung dari head dan salin isi baru ke dalamnya (Nol alokasi objek!)
+            val targetLine = buffer[head]
+            if (targetLine != null && targetLine.size == cols) {
+                for (c in 0 until cols) {
+                    if (c < source.size) {
+                        targetLine[c].copyFrom(source[c])
+                    } else {
+                        targetLine[c].reset()
+                    }
+                }
+            } else {
+                buffer[head] = Array(cols) { col ->
+                    TerminalCell().apply { if (col < source.size) copyFrom(source[col]) }
+                }
+            }
+            head = (head + 1) % capacity
+        }
+    }
+
+    fun takeLast(count: Int): List<Array<TerminalCell>> {
+        val safeCount = count.coerceIn(0, size)
+        val result = ArrayList<Array<TerminalCell>>(safeCount)
+        val startIdx = size - safeCount
+        for (i in 0 until safeCount) {
+            get(startIdx + i)?.let { result.add(it) }
+            val bufIdx = (head + startIdx + i) % capacity
+            buffer[bufIdx] = null
+        }
+        size -= safeCount
+        return result
+    }
+
+    operator fun get(index: Int): Array<TerminalCell>? {
+        if (index < 0 || index >= size) return null
+        return buffer[(head + index) % capacity]
+    }
+
+    fun getOrNull(index: Int): Array<TerminalCell>? = get(index)
+
+    fun isNotEmpty(): Boolean = size > 0
+    fun isEmpty(): Boolean = size == 0
+
+    fun toList(): List<Array<TerminalCell>> {
+        val list = ArrayList<Array<TerminalCell>>(size)
+        for (i in 0 until size) {
+            get(i)?.let { list.add(it) }
+        }
+        return list
+    }
+
+    override fun iterator(): Iterator<Array<TerminalCell>> = object : Iterator<Array<TerminalCell>> {
+        private var curr = 0
+        override fun hasNext(): Boolean = curr < size
+        override fun next(): Array<TerminalCell> {
+            val line = get(curr) ?: throw NoSuchElementException()
+            curr++
+            return line
+        }
+    }
+
+    fun clear() {
+        head = 0
+        size = 0
+        buffer.fill(null)
+    }
+
+    inline fun forEach(action: (Array<TerminalCell>) -> Unit) {
+        for (i in 0 until size) {
+            val line = get(i)
+            if (line != null) action(line)
+        }
+    }
+}
+
+/**
  * Virtual 2D Grid Terminal Buffer & VT100 / ANSI Escape Sequence Parser.
  * Mendukung ANSI 16-color, 256-color, 24-bit TrueColor, kursor baris-kolom ([6G, [H, dll.),
  * Alternate Screen Buffer ([?1049h), dan rendering langsung ke Compose AnnotatedString.
@@ -71,8 +164,7 @@ class TerminalGridBuffer(
     // 2D Matrix Grid: baris x kolom
     private var grid = Array(maxRows) { Array(maxCols) { TerminalCell() } }
     private var altGrid = Array(maxRows) { Array(maxCols) { TerminalCell() } }
-    private val scrollback = mutableListOf<Array<TerminalCell>>()
-    private val maxScrollback = 2000
+    private val scrollback = TerminalScrollbackBuffer(2000)
 
     var cursorRow: Int = 0
         private set
@@ -226,13 +318,7 @@ class TerminalGridBuffer(
                 // Geser baris di atas kursor ke scrollback agar kursor dan prompt tetap berada di layar aktif
                 val shift = (refCursorRow - (r - 1)).coerceIn(0, oldGridRows - r)
                 for (row in 0 until shift) {
-                    val savedLine = Array(oldGridCols) { col ->
-                        TerminalCell().apply { copyFrom(grid[row][col]) }
-                    }
-                    scrollback.add(savedLine)
-                    if (scrollback.size > maxScrollback) {
-                        scrollback.removeAt(0)
-                    }
+                    scrollback.push(grid[row], oldGridCols)
                 }
                 for (row in 0 until r) {
                     val srcRow = row + shift
@@ -247,8 +333,9 @@ class TerminalGridBuffer(
                 // Layar membesar (misal keyboard virtual ditutup):
                 // Tarik kembali baris dari scrollback untuk mengisi ruang baris atas yang bertambah
                 val unwind = if (!isAltBuffer) (r - oldGridRows).coerceAtMost(scrollback.size) else 0
-                for (row in 0 until unwind) {
-                    val pulledLine = scrollback.removeAt(scrollback.size - (unwind - row))
+                val pulledLines = scrollback.takeLast(unwind)
+                for (row in 0 until pulledLines.size) {
+                    val pulledLine = pulledLines[row]
                     for (col in 0 until maxCols.coerceAtMost(pulledLine.size)) {
                         newGrid[row][col].copyFrom(pulledLine[col])
                     }
@@ -631,13 +718,7 @@ class TerminalGridBuffer(
         val top = scrollTop.coerceIn(0, rowsLimit - 1)
         val bottom = scrollBottom.coerceIn(top, rowsLimit - 1)
         if (!isAltBuffer && top == 0 && bottom == rowsLimit - 1) {
-            val savedLine = Array(colsLimit) { col ->
-                TerminalCell().apply { copyFrom(grid[0][col]) }
-            }
-            scrollback.add(savedLine)
-            if (scrollback.size > maxScrollback) {
-                scrollback.removeAt(0)
-            }
+            scrollback.push(grid[0], colsLimit)
         }
         for (r in top until bottom) {
             for (c in 0 until colsLimit) {
