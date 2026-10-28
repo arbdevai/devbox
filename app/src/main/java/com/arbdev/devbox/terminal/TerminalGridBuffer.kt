@@ -1369,7 +1369,8 @@ class TerminalGridBuffer(
                     val maxScrollbackRender = 300
                     val startIdx = (scrollback.size - maxScrollbackRender).coerceAtLeast(0)
                     for (idx in startIdx until scrollback.size) {
-                        renderLine(this, scrollback[idx], -1, -1)
+                        val line = scrollback[idx] ?: continue
+                        renderLine(this, line, -1, -1)
                         append('\n')
                     }
                 }
