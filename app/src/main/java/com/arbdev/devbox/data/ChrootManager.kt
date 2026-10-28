@@ -1123,14 +1123,11 @@ BRIDGE_EOF
             mkdir -p "${'$'}rf/home/coder/storage" 2>/dev/null || true
             ln -sf /mnt/sdcard/Download "${'$'}rf/home/coder/storage/downloads" 2>/dev/null || true
             ln -sf /mnt/sdcard "${'$'}rf/home/coder/storage/shared" 2>/dev/null || true
-            chown -h 1000:1000 "${'$'}rf/home/coder/storage"/* 2>/dev/null || true
+            find "${'$'}rf/home/coder/storage" -mindepth 1 -maxdepth 1 -exec chown -h 1000:1000 {} + 2>/dev/null || true
             chown 1000:1000 "${'$'}rf/home/coder/storage" 2>/dev/null || true
 
             # 9. Konfigurasi Git Safe Directory otomatis (Cegah dubious ownership error pada prompt)
             mkdir -p "${'$'}rf/etc" 2>/dev/null || true
-            if [ -f "${'$'}rf/home/coder/.gitconfig" ]; then
-                sed -i 's/directory = \\*/directory = */g' "${'$'}rf/home/coder/.gitconfig" 2>/dev/null || true
-            fi
             if [ -x "${'$'}rf/usr/bin/git" ]; then
                 chroot "${'$'}rf" /usr/bin/git config --system --add safe.directory "*" 2>/dev/null || true
                 if [ -d "${'$'}rf/home/coder" ]; then
@@ -1256,7 +1253,7 @@ agy() {
                 local ppid
                 ppid=${'$'}(awk '/^PPid:/{print ${'$'}2}' "${'$'}p/status" 2>/dev/null || echo 0)
                 if [[ "${'$'}ppid" -le 1 ]] && grep -s -a -q "DEVBOX_SESSION_ID=${'$'}{DEVBOX_SESSION_ID}" "${'$'}p/environ" 2>/dev/null; then
-                    kill -9 "${'$'}{p##*/}" 2>/dev/null || true
+                    kill -9 "${'$'}(basename "${'$'}p")" 2>/dev/null || true
                 fi
             fi
         done
