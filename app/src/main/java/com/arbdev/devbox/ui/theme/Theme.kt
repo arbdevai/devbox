@@ -1,8 +1,25 @@
 package com.arbdev.devbox.ui.theme
 
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.background
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.composed
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.unit.IntSize
 
 private val DarkColorScheme = darkColorScheme(
     primary = DevPrimary,
@@ -48,29 +65,29 @@ fun DevBoxTheme(
  * Modern Skeleton Shimmer Effect murni Jetpack Compose (Material 3 Expressive).
  * Digunakan sebagai pengganti loading spinner bulat sesuai standar android-compose-builder skill.
  */
-fun androidx.compose.ui.Modifier.shimmerEffect(): androidx.compose.ui.Modifier = androidx.compose.ui.composed {
-    var size by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(androidx.compose.ui.unit.IntSize.Zero) }
-    val transition = androidx.compose.animation.core.rememberInfiniteTransition(label = "shimmerTransition")
+fun Modifier.shimmerEffect(): Modifier = composed {
+    var size by remember { mutableStateOf(IntSize.Zero) }
+    val transition = rememberInfiniteTransition(label = "shimmerTransition")
     val startOffsetX by transition.animateFloat(
         initialValue = -2 * size.width.toFloat(),
         targetValue = 2 * size.width.toFloat(),
-        animationSpec = androidx.compose.animation.core.infiniteRepeatable(
-            animation = androidx.compose.animation.core.tween(1200, easing = androidx.compose.animation.core.LinearEasing),
-            repeatMode = androidx.compose.animation.core.RepeatMode.Restart
+        animationSpec = infiniteRepeatable(
+            animation = tween(1200, easing = LinearEasing),
+            repeatMode = RepeatMode.Restart
         ),
         label = "shimmerOffset"
     )
-    androidx.compose.foundation.background(
-        brush = androidx.compose.ui.graphics.Brush.linearGradient(
+    background(
+        brush = Brush.linearGradient(
             colors = listOf(
                 MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
                 MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.15f),
                 MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
             ),
-            start = androidx.compose.ui.geometry.Offset(startOffsetX, 0f),
-            end = androidx.compose.ui.geometry.Offset(startOffsetX + size.width.toFloat(), size.height.toFloat())
+            start = Offset(startOffsetX, 0f),
+            end = Offset(startOffsetX + size.width.toFloat(), size.height.toFloat())
         )
     ).then(
-        androidx.compose.ui.layout.onGloballyPositioned { size = it.size }
+        onGloballyPositioned { size = it.size }
     )
 }
