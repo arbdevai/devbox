@@ -1,13 +1,16 @@
 package com.arbdev.devbox.ui.screens
 
 import android.annotation.SuppressLint
+import android.app.Activity
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
+import android.content.pm.ActivityInfo
 import android.graphics.Bitmap
 import android.net.Uri
 import android.os.Build
+import android.view.View
 import android.view.ViewGroup
 import android.webkit.CookieManager
 import android.webkit.WebChromeClient
@@ -154,7 +157,8 @@ import java.net.URLEncoder
 import java.util.UUID
 
 const val DEVBOX_HOME_URL = "devbox:home"
-const val CHROME_DESKTOP_UA = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36"
+const val CHROME_MOBILE_UA = "Mozilla/5.0 (Linux; Android 14; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Mobile Safari/537.36"
+const val CHROME_DESKTOP_UA = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36"
 
 fun isPortListening(port: Int): Boolean {
     val hexPort = String.format("%04X", port).uppercase()
@@ -1079,13 +1083,34 @@ fun WebPreviewScreen() {
     var findMatchOrdinal by remember { mutableIntStateOf(0) }
     var findMatchCount by remember { mutableIntStateOf(0) }
 
+    // Fullscreen Custom View (HTML5 Video / YouTube Fullscreen)
+    var customView by remember { mutableStateOf<View?>(null) }
+    var customViewCallback by remember { mutableStateOf<WebChromeClient.CustomViewCallback?>(null) }
+
     LaunchedEffect(currentTab.id) {
         urlInput = if (currentTab.url == DEVBOX_HOME_URL) "" else currentTab.url
         canBack = currentTab.webView?.canGoBack() == true
         canForward = currentTab.webView?.canGoForward() == true
     }
 
-    BackHandler(enabled = isFindInPageActive || canBack || currentTab.url != DEVBOX_HOME_URL) {
+    val canBrowserHandleBack = customView != null ||
+            showTabSwitcher ||
+            isFindInPageActive ||
+            (currentTab.webView?.canGoBack() == true) ||
+            (currentTab.url != DEVBOX_HOME_URL)
+
+    BackHandler(enabled = canBrowserHandleBack) {
+        if (customView != null) {
+            customViewCallback?.onCustomViewHidden()
+            customView = null
+            customViewCallback = null
+            (context as? Activity)?.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
+            return@BackHandler
+        }
+        if (showTabSwitcher) {
+            showTabSwitcher = false
+            return@BackHandler
+        }
         if (isFindInPageActive) {
             isFindInPageActive = false
             currentTab.webView?.clearMatches()
@@ -1153,11 +1178,23 @@ fun WebPreviewScreen() {
         WebPreviewStateManager.save(context)
     }
 
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(DevBackground)
-    ) {
+    if (customView != null) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(Color.Black)
+        ) {
+            AndroidView(
+                factory = { customView!! },
+                modifier = Modifier.fillMaxSize()
+            )
+        }
+    } else {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(DevBackground)
+        ) {
         // Modern Chrome / Brave Omnibox Header Bar
         Row(
             modifier = Modifier
@@ -1350,17 +1387,7 @@ fun WebPreviewScreen() {
                                 }
                                 Switch(
                                     checked = currentTab.isDesktopMode,
-                                    onCheckedChange = { checked ->
-                                        currentTab.isDesktopMode = checked
-                                        currentTab.webView?.settings?.let { s ->
-                                            s.userAgentString = if (checked) CHROME_DESKTOP_UA else null
-                                            s.useWideViewPort = true
-                                            s.loadWithOverviewMode = true
-                                        }
-                                        currentTab.webView?.reload()
-                                        WebPreviewStateManager.save(context)
-                                        showBrowserMenu = false
-                                    },
+                                    onCheckedChange = null,
                                     colors = SwitchDefaults.colors(
                                         checkedThumbColor = DevPrimary,
                                         checkedTrackColor = DevPrimaryContainer
@@ -1371,12 +1398,13 @@ fun WebPreviewScreen() {
                         onClick = {
                             val next = !currentTab.isDesktopMode
                             currentTab.isDesktopMode = next
-                            currentTab.webView?.settings?.let { s ->
-                                s.userAgentString = if (next) CHROME_DESKTOP_UA else null
-                                s.useWideViewPort = true
-                                s.loadWithOverviewMode = true
+                            currentTab.webView?.let { wv ->
+                                wv.settings.userAgentString = if (next) CHROME_DESKTOP_UA else CHROME_MOBILE_UA
+                                wv.settings.useWideViewPort = true
+                                wv.settings.loadWithOverviewMode = true
+                                wv.settings.cacheMode = WebSettings.LOAD_NO_CACHE
+                                wv.reload()
                             }
-                            currentTab.webView?.reload()
                             WebPreviewStateManager.save(context)
                             showBrowserMenu = false
                         }
@@ -1620,9 +1648,7 @@ fun WebPreviewScreen() {
                                         builtInZoomControls = true
                                         displayZoomControls = false
 
-                                        if (currentTab.isDesktopMode) {
-                                            userAgentString = CHROME_DESKTOP_UA
-                                        }
+                                        userAgentString = if (currentTab.isDesktopMode) CHROME_DESKTOP_UA else CHROME_MOBILE_UA
 
                                         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                                             @Suppress("DEPRECATION")
@@ -1651,6 +1677,19 @@ fun WebPreviewScreen() {
                                                 currentTab.title = shortTitle
                                                 WebPreviewStateManager.save(context)
                                             }
+                                        }
+
+                                        override fun onShowCustomView(view: View?, callback: CustomViewCallback?) {
+                                            customView = view
+                                            customViewCallback = callback
+                                            (context as? Activity)?.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
+                                        }
+
+                                        override fun onHideCustomView() {
+                                            customViewCallback?.onCustomViewHidden()
+                                            customView = null
+                                            customViewCallback = null
+                                            (context as? Activity)?.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
                                         }
                                     }
 
@@ -1688,6 +1727,12 @@ fun WebPreviewScreen() {
                                                     currentTab.url = it
                                                     WebPreviewStateManager.save(context)
                                                 }
+                                            }
+                                            if (currentTab.isDesktopMode) {
+                                                view?.evaluateJavascript(
+                                                    "var meta = document.querySelector('meta[name=\"viewport\"]'); if (meta) { meta.setAttribute('content', 'width=1280, initial-scale=0.35'); }",
+                                                    null
+                                                )
                                             }
                                         }
 
@@ -1740,6 +1785,7 @@ fun WebPreviewScreen() {
             }
         }
     }
+}
 
     if (showTabSwitcher) {
         TabSwitcherSheet(

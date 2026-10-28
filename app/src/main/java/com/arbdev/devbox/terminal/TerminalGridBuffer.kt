@@ -105,6 +105,8 @@ class TerminalGridBuffer(
         private set
     var isAutoWrap: Boolean = true
         private set
+    var isInsertMode: Boolean = false
+        private set
     @Volatile
     var isSynchronizedUpdate: Boolean = false
         private set
@@ -185,6 +187,7 @@ class TerminalGridBuffer(
             isSgrMouseMode = false
             isApplicationCursorKeys = false
             isAutoWrap = true
+            isInsertMode = false
             isSynchronizedUpdate = false
             wrapPending = false
             scrollTop = 0
@@ -569,6 +572,15 @@ class TerminalGridBuffer(
 
         val safeRow = cursorRow.coerceIn(0, rowsLimit - 1)
         val safeCol = cursorCol.coerceIn(0, colsLimit - 1)
+
+        // ECMA-48 IRM (Insert Mode): jika aktif, geser isi sel di sebelah kanan ke kanan
+        if (isInsertMode && safeCol < colsLimit - charWidth) {
+            for (c in colsLimit - 1 downTo safeCol + charWidth) {
+                target[safeRow][c].copyFrom(target[safeRow][c - charWidth])
+            }
+            target[safeRow][safeCol].reset()
+        }
+
         val cell = target[safeRow][safeCol]
         cell.char = ch
         cell.extraChar = extra
@@ -892,6 +904,12 @@ class TerminalGridBuffer(
                             }
                         }
                     }
+                } else {
+                    for (p in params) {
+                        when (p) {
+                            4 -> isInsertMode = true // ECMA-48 IRM (Insert Mode)
+                        }
+                    }
                 }
             }
 
@@ -928,6 +946,12 @@ class TerminalGridBuffer(
                                 isSynchronizedUpdate = false
                                 notifyUpdate(forceImmediate = true)
                             }
+                        }
+                    }
+                } else {
+                    for (p in params) {
+                        when (p) {
+                            4 -> isInsertMode = false // ECMA-48 IRM (Replace Mode)
                         }
                     }
                 }
@@ -1055,6 +1079,7 @@ class TerminalGridBuffer(
         currentHyperlinkUrl = null
         isBracketedPasteMode = false
         isAutoWrap = true
+        isInsertMode = false
         wrapPending = false
         resetSgr()
     }

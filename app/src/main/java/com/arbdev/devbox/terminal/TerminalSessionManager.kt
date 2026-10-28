@@ -171,8 +171,13 @@ class NativeTerminalSession(
 
                 // Menggunakan /usr/bin/script untuk mengalokasikan PTY sejati tanpa JNI,
                 // dan menjalankan login shell interaktif dengan privilege root dan environment user coder.
-                val initRows = if (lastRows > 0) lastRows else buffer.maxRows
-                val initCols = if (lastCols > 0) lastCols else buffer.maxCols
+                val knownCols = TerminalSessionManager.sessions.firstOrNull { it.lastCols > 0 }?.lastCols ?: 0
+                val knownRows = TerminalSessionManager.sessions.firstOrNull { it.lastRows > 0 }?.lastRows ?: 0
+                val initRows = if (lastRows > 0) lastRows else if (knownRows > 0) knownRows else buffer.maxRows
+                val initCols = if (lastCols > 0) lastCols else if (knownCols > 0) knownCols else buffer.maxCols
+                lastRows = initRows
+                lastCols = initCols
+                buffer.resize(initCols, initRows)
 
                 val chrootCmd = "mkdir -p '$targetRootfs/dev' '$targetRootfs/dev/pts' '$targetRootfs/proc' '$targetRootfs/sys' '$targetRootfs/mnt/sdcard' '$targetRootfs/tmp' 2>/dev/null; " +
                         "chmod 1777 '$targetRootfs/tmp' 2>/dev/null; " +
