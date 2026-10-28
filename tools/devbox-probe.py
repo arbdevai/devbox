@@ -268,16 +268,245 @@ def simulate_bubbletea_render():
     sys.stdout.flush()
     print(f"\n{CLR_GREEN}Jika 3 baris di atas tertimpa sempurna tanpa ada sisa baris lama, terminal bekerja dengan benar.{CLR_RESET}\n")
 
+def daemon_loop():
+    """Loop background daemon yang otomatis memantau semua sesi aktif dan menulis log."""
+    log_file = "/tmp/devbox-probe.log"
+    pid_file = "/tmp/devbox-probe.pid"
+
+    # Simpan PID daemon
+    with open(pid_file, "w") as f:
+        f.write(str(os.getpid()))
+
+    with open(log_file, "a") as log:
+        log.write(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] [DAEMON_START] devbox-probe background watcher aktif (PID: {os.getpid()})\n")
+        log.flush()
+
+        tracked_sessions = {} # sid -> {pts, fd, last_mtime, last_ws, last_k_rows, last_k_cols}
+
+        try:
+            while True:
+                active_sessions = find_active_sessions()
+                active_sids = {s['id']: s for s in active_sessions if os.path.exists(s.get('pts', ''))}
+
+                # Bersihkan sesi yang sudah mati
+                for sid in list(tracked_sessions.keys()):
+                    if sid not in active_sids:
+                        try:
+                            os.close(tracked_sessions[sid]['fd'])
+                        except Exception:
+                            pass
+                        log.write(f"[{time.strftime('%H:%M:%S')}] [SESSION_EXIT] Sesi {sid[:8]} ditutup.\n")
+                        log.flush()
+                        del tracked_sessions[sid]
+
+                # Daftarkan sesi baru
+                for sid, s in active_sids.items():
+                    if sid not in tracked_sessions:
+                        try:
+                            fd = os.open(s['pts'], os.O_RDONLY | os.O_NOCTTY)
+                            tracked_sessions[sid] = {
+                                'pts': s['pts'],
+                                'fd': fd,
+                                'last_mtime': 0,
+                                'last_ws': '',
+                                'last_k_rows': -1,
+                                'last_k_cols': -1,
+                                'has_agy': False
+                            }
+                            log.write(f"[{time.strftime('%H:%M:%S')}] [SESSION_NEW] Sesi {sid[:8]} terhubung pada {s['pts']}\n")
+                            log.flush()
+                        except Exception:
+                            pass
+
+                # Monitor setiap sesi yang terdaftar
+                for sid, data in tracked_sessions.items():
+                    ws_file = f"/tmp/.devbox_ws_{sid}"
+                    fd = data['fd']
+
+                    # 1. Cek perubahan file UI
+                    if os.path.exists(ws_file):
+                        try:
+                            mtime = os.path.getmtime(ws_file)
+                            if mtime != data['last_mtime']:
+                                data['last_mtime'] = mtime
+                                with open(ws_file, "r") as f:
+                                    ws_content = f.read().strip()
+                                if ws_content != data['last_ws']:
+                                    t0 = time.time()
+                                    data['last_ws'] = ws_content
+                                    # Cek sampai tersinkronisasi di kernel
+                                    settled = False
+                                    while (time.time() - t0) < 1.5:
+                                        kr, kc = get_terminal_size(fd)
+                                        if ws_content.startswith("rows"):
+                                            parts = ws_content.split()
+                                            tr, tc = int(parts[1]), int(parts[3])
+                                            if kr == tr and kc == tc:
+                                                lat_ms = (time.time() - t0) * 1000
+                                                log.write(f"[{time.strftime('%H:%M:%S')}] [RESIZE_SYNC] Sesi {sid[:8]} ({data['pts']}): UI={ws_content} -> Kernel {kr}x{kc} sinkron dalam {lat_ms:.1f}ms\n")
+                                                log.flush()
+                                                settled = True
+                                                data['last_k_rows'], data['last_k_cols'] = kr, kc
+                                                break
+                                        time.sleep(0.01)
+                                    if not settled:
+                                        kr, kc = get_terminal_size(fd)
+                                        log.write(f"[{time.strftime('%H:%M:%S')}] [RESIZE_DESYNC] Sesi {sid[:8]}: UI={ws_content} vs Kernel={kr}x{kc} (Belum sinkron setelah 1.5s)\n")
+                                        log.flush()
+                        except Exception:
+                            pass
+
+                    # 2. Cek ukuran kernel mandiri
+                    kr, kc = get_terminal_size(fd)
+                    if (kr != data['last_k_rows'] or kc != data['last_k_cols']) and data['last_k_rows'] != -1:
+                        log.write(f"[{time.strftime('%H:%M:%S')}] [KERNEL_RESIZE] Sesi {sid[:8]}: PTY berubah {data['last_k_rows']}x{data['last_k_cols']} -> {kr}x{kc}\n")
+                        log.flush()
+                    data['last_k_rows'], data['last_k_cols'] = kr, kc
+
+                    # 3. Cek apakah ada agy aktif di sesi ini
+                    pid_file = f"/tmp/.devbox_pid_{sid}"
+                    try:
+                        with open(pid_file, "r") as pf:
+                            spid = pf.read().strip()
+                        children = subprocess.check_output(f"pgrep -P {spid} 2>/dev/null || true", shell=True, text=True).split()
+                        has_agy = False
+                        for c in children:
+                            comm = subprocess.check_output(f"cat /proc/{c}/comm 2>/dev/null || true", shell=True, text=True).strip()
+                            if comm in ("agy", "antigravity"):
+                                has_agy = True
+                                break
+                        if has_agy and not data['has_agy']:
+                            log.write(f"[{time.strftime('%H:%M:%S')}] [AGY_ATTACH] Antigravity CLI (agy) aktif di sesi {sid[:8]} ({data['pts']}) - Window {kr}x{kc}\n")
+                            log.flush()
+                        elif not has_agy and data['has_agy']:
+                            log.write(f"[{time.strftime('%H:%M:%S')}] [AGY_DETACH] Antigravity CLI selesai di sesi {sid[:8]}\n")
+                            log.flush()
+                        data['has_agy'] = has_agy
+                    except Exception:
+                        pass
+
+                time.sleep(0.2)
+        except KeyboardInterrupt:
+            log.write(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] [DAEMON_STOP] devbox-probe dihentikan.\n")
+            log.flush()
+        finally:
+            for d in tracked_sessions.values():
+                try:
+                    os.close(d['fd'])
+                except Exception:
+                    pass
+            if os.path.exists(pid_file):
+                try:
+                    os.remove(pid_file)
+                except Exception:
+                    pass
+
+def start_daemon():
+    """Meluncurkan daemon di latar belakang jika belum berjalan."""
+    pid_file = "/tmp/devbox-probe.pid"
+    if os.path.exists(pid_file):
+        try:
+            with open(pid_file, "r") as f:
+                old_pid = int(f.read().strip())
+            # Cek apakah proses masih hidup
+            os.kill(old_pid, 0)
+            print(f"{CLR_GREEN}Daemon devbox-probe sudah berjalan di background (PID: {old_pid}).{CLR_RESET}")
+            return
+        except Exception:
+            pass
+
+    # Double fork
+    try:
+        pid = os.fork()
+        if pid > 0:
+            sys.exit(0)
+    except OSError as e:
+        sys.exit(1)
+
+    os.setsid()
+    try:
+        pid = os.fork()
+        if pid > 0:
+            sys.exit(0)
+    except OSError as e:
+        sys.exit(1)
+
+    # Tutup fd standar
+    sys.stdout.flush()
+    sys.stderr.flush()
+    with open('/dev/null', 'r') as devnull_r, open('/dev/null', 'a+') as devnull_w:
+        os.dup2(devnull_r.fileno(), sys.stdin.fileno())
+        os.dup2(devnull_w.fileno(), sys.stdout.fileno())
+        os.dup2(devnull_w.fileno(), sys.stderr.fileno())
+
+    daemon_loop()
+
+def show_status():
+    """Menampilkan status daemon dan log terakhir."""
+    pid_file = "/tmp/devbox-probe.pid"
+    log_file = "/tmp/devbox-probe.log"
+    print(f"\n{CLR_GREEN}=== STATUS DEVBOX BACKGROUND PROBE DAEMON ==={CLR_RESET}")
+    running = False
+    if os.path.exists(pid_file):
+        try:
+            with open(pid_file, "r") as f:
+                pid = int(f.read().strip())
+            os.kill(pid, 0)
+            print(f"Status Daemon : {CLR_GREEN}BERJALAN (PID {pid}){CLR_RESET}")
+            running = True
+        except Exception:
+            print(f"Status Daemon : {CLR_YELLOW}MATI (Stale PID file){CLR_RESET}")
+    else:
+        print(f"Status Daemon : {CLR_GRAY}BELUM BERJALAN{CLR_RESET}")
+
+    if os.path.exists(log_file):
+        print(f"\n{CLR_BOLD}Log Terakhir ({log_file}):{CLR_RESET}")
+        try:
+            with open(log_file, "r") as f:
+                lines = f.readlines()
+            for l in lines[-20:]:
+                print("  " + l.strip())
+        except Exception as e:
+            print(f"Gagal membaca log: {e}")
+    else:
+        print(f"File log belum ada.")
+    print("")
+
+def stop_daemon():
+    """Menghentikan background daemon."""
+    pid_file = "/tmp/devbox-probe.pid"
+    if os.path.exists(pid_file):
+        try:
+            with open(pid_file, "r") as f:
+                pid = int(f.read().strip())
+            os.kill(pid, 15)
+            print(f"{CLR_GREEN}Daemon devbox-probe (PID {pid}) berhasil dihentikan.{CLR_RESET}")
+            os.remove(pid_file)
+            return
+        except Exception as e:
+            print(f"{CLR_RED}Gagal menghentikan daemon: {e}{CLR_RESET}")
+    else:
+        print(f"{CLR_YELLOW}Tidak ada daemon devbox-probe yang sedang berjalan.{CLR_RESET}")
+
 def main():
     parser = argparse.ArgumentParser(description="DevBox Terminal & PTY Diagnostic Probe")
     parser.add_argument("--check", action="store_true", help="Jalankan audit kesehatan PTY, DNS, dan memori")
     parser.add_argument("--watch", action="store_true", help="Monitor live latensi PTY resize saat keyboard dibuka/tutup")
     parser.add_argument("--session", type=str, help="Filter Session ID tertentu untuk di-monitor")
     parser.add_argument("--test-render", action="store_true", help="Uji coba simulasi render Bubble Tea escape sequences")
+    parser.add_argument("--daemon", action="store_true", help="Jalankan background daemon otomatis memantau semua sesi")
+    parser.add_argument("--status", action="store_true", help="Lihat status daemon dan isi log terkini")
+    parser.add_argument("--stop", action="store_true", help="Hentikan daemon background")
 
     args = parser.parse_args()
 
-    if args.watch:
+    if args.daemon:
+        start_daemon()
+    elif args.status:
+        show_status()
+    elif args.stop:
+        stop_daemon()
+    elif args.watch:
         watch_live(args.session)
     elif args.test_render:
         simulate_bubbletea_render()
