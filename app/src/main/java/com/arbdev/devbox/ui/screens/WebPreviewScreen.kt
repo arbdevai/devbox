@@ -1650,7 +1650,9 @@ fun WebPreviewScreen() {
 
                                         userAgentString = if (currentTab.isDesktopMode) CHROME_DESKTOP_UA else CHROME_MOBILE_UA
 
-                                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                                        if (androidx.webkit.WebViewFeature.isFeatureSupported(androidx.webkit.WebViewFeature.FORCE_DARK)) {
+                                            androidx.webkit.WebSettingsCompat.setForceDark(this, androidx.webkit.WebSettingsCompat.FORCE_DARK_ON)
+                                        } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                                             @Suppress("DEPRECATION")
                                             forceDark = WebSettings.FORCE_DARK_ON
                                         }

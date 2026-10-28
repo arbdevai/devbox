@@ -13,8 +13,8 @@ android {
         applicationId = "com.arbdev.devbox"
         minSdk = 26
         targetSdk = 36
-        versionCode = 88
-        versionName = "1.0.88"
+        versionCode = 89
+        versionName = "1.0.89"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables {
@@ -101,6 +101,11 @@ dependencies {
     // Utilities
     implementation(libs.zxing.core)
     implementation(libs.androidx.work.runtime.ktx)
+
+    // Modern Engine & Root Upgrades
+    implementation(libs.libsu.core)
+    implementation(libs.androidx.webkit)
+    implementation(libs.koin.compose)
 
     testImplementation(libs.junit)
     debugImplementation(libs.androidx.compose.ui.tooling)

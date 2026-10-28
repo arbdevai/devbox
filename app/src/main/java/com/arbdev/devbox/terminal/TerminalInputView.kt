@@ -58,7 +58,15 @@ class TerminalInputView(context: Context) : View(context) {
                         return true
                     }
                     if (event.keyCode == KeyEvent.KEYCODE_ENTER) {
-                        onCommitText?.invoke("\r")
+                        if (event.isShiftPressed) {
+                            // Kitty Keyboard Protocol: Shift+Enter sends \u001B[13;2u (newline di prompt AI CLI)
+                            onCommitText?.invoke("\u001B[13;2u")
+                        } else if (event.isCtrlPressed) {
+                            // Kitty Keyboard Protocol: Ctrl+Enter sends \u001B[13;5u
+                            onCommitText?.invoke("\u001B[13;5u")
+                        } else {
+                            onCommitText?.invoke("\r")
+                        }
                         return true
                     }
                     if (onSendKey?.invoke(event.keyCode) == true) {
@@ -76,7 +84,13 @@ class TerminalInputView(context: Context) : View(context) {
             return true
         }
         if (keyCode == KeyEvent.KEYCODE_ENTER) {
-            onCommitText?.invoke("\r")
+            if (event?.isShiftPressed == true) {
+                onCommitText?.invoke("\u001B[13;2u")
+            } else if (event?.isCtrlPressed == true) {
+                onCommitText?.invoke("\u001B[13;5u")
+            } else {
+                onCommitText?.invoke("\r")
+            }
             return true
         }
         if (onSendKey?.invoke(keyCode) == true) {

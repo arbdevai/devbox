@@ -364,9 +364,9 @@ class NativeTerminalSession(
         val targetRootfs = ChrootManager.activeRootfs
         val sessionId = id
 
-        // Debounce: 180ms saat pinch zoom agar Magisk tidak spam notif, atau 15ms saat keyboard buka/tutup agar TUI instan
+        // Debounce: 120ms saat pinch zoom font, atau 0ms (instan murni via libsu persistent shell) saat keyboard buka/tutup
         resizeJob?.cancel()
-        val debounceMs = if (isImmediate) 15L else 180L
+        val debounceMs = if (isImmediate) 0L else 120L
         resizeJob = sessionScope.launch(Dispatchers.IO) {
             if (debounceMs > 0) {
                 delay(debounceMs)

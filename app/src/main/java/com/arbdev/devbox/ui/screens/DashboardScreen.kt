@@ -48,6 +48,7 @@ import androidx.compose.material.icons.filled.DeleteSweep
 import androidx.compose.material.icons.filled.Dns
 import androidx.compose.material.icons.filled.Error
 import androidx.compose.material.icons.filled.Folder
+import com.arbdev.devbox.ui.theme.shimmerEffect
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Layers
 import androidx.compose.material.icons.filled.PowerSettingsNew
@@ -748,6 +749,7 @@ fun DashboardScreen(
 
         Spacer(modifier = Modifier.height(10.dp))
 
+        val isBentoLoading = isInitialLoading || isRefreshing
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.spacedBy(10.dp)
@@ -757,6 +759,7 @@ fun DashboardScreen(
                 value = "${state.ramAvailableMb} MB",
                 subtitle = if (state.ramAvailableMb > 700) "Optimal" else "High Pressure",
                 accentColor = if (state.ramAvailableMb > 450) DevPrimary else DevWarning,
+                isLoading = isBentoLoading,
                 modifier = Modifier.weight(1f)
             )
             BentoMetricTile(
@@ -764,6 +767,7 @@ fun DashboardScreen(
                 value = "${state.swapUsedMb} MB",
                 subtitle = "Active Swap",
                 accentColor = DevPrimary,
+                isLoading = isBentoLoading,
                 modifier = Modifier.weight(1f)
             )
         }
@@ -779,6 +783,7 @@ fun DashboardScreen(
                 value = "${state.activeProcesses}",
                 subtitle = if (orphanProcesses.isEmpty()) "0 Orphans" else "${orphanProcesses.size} Orphans",
                 accentColor = if (orphanProcesses.isEmpty()) DevPrimary else DevWarning,
+                isLoading = isBentoLoading,
                 modifier = Modifier.weight(1f)
             )
             BentoMetricTile(
@@ -786,6 +791,7 @@ fun DashboardScreen(
                 value = "${TerminalSessionManager.sessions.size}",
                 subtitle = "Interactive Shells",
                 accentColor = DevPrimary,
+                isLoading = isBentoLoading,
                 modifier = Modifier.weight(1f)
             )
         }
@@ -1758,10 +1764,13 @@ fun BentoMetricTile(
     value: String,
     subtitle: String,
     accentColor: Color,
+    isLoading: Boolean = false,
     modifier: Modifier = Modifier
 ) {
     Card(
-        modifier = modifier,
+        modifier = modifier.then(
+            if (isLoading) Modifier.shimmerEffect() else Modifier
+        ),
         colors = CardDefaults.cardColors(containerColor = DevSurface),
         shape = RoundedCornerShape(18.dp),
         border = BorderStroke(1.dp, DevBorder)

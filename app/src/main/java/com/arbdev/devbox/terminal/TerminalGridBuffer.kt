@@ -665,6 +665,32 @@ class TerminalGridBuffer(
         }
     }
 
+    /**
+     * Menarik kembali baris dari scrollback ke activeGrid jika program TUI (agy/Bubbletea)
+     * meminta kursor naik melampaui baris 0 (karena layar menyempit saat keyboard terbuka).
+     * Mencegah baris lama prompt membeku permanen di scrollback (mengatasi bug prompt kedouble 100%).
+     */
+    private fun reclaimFromScrollback(linesCount: Int) {
+        if (isAltBuffer || scrollback.isEmpty() || linesCount <= 0) return
+        val count = linesCount.coerceAtMost(scrollback.size).coerceAtMost(maxRows)
+        val target = activeGrid
+        if (target.isEmpty()) return
+        val colsLimit = target[0].size
+        val rowsLimit = target.size
+
+        for (r in rowsLimit - 1 downTo count) {
+            for (c in 0 until colsLimit) {
+                target[r][c].copyFrom(target[r - count][c])
+            }
+        }
+        for (r in count - 1 downTo 0) {
+            val pulledLine = scrollback.removeAt(scrollback.size - 1)
+            for (c in 0 until colsLimit.coerceAtMost(pulledLine.size)) {
+                target[r][c].copyFrom(pulledLine[c])
+            }
+        }
+    }
+
     private fun handleCsiCommand(command: Char) {
         // Tangani Synchronized Output mode query / status (\x1b[?2026$p)
         if (csiIntermediate == '$' && command == 'p' && isCsiPrivate && csiParams.toString() == "2026") {
@@ -706,7 +732,14 @@ class TerminalGridBuffer(
             // Cursor Up: [A
             'A' -> {
                 val count = if (params.isNotEmpty() && params[0] > 0) params[0] else 1
-                cursorRow = (cursorRow - count).coerceAtLeast(0)
+                val targetRow = cursorRow - count
+                if (targetRow < 0 && !isAltBuffer && scrollback.isNotEmpty()) {
+                    val deficit = -targetRow
+                    reclaimFromScrollback(deficit)
+                    cursorRow = 0
+                } else {
+                    cursorRow = targetRow.coerceAtLeast(0)
+                }
             }
 
             // Cursor Down: [B
@@ -737,7 +770,14 @@ class TerminalGridBuffer(
             // Cursor Previous Line: [F (pindah baris ke atas dan kolom ke-0) -> Sangat penting untuk TUI agy/bubbletea/survey
             'F' -> {
                 val count = if (params.isNotEmpty() && params[0] > 0) params[0] else 1
-                cursorRow = (cursorRow - count).coerceAtLeast(0)
+                val targetRow = cursorRow - count
+                if (targetRow < 0 && !isAltBuffer && scrollback.isNotEmpty()) {
+                    val deficit = -targetRow
+                    reclaimFromScrollback(deficit)
+                    cursorRow = 0
+                } else {
+                    cursorRow = targetRow.coerceAtLeast(0)
+                }
                 cursorCol = 0
             }
 

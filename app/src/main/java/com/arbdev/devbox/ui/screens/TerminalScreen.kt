@@ -1117,9 +1117,9 @@ fun TerminalScreen(
                 lastCharHeight = charHeightPx
 
                 if (isFontZoom) {
-                    delay(150) // Debounce pinch-zoom font resize untuk mencegah Magisk toast spam
+                    delay(120) // Debounce pinch-zoom font resize
                 } else {
-                    delay(35) // Keyboard buka/tutup atau resize layout: settle singkat agar PTY update instan
+                    delay(10) // Keyboard buka/tutup atau resize layout: settle instan (libsu persistent shell)
                 }
 
                 with(density) {
@@ -2408,7 +2408,7 @@ fun TerminalCanvas(
                             }
                         }
 
-                        // 2. Gambar karakter teks di posisi matriks kolom monospaced yang presisi (anti-drift tabel & anti-jitter kursor)
+                        // 2. Gambar karakter teks dengan Text Run Batching (mengurangi ribuan JNI drawText call per frame)
                         var col = 0
                         while (col < lineCols) {
                             val cell = line.getOrNull(col) ?: break
@@ -2420,6 +2420,45 @@ fun TerminalCanvas(
                             val pt = GridPoint(lineIdx, col)
                             val isSelected = hasSelection && selMin != null && selMax != null && pt >= selMin && pt <= selMax
                             val isCursor = (isCursorVisible && (lineIdx - historyCount) == cursorRow && col == cursorCol)
+
+                            // Jika karakter memerlukan penanganan khusus (kursor, seleksi, wide char, extra mark)
+                            if (isCursor || isSelected || cell.isWide || cell.extraChar != null) {
+                                val rawFg = if (cell.isDim) cell.fgColor.copy(alpha = 0.6f) else cell.fgColor
+                                val invFg = if (cell.isInverse) {
+                                    if (cell.bgColor == Color.Transparent) (if (activeTheme.background == Color.Transparent) Color(0xFF0D1117) else activeTheme.background)
+                                    else cell.bgColor
+                                } else {
+                                    rawFg
+                                }
+                                val fg = when {
+                                    isSelected -> Color.White
+                                    isCursor -> if (activeTheme.background == Color.Transparent) Color.Black else activeTheme.background
+                                    else -> invFg
+                                }
+                                textPaint.color = fg.toArgb()
+                                textPaint.isFakeBoldText = cell.isBold || isSelected
+                                textPaint.isUnderlineText = cell.isUnderline || cell.hyperlinkUrl != null
+                                val cellX = col * charWidth
+
+                                if (cell.extraChar != null) {
+                                    nativeCanvas.drawText("${cell.char}${cell.extraChar}", cellX, yText, textPaint)
+                                } else if (cell.isWide) {
+                                    singleChar[0] = cell.char
+                                    nativeCanvas.drawText(singleChar, 0, 1, cellX, yText, textPaint)
+                                } else if (cell.char != ' ') {
+                                    singleChar[0] = cell.char
+                                    nativeCanvas.drawText(singleChar, 0, 1, cellX, yText, textPaint)
+                                }
+                                col++
+                                continue
+                            }
+
+                            // Lewati spasi biasa
+                            if (cell.char == ' ') {
+                                col++
+                                continue
+                            }
+
                             val rawFg = if (cell.isDim) cell.fgColor.copy(alpha = 0.6f) else cell.fgColor
                             val invFg = if (cell.isInverse) {
                                 if (cell.bgColor == Color.Transparent) (if (activeTheme.background == Color.Transparent) Color(0xFF0D1117) else activeTheme.background)
@@ -2427,41 +2466,43 @@ fun TerminalCanvas(
                             } else {
                                 rawFg
                             }
-                            val fg = when {
-                                isSelected -> Color.White
-                                isCursor -> if (activeTheme.background == Color.Transparent) Color.Black else activeTheme.background
-                                else -> invFg
-                            }
-                            val isBold = cell.isBold || isSelected
-                            val isUnderline = cell.isUnderline || cell.hyperlinkUrl != null
+                            val runFg = invFg
+                            val runBold = cell.isBold
+                            val runUnderline = cell.isUnderline || cell.hyperlinkUrl != null
+                            val startCol = col
 
-                            textPaint.color = fg.toArgb()
-                            textPaint.isFakeBoldText = isBold
-                            textPaint.isUnderlineText = isUnderline
-
-                            val cellX = col * charWidth
-
-                            // Karakter dengan extra combining mark
-                            if (cell.extraChar != null) {
-                                nativeCanvas.drawText("${cell.char}${cell.extraChar}", cellX, yText, textPaint)
-                                col++
-                                continue
-                            }
-
-                            // Karakter wide (CJK / wide symbol 2 sel)
-                            if (cell.isWide) {
-                                singleChar[0] = cell.char
-                                nativeCanvas.drawText(singleChar, 0, 1, cellX, yText, textPaint)
-                                col++
-                                continue
-                            }
-
-                            // Karakter normal (1 sel): lewati spasi kosong agar GPU tidak kerja sia-sia
-                            if (cell.char != ' ') {
-                                singleChar[0] = cell.char
-                                nativeCanvas.drawText(singleChar, 0, 1, cellX, yText, textPaint)
-                            }
+                            val sb = StringBuilder()
+                            sb.append(cell.char)
                             col++
+
+                            while (col < lineCols) {
+                                val nextCell = line.getOrNull(col) ?: break
+                                if (nextCell.isWideContinuation || nextCell.isWide || nextCell.extraChar != null || nextCell.char == ' ') break
+                                val nextPt = GridPoint(lineIdx, col)
+                                val nextSelected = hasSelection && selMin != null && selMax != null && nextPt >= selMin && nextPt <= selMax
+                                val nextCursor = (isCursorVisible && (lineIdx - historyCount) == cursorRow && col == cursorCol)
+                                if (nextSelected || nextCursor) break
+
+                                val nextRawFg = if (nextCell.isDim) nextCell.fgColor.copy(alpha = 0.6f) else nextCell.fgColor
+                                val nextInvFg = if (nextCell.isInverse) {
+                                    if (nextCell.bgColor == Color.Transparent) (if (activeTheme.background == Color.Transparent) Color(0xFF0D1117) else activeTheme.background)
+                                    else nextCell.bgColor
+                                } else {
+                                    nextRawFg
+                                }
+                                val nextUnderline = nextCell.isUnderline || nextCell.hyperlinkUrl != null
+                                if (nextInvFg == runFg && nextCell.isBold == runBold && nextUnderline == runUnderline) {
+                                    sb.append(nextCell.char)
+                                    col++
+                                } else {
+                                    break
+                                }
+                            }
+
+                            textPaint.color = runFg.toArgb()
+                            textPaint.isFakeBoldText = runBold
+                            textPaint.isUnderlineText = runUnderline
+                            nativeCanvas.drawText(sb.toString(), startCol * charWidth, yText, textPaint)
                         }
 
                         // Kursor di luar batas kolom karakter

@@ -222,7 +222,15 @@ object ChrootManager {
             mountpoint -q '$rootfs/mnt/sdcard' || { mount --bind /sdcard '$rootfs/mnt/sdcard' && mount --make-private '$rootfs/mnt/sdcard'; }
             mount --make-rprivate '$rootfs' 2>/dev/null || true
             grep -qE '^127\.0\.0\.1[[:space:]]+localhost' '$rootfs/etc/hosts' 2>/dev/null || echo '127.0.0.1 localhost' >> '$rootfs/etc/hosts' 2>/dev/null || true
-            grep -q 'nameserver' '$rootfs/etc/resolv.conf' 2>/dev/null || echo 'nameserver 8.8.8.8' >> '$rootfs/etc/resolv.conf' 2>/dev/null || true
+            android_dns1=${'$'}(getprop net.dns1 2>/dev/null || true)
+            android_dns2=${'$'}(getprop net.dns2 2>/dev/null || true)
+            if [ -n "${'$'}android_dns1" ] && ! grep -q "${'$'}android_dns1" '$rootfs/etc/resolv.conf' 2>/dev/null; then
+                printf "nameserver %s\n" "${'$'}android_dns1" > '$rootfs/etc/resolv.conf' 2>/dev/null || true
+                [ -n "${'$'}android_dns2" ] && printf "nameserver %s\n" "${'$'}android_dns2" >> '$rootfs/etc/resolv.conf' 2>/dev/null || true
+                printf "nameserver 8.8.8.8\nnameserver 1.1.1.1\n" >> '$rootfs/etc/resolv.conf' 2>/dev/null || true
+            else
+                grep -q 'nameserver' '$rootfs/etc/resolv.conf' 2>/dev/null || printf "nameserver 8.8.8.8\nnameserver 1.1.1.1\n" >> '$rootfs/etc/resolv.conf' 2>/dev/null || true
+            fi
             if [ ! -f '$rootfs/usr/local/bin/xdg-open' ]; then
                 mkdir -p '$rootfs/usr/local/bin'
                 cat <<'XDG_EOF' > '$rootfs/usr/local/bin/xdg-open'
@@ -689,7 +697,7 @@ BRIDGE_EOF
         return if (enable) {
             mountAll(rootfs)
             val envPrefix = "env -i HOME=/home/coder USER=coder LOGNAME=coder SHELL=/bin/bash TERM=xterm-256color DEVBOX=1 DEVBOX_SERVICE=code-server PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
-            val cmd = "chroot '$rootfs' /usr/bin/$envPrefix /usr/sbin/runuser -u coder -- /bin/bash -lc 'nohup code-server --bind-addr 127.0.0.1:8080 >/tmp/devbox-code-server.log 2>&1 & echo \$! > /tmp/devbox-code-server.pid'"
+            val cmd = "chroot '$rootfs' /usr/bin/$envPrefix /usr/sbin/runuser -u coder -- /bin/bash -lc 'nohup code-server --auth none --bind-addr 127.0.0.1:8080 >/tmp/devbox-code-server.log 2>&1 & echo \$! > /tmp/devbox-code-server.pid'"
             RootExecutor.execute(cmd)
             Result.success(Unit)
         } else {
@@ -1334,9 +1342,10 @@ PROFILE_EOF
             cp "${'$'}rf/home/coder/.profile" "${'$'}rf/root/.bash_profile" 2>/dev/null || true
             cp "${'$'}rf/home/coder/.profile" "${'$'}rf/etc/skel/.profile" 2>/dev/null || true
 
-            # Hak milik direktori home coder
-            chown -R 1000:1000 "${'$'}rf/home/coder" 2>/dev/null || true
-            chmod -R 777 "${'$'}rf/home/coder" 2>/dev/null || true
+            # Hak milik direktori home coder (non-rekursif untuk mencegah disk freeze & menjaga izin SSH key 600)
+            chown 1000:1000 "${'$'}rf/home/coder" "${'$'}rf/home/coder/.bashrc" "${'$'}rf/home/coder/.profile" 2>/dev/null || true
+            chmod 755 "${'$'}rf/home/coder" 2>/dev/null || true
+            chmod 644 "${'$'}rf/home/coder/.bashrc" "${'$'}rf/home/coder/.profile" 2>/dev/null || true
         """.trimIndent()
     }
 
