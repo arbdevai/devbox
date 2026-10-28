@@ -512,6 +512,7 @@ class NativeTerminalSession(
 }
 
 object TerminalSessionManager {
+    private val managerScope = CoroutineScope(Dispatchers.IO + Job())
     val sessions = mutableStateListOf<NativeTerminalSession>()
     val activeIndex = mutableIntStateOf(0)
     var detectedWebPort by mutableStateOf<Int?>(null)
@@ -556,7 +557,7 @@ object TerminalSessionManager {
 
     fun createNewSession(customName: String? = null): NativeTerminalSession {
         // Bersihkan sesi mati di /tmp agar alokasi PTY tidak bertabrakan saat multi-sesi
-        sessionScope.launch(Dispatchers.IO) {
+        managerScope.launch {
             com.arbdev.devbox.data.ChrootManager.cleanDeadTmpSessions()
         }
         val sessionNumber = sessions.size + 1
@@ -580,7 +581,7 @@ object TerminalSessionManager {
                 index < current -> activeIndex.intValue = current - 1
                 index == current -> activeIndex.intValue = current.coerceAtMost(sessions.size - 1)
             }
-            sessionScope.launch(Dispatchers.IO) {
+            managerScope.launch {
                 com.arbdev.devbox.data.ChrootManager.cleanDeadTmpSessions()
             }
         }

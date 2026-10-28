@@ -1129,7 +1129,7 @@ BRIDGE_EOF
             # 9. Konfigurasi Git Safe Directory otomatis (Cegah dubious ownership error pada prompt)
             mkdir -p "${'$'}rf/etc" 2>/dev/null || true
             if [ -f "${'$'}rf/home/coder/.gitconfig" ]; then
-                sed -i 's/\\tdirectory = \*/\tdirectory = */g' "${'$'}rf/home/coder/.gitconfig" 2>/dev/null || true
+                sed -i 's/directory = \\*/directory = */g' "${'$'}rf/home/coder/.gitconfig" 2>/dev/null || true
             fi
             if [ -x "${'$'}rf/usr/bin/git" ]; then
                 chroot "${'$'}rf" /usr/bin/git config --system --add safe.directory "*" 2>/dev/null || true
