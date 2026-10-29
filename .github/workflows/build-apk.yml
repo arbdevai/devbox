@@ -100,20 +100,22 @@ jobs:
           BODY=$(echo "$COMMIT_MSG" | tail -n +2)
 
           cat << 'EOF' > release_notes.md
-          ## 📦 What's Changed
+          ## What's Changed
           EOF
 
-          echo "### ✨ $TITLE" >> release_notes.md
+          echo "### Overview" >> release_notes.md
+          echo "$TITLE" >> release_notes.md
           echo "" >> release_notes.md
           if [ -n "$BODY" ]; then
+            echo "### Details" >> release_notes.md
             echo "$BODY" >> release_notes.md
           else
-            echo "- Peningkatan performa, perbaikan bug, dan stabilitas sistem." >> release_notes.md
+            echo "- Performance improvements, bug fixes, and system stabilization." >> release_notes.md
           fi
           echo "" >> release_notes.md
           echo "---" >> release_notes.md
-          echo "### 📥 Direct Download" >> release_notes.md
-          echo "- **Release APK:** [app-release.apk](https://github.com/${{ github.repository }}/releases/download/${{ steps.check_release.outputs.tag }}/app-release.apk)" >> release_notes.md
+          echo "### Download" >> release_notes.md
+          echo "- Release APK: [app-release.apk](https://github.com/${{ github.repository }}/releases/download/${{ steps.check_release.outputs.tag }}/app-release.apk)" >> release_notes.md
 
       - name: Publish tagged release
         if: steps.check_release.outputs.is_release == 'true'
