@@ -348,15 +348,15 @@ fun TerminalScreen(
         KeepAliveService.updateNotification(context)
     }
 
-    // Auto-scroll reaktif: HANYA scroll saat ada penambahan baris baru (maxValue bertambah),
-    // BUKAN pada setiap pengetikan karakter / in-place rewrite agar TUI Bubbletea smooth bebas jitter
-    var previousMaxValue by remember(activeSession.id) { mutableIntStateOf(0) }
-    LaunchedEffect(verticalScrollState.maxValue) {
-        val currentMax = verticalScrollState.maxValue
-        if (autoScrollEnabled && currentMax > previousMaxValue && currentMax > 0) {
-            verticalScrollState.scrollTo(currentMax)
+    // Auto-scroll reaktif: HANYA scroll saat ada penambahan baris output nyata di buffer Linux PTY,
+    // BUKAN saat maxValue bertambah akibat viewport menyusut terpotong keyboard HP!
+    var previousLineCount by remember(activeSession.id) { mutableIntStateOf(activeSession.buffer.lineCountState.intValue) }
+    LaunchedEffect(activeSession.buffer.lineCountState.intValue) {
+        val currentLines = activeSession.buffer.lineCountState.intValue
+        if (!activeSession.buffer.isAltBuffer && autoScrollEnabled && currentLines > previousLineCount) {
+            verticalScrollState.scrollTo(verticalScrollState.maxValue)
         }
-        previousMaxValue = currentMax
+        previousLineCount = currentLines
     }
 
     // Eksekusi initial command jika disediakan
