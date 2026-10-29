@@ -41,6 +41,12 @@ object TarExtractor {
 
                                 if (entry.isDirectory) {
                                     destFile.mkdirs()
+                                    destFile.setReadable(true, false)
+                                    destFile.setWritable(true, true)
+                                    destFile.setExecutable(true, false)
+                                    try {
+                                        Os.chmod(destFile.absolutePath, 493) // 0755
+                                    } catch (_: Exception) {}
                                 } else if (entry.isSymbolicLink) {
                                     destFile.parentFile?.mkdirs()
                                     safeUnlink(destFile)
@@ -58,6 +64,10 @@ object TarExtractor {
                                     if (srcFile.exists()) {
                                         try {
                                             srcFile.copyTo(destFile, overwrite = true)
+                                            destFile.setReadable(true, false)
+                                            if (entryName.contains("bin/") || entryName.contains("sbin/")) {
+                                                destFile.setExecutable(true, false)
+                                            }
                                         } catch (_: Exception) {
                                             try {
                                                 Os.symlink(entry.linkName, destFile.absolutePath)
@@ -75,11 +85,25 @@ object TarExtractor {
                                     FileOutputStream(destFile).use { fos ->
                                         tarIn.copyTo(fos)
                                     }
-                                    if (entry.mode > 0) {
-                                        try {
-                                            Os.chmod(destFile.absolutePath, entry.mode)
-                                        } catch (_: Exception) {}
+
+                                    val rawMode = entry.mode
+                                    // Mask 0777 (511) untuk menghilangkan file-type bits agar Os.chmod tidak throw EINVAL
+                                    val perm = if (rawMode > 0) (rawMode and 511) else 420 // 511 = 0777, 420 = 0644
+                                    val isExecutable = (perm and 73) != 0 ||
+                                            entryName.contains("bin/") ||
+                                            entryName.contains("sbin/") ||
+                                            entryName.contains("ld-linux") ||
+                                            entryName.endsWith(".sh") ||
+                                            entryName.endsWith(".so")
+
+                                    destFile.setReadable(true, false)
+                                    destFile.setWritable(true, true)
+                                    if (isExecutable) {
+                                        destFile.setExecutable(true, false)
                                     }
+                                    try {
+                                        Os.chmod(destFile.absolutePath, perm or (if (isExecutable) 73 else 0))
+                                    } catch (_: Exception) {}
                                 }
 
                                 entryCount++

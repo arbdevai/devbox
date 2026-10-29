@@ -293,6 +293,12 @@ exit 0
                 """.trimIndent())
                 bridge.setExecutable(true, false)
             }
+
+            // Pastikan binary bash dan direktori esensial selalu executable
+            File(base, "usr/bin/bash").let { if (it.exists()) it.setExecutable(true, false) }
+            File(base, "bin/bash").let { if (it.exists()) it.setExecutable(true, false) }
+            File(base, "home/coder").let { if (it.exists()) { it.setReadable(true, false); it.setWritable(true, true); it.setExecutable(true, false) } }
+            File(base, "tmp").let { if (it.exists()) { it.setReadable(true, false); it.setWritable(true, true); it.setExecutable(true, false) } }
         } catch (_: Exception) {}
         return Result.success(Unit)
     }
@@ -352,6 +358,25 @@ exit 0
             try {
                 android.system.Os.chmod(sudoersCoder.absolutePath, 288) // 0440 octal
             } catch (_: Exception) {}
+
+            // Post-extraction sweep: Pastikan seluruh file binary dan direktori memiliki hak akses eksekusi
+            fun applyPermissionsRecursively(file: File) {
+                if (file.isDirectory) {
+                    file.setReadable(true, false)
+                    file.setWritable(true, true)
+                    file.setExecutable(true, false)
+                    try { android.system.Os.chmod(file.absolutePath, 493) } catch (_: Exception) {}
+                    file.listFiles()?.forEach { applyPermissionsRecursively(it) }
+                } else if (file.isFile) {
+                    file.setReadable(true, false)
+                    val p = file.absolutePath
+                    if (p.contains("/bin/") || p.contains("/sbin/") || p.contains("ld-linux") || file.name.endsWith(".so") || file.name.endsWith(".sh")) {
+                        file.setExecutable(true, false)
+                        try { android.system.Os.chmod(file.absolutePath, 493) } catch (_: Exception) {}
+                    }
+                }
+            }
+            applyPermissionsRecursively(targetDir)
         } catch (e: Exception) {
             AppLogger.w("PRootBackend", "Peringatan pasca konfigurasi rootfs: ${e.message}")
         }
