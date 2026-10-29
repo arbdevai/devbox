@@ -25,14 +25,54 @@ class PRootBackend(private val context: Context) : LinuxEnvironment {
         return false // Flavor no-root secara definitif tidak membutuhkan root
     }
 
+    private fun getProotBinaryPath(): String {
+        val nativeLibDir = context.applicationInfo.nativeLibraryDir
+        val primaryProot = File(nativeLibDir, "libproot.so")
+        if (primaryProot.exists() && primaryProot.length() > 100_000) {
+            return primaryProot.absolutePath
+        }
+
+        // Fail-safe 1: Periksa direktori lib turunan dari sourceDir APK
+        val parentLib = File(context.applicationInfo.sourceDir).parentFile?.let { File(it, "lib/arm64/libproot.so") }
+        if (parentLib != null && parentLib.exists() && parentLib.length() > 100_000) {
+            return parentLib.absolutePath
+        }
+
+        // Fail-safe 2: Ekstraksi darurat langsung dari APK sourceDir jika installer OS tidak mengekstraknya
+        try {
+            val fallbackBin = File(context.filesDir, "bin/libproot.so")
+            if (fallbackBin.exists() && fallbackBin.length() > 100_000) {
+                fallbackBin.setExecutable(true, false)
+                return fallbackBin.absolutePath
+            }
+            fallbackBin.parentFile?.mkdirs()
+            java.util.zip.ZipFile(context.applicationInfo.sourceDir).use { zip ->
+                val entry = zip.getEntry("lib/arm64-v8a/libproot.so")
+                if (entry != null) {
+                    zip.getInputStream(entry).use { input ->
+                        fallbackBin.outputStream().use { output ->
+                            input.copyTo(output)
+                        }
+                    }
+                    fallbackBin.setExecutable(true, false)
+                    AppLogger.i("PRootBackend", "Ekstraksi fail-safe libproot.so selesai: ${fallbackBin.absolutePath}")
+                    return fallbackBin.absolutePath
+                }
+            }
+        } catch (e: Exception) {
+            AppLogger.e("PRootBackend", "Gagal ekstraksi darurat libproot.so: ${e.message}")
+        }
+
+        return primaryProot.absolutePath
+    }
+
     override fun startTerminalProcess(
         sessionId: String,
         targetRootfs: String,
         initCols: Int,
         initRows: Int
     ): Process {
-        val nativeLibDir = context.applicationInfo.nativeLibraryDir
-        val prootBin = File(nativeLibDir, "libproot.so").absolutePath
+        val prootBin = getProotBinaryPath()
         val prootTmp = File(context.cacheDir, "proot_tmp").apply { mkdirs() }.absolutePath
         File(targetRootfs, "home/coder").mkdirs()
         File(targetRootfs, "tmp").mkdirs()
@@ -238,12 +278,12 @@ exit 0
     }
 
     override suspend fun runEnvironmentDiagnostics(): String = withContext(Dispatchers.IO) {
-        val nativeLibDir = context.applicationInfo.nativeLibraryDir
-        val prootBin = File(nativeLibDir, "libproot.so")
+        val prootPath = getProotBinaryPath()
+        val prootBin = File(prootPath)
         """
 === INFORMASI ENVIRONMENT NO-ROOT ===
 Mode: PRoot Userspace (No Root Required)
-PRoot Binary: ${prootBin.absolutePath} (Ukuran: ${prootBin.length()} bytes, Exists: ${prootBin.exists()})
+PRoot Binary: $prootPath (Ukuran: ${prootBin.length()} bytes, Exists: ${prootBin.exists()})
 Default Rootfs: $defaultRootfsPath
 FilesDir: ${context.filesDir.absolutePath}
 OS Architecture: ${System.getProperty("os.arch")}

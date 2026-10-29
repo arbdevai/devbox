@@ -135,8 +135,9 @@ object UpdateManager {
             AppLogger.i("UpdateManager", "Versi saat ini: $currentVersion, Versi rilis: $latestTag")
 
             val isNewer = isVersionNewer(latestTag, currentVersion)
-            val apkAsset = release.assets.firstOrNull { it.name.endsWith(".apk") }
-                ?: release.assets.firstOrNull()
+            val targetFlavorKeyword = if (com.arbdev.devbox.FlavorConfig.IS_ROOT_FLAVOR) "-root-" else "-noroot-"
+            val apkAsset = release.assets.firstOrNull { it.name.contains(targetFlavorKeyword) && it.name.endsWith(".apk") }
+                ?: release.assets.firstOrNull { it.name.endsWith(".apk") }
 
             val downloadUrl = apkAsset?.downloadUrl ?: ""
             val sizeMb = if (apkAsset != null && apkAsset.size > 0) apkAsset.size / (1024.0 * 1024.0) else 0.0
