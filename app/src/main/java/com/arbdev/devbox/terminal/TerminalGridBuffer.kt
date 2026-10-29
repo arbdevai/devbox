@@ -1320,7 +1320,7 @@ class TerminalGridBuffer(
                 hasPendingUpdate = false
                 lastNotifyTime = System.currentTimeMillis()
                 version.intValue++
-                val curLines = if (isAltBuffer) maxRows else (scrollback.size + getLastActiveRow() + 1).coerceAtLeast(1)
+                val curLines = if (isAltBuffer) maxRows else (scrollback.size + maxRows)
                 if (lineCountState.intValue != curLines) {
                     lineCountState.intValue = curLines
                 }
@@ -1343,7 +1343,7 @@ class TerminalGridBuffer(
             notifyHandler.removeCallbacks(notifyRunnable)
             notifyHandler.post {
                 version.intValue++
-                val curLines = if (isAltBuffer) maxRows else (scrollback.size + getLastActiveRow() + 1).coerceAtLeast(1)
+                val curLines = if (isAltBuffer) maxRows else (scrollback.size + maxRows)
                 if (lineCountState.intValue != curLines) {
                     lineCountState.intValue = curLines
                 }
@@ -1544,8 +1544,7 @@ class TerminalGridBuffer(
     fun getLineCount(): Int {
         synchronized(lock) {
             val historyCount = if (isAltBuffer) 0 else scrollback.size
-            val activeCount = getLastActiveRow() + 1
-            return historyCount + activeCount
+            return historyCount + maxRows
         }
     }
 

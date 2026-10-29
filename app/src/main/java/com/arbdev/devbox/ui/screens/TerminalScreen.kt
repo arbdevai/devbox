@@ -1154,8 +1154,8 @@ fun TerminalScreen(
                 }
             }
 
-            // Saat keyboard virtual aktif, geser scroll canvas ke posisi kursor agar tetap terlihat di atas keyboard
-            LaunchedEffect(isImeVisible, activeSession.buffer.cursorRow, activeSession.buffer.version.intValue) {
+            // Saat keyboard virtual aktif, geser scroll canvas ke posisi kursor HANYA saat keyboard baru terbuka atau baris kursor berpindah (anti-jitter saat mengetik)
+            LaunchedEffect(isImeVisible, activeSession.buffer.cursorRow) {
                 if (isImeVisible && autoScrollEnabled && charHeightPx > 0f) {
                     val historyCount = activeSession.buffer.getScrollbackSize()
                     val cursorRow = activeSession.buffer.cursorRow
