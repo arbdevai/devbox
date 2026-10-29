@@ -108,7 +108,11 @@ object TarExtractor {
     private fun safeUnlink(file: File) {
         try {
             if (isSymlink(file)) {
-                Os.unlink(file.absolutePath)
+                try {
+                    Os.remove(file.absolutePath)
+                } catch (_: Exception) {
+                    file.delete()
+                }
             } else if (file.exists()) {
                 file.delete()
             }
