@@ -29,7 +29,7 @@ data class ChrootState(
 )
 
 object ChrootManager {
-    const val DEFAULT_ROOTFS = "/data/local/devbox-chroot"
+    var DEFAULT_ROOTFS = "/data/local/devbox-chroot"
     const val LEGACY_ROOTFS = "/data/local/ubuntu-chroot"
     private const val PREFS_NAME = "devbox_prefs"
     private const val KEY_ACTIVE_ROOTFS = "key_active_rootfs"
@@ -39,11 +39,92 @@ object ChrootManager {
 
     fun init(context: Context) {
         appContext = context.applicationContext
+        DEFAULT_ROOTFS = com.arbdev.devbox.FlavorConfig.getDefaultRootfs(context)
         val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
         val saved = prefs.getString(KEY_ACTIVE_ROOTFS, null)
-        if (!saved.isNullOrBlank()) {
-            activeRootfs = saved
-            AppLogger.i("ChrootManager", "Memuat rootfs dari SharedPreferences: $activeRootfs")
+        activeRootfs = if (!saved.isNullOrBlank()) {
+            saved
+        } else {
+            DEFAULT_ROOTFS
+        }
+        AppLogger.i("ChrootManager", "Memuat rootfs [${com.arbdev.devbox.FlavorConfig.FLAVOR_NAME}]: $activeRootfs")
+    }
+
+    fun findSuPath(): String {
+        val candidates = arrayOf(
+            "/system/bin/su",
+            "/system/xbin/su",
+            "/data/adb/ksu/bin/su",
+            "/data/adb/ap/bin/su",
+            "su"
+        )
+        for (candidate in candidates) {
+            if (candidate == "su" || File(candidate).exists()) {
+                return candidate
+            }
+        }
+        return "su"
+    }
+
+    fun startTerminalProcess(
+        sessionId: String,
+        targetRootfs: String,
+        initCols: Int,
+        initRows: Int
+    ): Process {
+        return if (com.arbdev.devbox.FlavorConfig.IS_ROOT_FLAVOR) {
+            val suBinary = findSuPath()
+            val chrootCmd = "mkdir -p '$targetRootfs/dev' '$targetRootfs/dev/pts' '$targetRootfs/proc' '$targetRootfs/sys' '$targetRootfs/mnt/sdcard' '$targetRootfs/tmp' 2>/dev/null; " +
+                    "chmod 1777 '$targetRootfs/tmp' 2>/dev/null; " +
+                    "mountpoint -q '$targetRootfs/dev' || { mount --bind /dev '$targetRootfs/dev' 2>/dev/null && mount --make-private '$targetRootfs/dev' 2>/dev/null; }; " +
+                    "mountpoint -q '$targetRootfs/dev/pts' || mount --bind /dev/pts '$targetRootfs/dev/pts' 2>/dev/null || mount -t devpts devpts '$targetRootfs/dev/pts' 2>/dev/null; " +
+                    "mountpoint -q '$targetRootfs/proc' || mount -t proc proc '$targetRootfs/proc' 2>/dev/null; " +
+                    "mountpoint -q '$targetRootfs/sys' || mount -t sysfs sysfs '$targetRootfs/sys' 2>/dev/null; " +
+                    "mountpoint -q '$targetRootfs/mnt/sdcard' || { mount --bind /sdcard '$targetRootfs/mnt/sdcard' 2>/dev/null && mount --make-private '$targetRootfs/mnt/sdcard' 2>/dev/null; }; " +
+                    "chown 1000:1000 '$targetRootfs/home/coder' 2>/dev/null; " +
+                    "cd '$targetRootfs' && exec chroot '$targetRootfs' /usr/bin/env -i HOME=/home/coder USER=coder LOGNAME=sahal SHELL=/bin/bash TERM=xterm-256color COLORTERM=truecolor DEVBOX=1 DEVBOX_SESSION_ID='$sessionId' GH_NO_KEYRING=1 PATH=/home/coder/.local/bin:/home/coder/.cargo/bin:/home/coder/go/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin /bin/bash -c 'cd /home/coder 2>/dev/null || cd /; if [ -x /usr/bin/script ]; then exec /usr/bin/script -qefc \"shopt -s checkwinsize 2>/dev/null; echo \\\$\\\$ > /tmp/.devbox_pid_$sessionId 2>/dev/null; tty > /tmp/.devbox_pts_$sessionId 2>/dev/null; echo \\\$(tty) > /home/coder/.devbox_pts_$sessionId 2>/dev/null; ws=\\\$(cat /tmp/.devbox_ws_$sessionId 2>/dev/null); if [ -n \\\"\\\$ws\\\" ]; then stty \\\$ws opost onlcr 2>/dev/null; else stty rows $initRows cols $initCols opost onlcr 2>/dev/null; fi; exec /bin/bash -l\" /dev/null; else exec /bin/bash -l; fi'"
+            val pb = ProcessBuilder(suBinary, "-c", chrootCmd)
+            pb.redirectErrorStream(true)
+            pb.start()
+        } else {
+            val ctx = appContext
+            val nativeLibDir = ctx?.applicationInfo?.nativeLibraryDir ?: "/data/data/com.arbdev.devbox.noroot/lib"
+            val prootBin = File(nativeLibDir, "libproot.so").absolutePath
+            val prootTmp = if (ctx != null) File(ctx.cacheDir, "proot_tmp").apply { mkdirs() }.absolutePath else "/tmp"
+            File(targetRootfs, "home/coder").mkdirs()
+            File(targetRootfs, "tmp").mkdirs()
+
+            val shellScript = "cd /home/coder 2>/dev/null || cd /; if [ -x /usr/bin/script ]; then exec /usr/bin/script -qefc \"shopt -s checkwinsize 2>/dev/null; echo \\\$\$ > /tmp/.devbox_pid_$sessionId 2>/dev/null; ws=\\\$(cat /tmp/.devbox_ws_$sessionId 2>/dev/null); if [ -n \\\"\\\$ws\\\" ]; then stty \\\$ws opost onlcr 2>/dev/null; else stty rows $initRows cols $initCols opost onlcr 2>/dev/null; fi; exec /bin/bash -l\" /dev/null; else exec /bin/bash -l; fi"
+
+            val pb = ProcessBuilder(
+                prootBin,
+                "--kill-on-exit",
+                "--link2symlink",
+                "-0",
+                "-r", targetRootfs,
+                "-b", "/dev",
+                "-b", "/proc",
+                "-b", "/sys",
+                "-b", "/sdcard:/mnt/sdcard",
+                "-b", "$prootTmp:/tmp",
+                "-w", "/home/coder",
+                "/usr/bin/env", "-i",
+                "HOME=/home/coder",
+                "USER=coder",
+                "LOGNAME=coder",
+                "SHELL=/bin/bash",
+                "TERM=xterm-256color",
+                "COLORTERM=truecolor",
+                "DEVBOX=1",
+                "DEVBOX_SESSION_ID=$sessionId",
+                "GH_NO_KEYRING=1",
+                "PATH=/home/coder/.local/bin:/home/coder/.cargo/bin:/home/coder/go/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+                "/bin/bash", "-c",
+                shellScript
+            )
+            pb.environment()["PROOT_TMP_DIR"] = prootTmp
+            pb.redirectErrorStream(true)
+            pb.start()
         }
     }
 
@@ -107,7 +188,7 @@ object ChrootManager {
     var lastKnownState: ChrootState? = null
 
     suspend fun getChrootState(rootfs: String = activeRootfs): ChrootState {
-        val rootOk = RootExecutor.isRootAvailable()
+        val rootOk = if (com.arbdev.devbox.FlavorConfig.IS_ROOT_FLAVOR) RootExecutor.isRootAvailable() else true
         if (!rootOk) {
             AppLogger.w("ChrootManager", "Superuser (su) tidak terdeteksi.")
             val state = ChrootState(isRootGranted = false, rootfsPath = rootfs)
@@ -135,7 +216,7 @@ object ChrootManager {
             fi
 
             if [ "${'$'}status" = "EXISTS" ]; then
-                grep -q " ${'$'}rf/proc " /proc/mounts 2>/dev/null && mnt=1 || mnt=0
+                grep -q " ${'$'}rf/proc " /proc/mounts 2>/dev/null && mnt=1 || mnt=${if (com.arbdev.devbox.FlavorConfig.IS_ROOT_FLAVOR) 0 else 1}
 
                 # Hitung proses chroot milik DevBox secara instan
                 procs=${'$'}(grep -sl "DEVBOX" /proc/[0-9]*/environ 2>/dev/null | wc -l)

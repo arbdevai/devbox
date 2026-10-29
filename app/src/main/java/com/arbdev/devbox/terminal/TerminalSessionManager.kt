@@ -125,22 +125,6 @@ class NativeTerminalSession(
         initializeProcess()
     }
 
-    private fun findSuPath(): String {
-        val candidates = arrayOf(
-            "/system/bin/su",
-            "/system/xbin/su",
-            "/data/adb/ksu/bin/su",
-            "/data/adb/ap/bin/su",
-            "su"
-        )
-        for (candidate in candidates) {
-            if (candidate == "su" || File(candidate).exists()) {
-                return candidate
-            }
-        }
-        return "su"
-    }
-
     fun initializeProcess() {
         synchronized(initLock) {
             if (isInitializing || (isRunning && outputStream != null)) return
@@ -162,9 +146,7 @@ class NativeTerminalSession(
         sessionScope.launch(Dispatchers.IO) {
             try {
                 val targetRootfs = ChrootManager.activeRootfs
-                val suBinary = findSuPath()
-
-                AppLogger.i("NativeTerminal", "Meluncurkan sesi terminal [$name] di $targetRootfs via $suBinary")
+                AppLogger.i("NativeTerminal", "Meluncurkan sesi terminal [$name] di $targetRootfs [${com.arbdev.devbox.FlavorConfig.FLAVOR_NAME}]")
 
                 // Pastikan lingkungan user coder, passwordless sudo, direktori ~/projects, dan .bashrc modern siap
                 ChrootManager.ensureEnvironmentReadySync(targetRootfs)
@@ -179,19 +161,7 @@ class NativeTerminalSession(
                 lastCols = initCols
                 buffer.resize(initCols, initRows)
 
-                val chrootCmd = "mkdir -p '$targetRootfs/dev' '$targetRootfs/dev/pts' '$targetRootfs/proc' '$targetRootfs/sys' '$targetRootfs/mnt/sdcard' '$targetRootfs/tmp' 2>/dev/null; " +
-                        "chmod 1777 '$targetRootfs/tmp' 2>/dev/null; " +
-                        "mountpoint -q '$targetRootfs/dev' || { mount --bind /dev '$targetRootfs/dev' 2>/dev/null && mount --make-private '$targetRootfs/dev' 2>/dev/null; }; " +
-                        "mountpoint -q '$targetRootfs/dev/pts' || mount --bind /dev/pts '$targetRootfs/dev/pts' 2>/dev/null || mount -t devpts devpts '$targetRootfs/dev/pts' 2>/dev/null; " +
-                        "mountpoint -q '$targetRootfs/proc' || mount -t proc proc '$targetRootfs/proc' 2>/dev/null; " +
-                        "mountpoint -q '$targetRootfs/sys' || mount -t sysfs sysfs '$targetRootfs/sys' 2>/dev/null; " +
-                        "mountpoint -q '$targetRootfs/mnt/sdcard' || { mount --bind /sdcard '$targetRootfs/mnt/sdcard' 2>/dev/null && mount --make-private '$targetRootfs/mnt/sdcard' 2>/dev/null; }; " +
-                        "chown 1000:1000 '$targetRootfs/home/coder' 2>/dev/null; " +
-                        "cd '$targetRootfs' && exec chroot '$targetRootfs' /usr/bin/env -i HOME=/home/coder USER=coder LOGNAME=sahal SHELL=/bin/bash TERM=xterm-256color COLORTERM=truecolor DEVBOX=1 DEVBOX_SESSION_ID='$id' GH_NO_KEYRING=1 PATH=/home/coder/.local/bin:/home/coder/.cargo/bin:/home/coder/go/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin /bin/bash -c 'cd /home/coder 2>/dev/null || cd /; if [ -x /usr/bin/script ]; then exec /usr/bin/script -qefc \"shopt -s checkwinsize 2>/dev/null; echo \\\$\\\$ > /tmp/.devbox_pid_$id 2>/dev/null; tty > /tmp/.devbox_pts_$id 2>/dev/null; echo \\\$(tty) > /home/coder/.devbox_pts_$id 2>/dev/null; ws=\\\$(cat /tmp/.devbox_ws_$id 2>/dev/null); if [ -n \\\"\\\$ws\\\" ]; then stty \\\$ws opost onlcr 2>/dev/null; else stty rows $initRows cols $initCols opost onlcr 2>/dev/null; fi; exec /bin/bash -l\" /dev/null; else exec /bin/bash -l; fi'"
-
-                val pb = ProcessBuilder(suBinary, "-c", chrootCmd)
-                pb.redirectErrorStream(true) // Gabungkan stderr ke stdout stream
-                val proc = pb.start()
+                val proc = ChrootManager.startTerminalProcess(id, targetRootfs, initCols, initRows)
                 process = proc
                 outputStream = proc.outputStream
                 inputStream = proc.inputStream

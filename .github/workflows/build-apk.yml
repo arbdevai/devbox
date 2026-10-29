@@ -79,7 +79,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: app-release-${{ github.sha }}
-          path: app/build/outputs/apk/release/*.apk
+          path: app/build/outputs/apk/**/release/*.apk
           if-no-files-found: error
           retention-days: 14
 
@@ -110,4 +110,4 @@ jobs:
           name: DevBox ${{ steps.check_release.outputs.tag }}
           body_path: release_notes.md
           generate_release_notes: true
-          files: app/build/outputs/apk/release/*.apk
+          files: app/build/outputs/apk/**/release/*.apk

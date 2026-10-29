@@ -52,7 +52,8 @@ def main():
 
     out.append("---")
     out.append("### Download")
-    out.append(f"- Release APK: [app-release.apk](https://github.com/{repo}/releases/download/{tag}/app-release.apk)")
+    out.append(f"- Root Flavor (Native Chroot): [app-root-release.apk](https://github.com/{repo}/releases/download/{tag}/app-root-release.apk)")
+    out.append(f"- No-Root Flavor (PRoot Userspace): [app-noroot-release.apk](https://github.com/{repo}/releases/download/{tag}/app-noroot-release.apk)")
 
     with open("release_notes.md", "w") as f:
         f.write("\n".join(out) + "\n")

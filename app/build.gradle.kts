@@ -13,16 +13,31 @@ android {
         applicationId = "com.arbdev.devbox"
         minSdk = 26
         targetSdk = 36
-        versionCode = 10102
-        versionName = "1.1.2"
+        versionCode = 10200
+        versionName = "1.2.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables {
             useSupportLibrary = true
         }
 
+        manifestPlaceholders["appLabel"] = "DevBox"
+
         ndk {
-            abiFilters += listOf("arm64-v8a", "armeabi-v7a", "x86_64")
+            abiFilters += listOf("arm64-v8a")
+        }
+    }
+
+    flavorDimensions += "environment"
+    productFlavors {
+        create("root") {
+            dimension = "environment"
+            manifestPlaceholders["appLabel"] = "DevBox (Root)"
+        }
+        create("noroot") {
+            dimension = "environment"
+            applicationIdSuffix = ".noroot"
+            manifestPlaceholders["appLabel"] = "DevBox (No-Root)"
         }
     }
 
@@ -114,7 +129,7 @@ dependencies {
     implementation(libs.androidx.work.runtime.ktx)
 
     // Modern Engine & Root Upgrades
-    implementation(libs.libsu.core)
+    "rootImplementation"(libs.libsu.core)
     implementation(libs.androidx.webkit)
     implementation(libs.koin.compose)
 

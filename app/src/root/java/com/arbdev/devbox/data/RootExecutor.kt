@@ -5,14 +5,6 @@ import com.topjohnwu.superuser.Shell
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
-data class CommandResult(
-    val exitCode: Int,
-    val stdout: String,
-    val stderr: String
-) {
-    val isSuccess: Boolean get() = exitCode == 0
-}
-
 object RootExecutor {
 
     @Volatile
