@@ -440,7 +440,6 @@ class NativeTerminalSession(
         processMonitorJob?.cancel()
         val sessionId = id
         val targetRootfs = ChrootManager.activeRootfs
-        val suBinary = findSuPath()
 
         // Matikan seluruh pohon proses turunan (agy, python, node, script, bash) di dalam chroot
         sessionScope.launch(Dispatchers.IO) {
