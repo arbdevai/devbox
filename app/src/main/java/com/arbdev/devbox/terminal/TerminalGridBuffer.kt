@@ -755,10 +755,29 @@ class TerminalGridBuffer(
                 cursorCol = col.coerceIn(0, maxCols - 1)
             }
 
-            // Cursor Up: [A (Clamping zero-mutation agar TUI prompt tidak terduplikasi)
+            // Cursor Up: [A (Scrollback Reclaim on Cursor-Up Overflow - Solusi 2 Dokumen Audit Master)
             'A' -> {
                 val count = if (params.isNotEmpty() && params[0] > 0) params[0] else 1
-                cursorRow = (cursorRow - count).coerceAtLeast(0)
+                val targetRow = cursorRow - count
+                if (targetRow < 0 && !isAltBuffer && scrollback.isNotEmpty()) {
+                    val reclaimCount = minOf(-targetRow, scrollback.size)
+                    val lines = scrollback.takeLast(reclaimCount)
+                    for (r in maxRows - 1 downTo reclaimCount) {
+                        for (c in 0 until maxCols) {
+                            grid[r][c].copyFrom(grid[r - reclaimCount][c])
+                        }
+                    }
+                    for (i in 0 until lines.size) {
+                        val src = lines[i]
+                        for (c in 0 until maxCols) {
+                            if (c < src.size) grid[i][c].copyFrom(src[c])
+                            else grid[i][c].reset()
+                        }
+                    }
+                    cursorRow = 0
+                } else {
+                    cursorRow = targetRow.coerceAtLeast(0)
+                }
             }
 
             // Cursor Down: [B
@@ -786,10 +805,29 @@ class TerminalGridBuffer(
                 cursorCol = 0
             }
 
-            // Cursor Previous Line: [F (pindah baris ke atas dan kolom ke-0 - zero mutation)
+            // Cursor Previous Line: [F (Scrollback Reclaim on Cursor-Up Overflow - Solusi 2 Dokumen Audit Master)
             'F' -> {
                 val count = if (params.isNotEmpty() && params[0] > 0) params[0] else 1
-                cursorRow = (cursorRow - count).coerceAtLeast(0)
+                val targetRow = cursorRow - count
+                if (targetRow < 0 && !isAltBuffer && scrollback.isNotEmpty()) {
+                    val reclaimCount = minOf(-targetRow, scrollback.size)
+                    val lines = scrollback.takeLast(reclaimCount)
+                    for (r in maxRows - 1 downTo reclaimCount) {
+                        for (c in 0 until maxCols) {
+                            grid[r][c].copyFrom(grid[r - reclaimCount][c])
+                        }
+                    }
+                    for (i in 0 until lines.size) {
+                        val src = lines[i]
+                        for (c in 0 until maxCols) {
+                            if (c < src.size) grid[i][c].copyFrom(src[c])
+                            else grid[i][c].reset()
+                        }
+                    }
+                    cursorRow = 0
+                } else {
+                    cursorRow = targetRow.coerceAtLeast(0)
+                }
                 cursorCol = 0
             }
 
@@ -1306,9 +1344,7 @@ class TerminalGridBuffer(
             notifyHandler.post {
                 version.intValue++
                 val curLines = if (isAltBuffer) maxRows else (scrollback.size + getLastActiveRow() + 1).coerceAtLeast(1)
-                val diff = Math.abs(lineCountState.intValue - curLines)
-                // Throttle re-layout Compose agar tidak re-measure ribuan kali saat streaming cepat
-                if (diff >= 5 || forceImmediate || curLines == maxRows) {
+                if (lineCountState.intValue != curLines) {
                     lineCountState.intValue = curLines
                 }
             }

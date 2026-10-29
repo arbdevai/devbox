@@ -28,15 +28,21 @@ class TerminalInputView(context: Context) : View(context) {
     override fun onCheckIsTextEditor(): Boolean = true
 
     override fun onCreateInputConnection(outAttrs: EditorInfo): InputConnection {
-        // Konfigurasi persis seperti Termux TerminalView:
-        // Matikan predictive text, dictionary spellcheck, dan auto-correction agar keyboard menjadi pure stream
         outAttrs.inputType = InputType.TYPE_CLASS_TEXT or
-                InputType.TYPE_TEXT_VARIATION_VISIBLE_PASSWORD or
                 InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS
         outAttrs.imeOptions = EditorInfo.IME_FLAG_NO_EXTRACT_UI or EditorInfo.IME_ACTION_NONE
 
         return object : BaseInputConnection(this, false) {
             override fun commitText(text: CharSequence?, newCursorPosition: Int): Boolean {
+                if (!text.isNullOrEmpty()) {
+                    onCommitText?.invoke(text.toString())
+                }
+                return true
+            }
+
+            override fun setComposingText(text: CharSequence?, newCursorPosition: Int): Boolean {
+                // Untuk keyboard seperti Gboard/Samsung yang menggunakan composing text:
+                // Commit langsung setiap input teks agar stream PTY menerima karakter secara real-time
                 if (!text.isNullOrEmpty()) {
                     onCommitText?.invoke(text.toString())
                 }
@@ -59,10 +65,8 @@ class TerminalInputView(context: Context) : View(context) {
                     }
                     if (event.keyCode == KeyEvent.KEYCODE_ENTER) {
                         if (event.isShiftPressed) {
-                            // Kitty Keyboard Protocol: Shift+Enter sends \u001B[13;2u (newline di prompt AI CLI)
                             onCommitText?.invoke("\u001B[13;2u")
                         } else if (event.isCtrlPressed) {
-                            // Kitty Keyboard Protocol: Ctrl+Enter sends \u001B[13;5u
                             onCommitText?.invoke("\u001B[13;5u")
                         } else {
                             onCommitText?.invoke("\r")
@@ -72,13 +76,25 @@ class TerminalInputView(context: Context) : View(context) {
                     if (onSendKey?.invoke(event.keyCode) == true) {
                         return true
                     }
+                    // Jika event adalah karakter teks yang bisa diketik (misal physical keyboard),
+                    // kirim kodenya langsung tanpa memanggil super.sendKeyEvent agar tidak double
+                    val unicode = event.unicodeChar
+                    if (unicode > 0 && !Character.isISOControl(unicode)) {
+                        onCommitText?.invoke(unicode.toChar().toString())
+                        return true
+                    }
                 }
-                return super.sendKeyEvent(event)
+                // Jika ACTION_UP untuk DEL/ENTER, konsumsi agar tidak diteruskan ke onKeyUp
+                if (event != null && (event.keyCode == KeyEvent.KEYCODE_DEL || event.keyCode == KeyEvent.KEYCODE_ENTER)) {
+                    return true
+                }
+                return false
             }
         }
     }
 
     override fun onKeyDown(keyCode: Int, event: KeyEvent?): Boolean {
+        // Hanya tangani keydown fisik jika belum ditangani oleh sendKeyEvent
         if (keyCode == KeyEvent.KEYCODE_DEL) {
             onBackspace?.invoke()
             return true
@@ -94,6 +110,11 @@ class TerminalInputView(context: Context) : View(context) {
             return true
         }
         if (onSendKey?.invoke(keyCode) == true) {
+            return true
+        }
+        val unicode = event?.unicodeChar ?: 0
+        if (unicode > 0 && !Character.isISOControl(unicode)) {
+            onCommitText?.invoke(unicode.toChar().toString())
             return true
         }
         return super.onKeyDown(keyCode, event)

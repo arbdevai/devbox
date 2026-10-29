@@ -1111,8 +1111,19 @@ fun TerminalScreen(
 
             var lastCharWidth by remember { mutableFloatStateOf(0f) }
             var lastCharHeight by remember { mutableFloatStateOf(0f) }
+            var unconstrainedMaxHeightPx by remember { mutableFloatStateOf(0f) }
 
-            LaunchedEffect(activeSession, maxWidth, maxHeight, charWidthPx, charHeightPx) {
+            // Lacak tinggi layar saat keyboard tertutup (full viewport height)
+            if (!isImeVisible && maxHeight.value > 0f) {
+                with(density) {
+                    val currentH = maxHeight.toPx()
+                    if (currentH > unconstrainedMaxHeightPx) {
+                        unconstrainedMaxHeightPx = currentH
+                    }
+                }
+            }
+
+            LaunchedEffect(activeSession, maxWidth, maxHeight, charWidthPx, charHeightPx, isImeVisible) {
                 val isFontZoom = lastCharWidth > 0f && (lastCharWidth != charWidthPx || lastCharHeight != charHeightPx)
                 lastCharWidth = charWidthPx
                 lastCharHeight = charHeightPx
@@ -1120,7 +1131,7 @@ fun TerminalScreen(
                 if (isFontZoom) {
                     delay(120) // Debounce pinch-zoom font resize
                 } else {
-                    delay(10) // Keyboard buka/tutup atau resize layout: settle instan (libsu persistent shell)
+                    delay(10)
                 }
 
                 with(density) {
@@ -1128,8 +1139,33 @@ fun TerminalScreen(
                     val vPaddingPx = 4.dp.toPx() // 2.dp vertical margin di setiap sisi
                     if (charWidthPx > 0 && charHeightPx > 0) {
                         val cols = ((maxWidth.toPx() - hPaddingPx).coerceAtLeast(1f) / charWidthPx).toInt().coerceIn(20, 300)
-                        val rows = ((maxHeight.toPx() - vPaddingPx).coerceAtLeast(1f) / charHeightPx).toInt().coerceIn(18, 200)
+                        // KUNCI ROWS LINUX (Virtual Viewport Panning):
+                        // Saat keyboard virtual HP muncul, JANGAN mengecilkan rows terminal di Linux!
+                        // Tetap gunakan tinggi layar penuh unconstrainedMaxHeightPx agar PTY tidak menerima SIGWINCH
+                        // dan Bubble Tea/agy tidak pernah terbentur baris 0 (Solusi 1 Dokumen Audit Master).
+                        val targetHeightPx = if (isImeVisible && unconstrainedMaxHeightPx > 0f) {
+                            unconstrainedMaxHeightPx
+                        } else {
+                            maxHeight.toPx()
+                        }
+                        val rows = ((targetHeightPx - vPaddingPx).coerceAtLeast(1f) / charHeightPx).toInt().coerceIn(18, 200)
                         activeSession.updateWindowSize(cols, rows, isImmediate = !isFontZoom)
+                    }
+                }
+            }
+
+            // Saat keyboard virtual aktif, geser scroll canvas ke posisi kursor agar tetap terlihat di atas keyboard
+            LaunchedEffect(isImeVisible, activeSession.buffer.cursorRow, activeSession.buffer.version.intValue) {
+                if (isImeVisible && autoScrollEnabled && charHeightPx > 0f) {
+                    val historyCount = activeSession.buffer.getScrollbackSize()
+                    val cursorRow = activeSession.buffer.cursorRow
+                    val cursorYPx = (historyCount + cursorRow) * charHeightPx
+                    with(density) {
+                        val visibleViewportPx = maxHeight.toPx()
+                        val targetScroll = (cursorYPx - visibleViewportPx + charHeightPx * 2).toInt().coerceAtLeast(0)
+                        if (targetScroll != verticalScrollState.value) {
+                            verticalScrollState.scrollTo(targetScroll)
+                        }
                     }
                 }
             }
@@ -2405,56 +2441,14 @@ fun TerminalCanvas(
                             }
                         }
 
-                        // 2. Gambar karakter teks dengan Text Run Batching (mengurangi ribuan JNI drawText call per frame)
-                        var col = 0
-                        while (col < lineCols) {
+                        // 2. Gambar karakter teks presisi per sel monospaced (100% akurat, nol kerning drift, nol loncat kursor)
+                        for (col in 0 until lineCols) {
                             val cell = line.getOrNull(col) ?: break
-                            if (cell.isWideContinuation) {
-                                col++
-                                continue
-                            }
+                            if (cell.isWideContinuation || cell.char == ' ') continue
 
                             val pt = GridPoint(lineIdx, col)
                             val isSelected = hasSelection && selMin != null && selMax != null && pt >= selMin && pt <= selMax
                             val isCursor = (isCursorVisible && (lineIdx - historyCount) == cursorRow && col == cursorCol)
-
-                            // Jika karakter memerlukan penanganan khusus (kursor, seleksi, wide char, extra mark)
-                            if (isCursor || isSelected || cell.isWide || cell.extraChar != null) {
-                                val rawFg = if (cell.isDim) cell.fgColor.copy(alpha = 0.6f) else cell.fgColor
-                                val invFg = if (cell.isInverse) {
-                                    if (cell.bgColor == Color.Transparent) (if (activeTheme.background == Color.Transparent) Color(0xFF0D1117) else activeTheme.background)
-                                    else cell.bgColor
-                                } else {
-                                    rawFg
-                                }
-                                val fg = when {
-                                    isSelected -> Color.White
-                                    isCursor -> if (activeTheme.background == Color.Transparent) Color.Black else activeTheme.background
-                                    else -> invFg
-                                }
-                                textPaint.color = fg.toArgb()
-                                textPaint.isFakeBoldText = cell.isBold || isSelected
-                                textPaint.isUnderlineText = cell.isUnderline || cell.hyperlinkUrl != null
-                                val cellX = col * charWidth
-
-                                if (cell.extraChar != null) {
-                                    nativeCanvas.drawText("${cell.char}${cell.extraChar}", cellX, yText, textPaint)
-                                } else if (cell.isWide) {
-                                    singleChar[0] = cell.char
-                                    nativeCanvas.drawText(singleChar, 0, 1, cellX, yText, textPaint)
-                                } else if (cell.char != ' ') {
-                                    singleChar[0] = cell.char
-                                    nativeCanvas.drawText(singleChar, 0, 1, cellX, yText, textPaint)
-                                }
-                                col++
-                                continue
-                            }
-
-                            // Lewati spasi biasa
-                            if (cell.char == ' ') {
-                                col++
-                                continue
-                            }
 
                             val rawFg = if (cell.isDim) cell.fgColor.copy(alpha = 0.6f) else cell.fgColor
                             val invFg = if (cell.isInverse) {
@@ -2463,43 +2457,22 @@ fun TerminalCanvas(
                             } else {
                                 rawFg
                             }
-                            val runFg = invFg
-                            val runBold = cell.isBold
-                            val runUnderline = cell.isUnderline || cell.hyperlinkUrl != null
-                            val startCol = col
-
-                            val sb = StringBuilder()
-                            sb.append(cell.char)
-                            col++
-
-                            while (col < lineCols) {
-                                val nextCell = line.getOrNull(col) ?: break
-                                if (nextCell.isWideContinuation || nextCell.isWide || nextCell.extraChar != null || nextCell.char == ' ') break
-                                val nextPt = GridPoint(lineIdx, col)
-                                val nextSelected = hasSelection && selMin != null && selMax != null && nextPt >= selMin && nextPt <= selMax
-                                val nextCursor = (isCursorVisible && (lineIdx - historyCount) == cursorRow && col == cursorCol)
-                                if (nextSelected || nextCursor) break
-
-                                val nextRawFg = if (nextCell.isDim) nextCell.fgColor.copy(alpha = 0.6f) else nextCell.fgColor
-                                val nextInvFg = if (nextCell.isInverse) {
-                                    if (nextCell.bgColor == Color.Transparent) (if (activeTheme.background == Color.Transparent) Color(0xFF0D1117) else activeTheme.background)
-                                    else nextCell.bgColor
-                                } else {
-                                    nextRawFg
-                                }
-                                val nextUnderline = nextCell.isUnderline || nextCell.hyperlinkUrl != null
-                                if (nextInvFg == runFg && nextCell.isBold == runBold && nextUnderline == runUnderline) {
-                                    sb.append(nextCell.char)
-                                    col++
-                                } else {
-                                    break
-                                }
+                            val fg = when {
+                                isSelected -> Color.White
+                                isCursor -> if (activeTheme.background == Color.Transparent) Color.Black else activeTheme.background
+                                else -> invFg
                             }
+                            textPaint.color = fg.toArgb()
+                            textPaint.isFakeBoldText = cell.isBold || isSelected
+                            textPaint.isUnderlineText = cell.isUnderline || cell.hyperlinkUrl != null
+                            val cellX = col * charWidth
 
-                            textPaint.color = runFg.toArgb()
-                            textPaint.isFakeBoldText = runBold
-                            textPaint.isUnderlineText = runUnderline
-                            nativeCanvas.drawText(sb.toString(), startCol * charWidth, yText, textPaint)
+                            if (cell.extraChar != null) {
+                                nativeCanvas.drawText("${cell.char}${cell.extraChar}", cellX, yText, textPaint)
+                            } else {
+                                singleChar[0] = cell.char
+                                nativeCanvas.drawText(singleChar, 0, 1, cellX, yText, textPaint)
+                            }
                         }
 
                         // Kursor di luar batas kolom karakter
