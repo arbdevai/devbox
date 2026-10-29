@@ -489,6 +489,7 @@ class NativeTerminalSession(
             inputStream?.close()
             process?.destroy()
             cachedPtsDev = null
+            buffer.destroy()
             sessionScope.launch(Dispatchers.IO) {
                 val cleanupCmd = "rm -f '$targetRootfs/tmp/.devbox_pts_$sessionId' '$targetRootfs/tmp/.devbox_pid_$sessionId' '$targetRootfs/tmp/.devbox_ws_$sessionId' '$targetRootfs/tmp/.devbox_cwd_$sessionId' '$targetRootfs/tmp/.devbox_active_agent_$sessionId' '$targetRootfs/home/coder/.devbox_pts_$sessionId' 2>/dev/null"
                 com.arbdev.devbox.data.RootExecutor.executeSync(cleanupCmd, silent = true)
