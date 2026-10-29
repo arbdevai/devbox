@@ -152,6 +152,8 @@ fun DashboardScreen(
     // Dialog Konfirmasi Keluar Total
     var showExitConfirmationDialog by remember { mutableStateOf(false) }
     var isExiting by remember { mutableStateOf(false) }
+    var exitProgress by remember { mutableFloatStateOf(0f) }
+    var exitStatusText by remember { mutableStateOf("") }
 
     // Dialog Konfirmasi Hapus Rootfs (Uninstall)
     var showUninstallDialog by remember { mutableStateOf(false) }
@@ -339,7 +341,7 @@ fun DashboardScreen(
                     border = BorderStroke(1.dp, DevPrimary)
                 ) {
                     Row(
-                        modifier = Modifier.padding(16.dp),
+                        modifier = Modifier.fillMaxWidth().padding(16.dp),
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
@@ -935,13 +937,35 @@ fun DashboardScreen(
                         horizontalAlignment = Alignment.CenterHorizontally,
                         modifier = Modifier.fillMaxWidth().padding(vertical = 12.dp)
                     ) {
-                        CircularProgressIndicator(color = DevError, modifier = Modifier.size(36.dp))
-                        Spacer(modifier = Modifier.height(12.dp))
-                        Text(
-                            text = "Terminating container processes & unmounting filesystems...",
-                            fontSize = 13.sp,
-                            color = DevOnSurface
+                        LinearProgressIndicator(
+                            progress = { exitProgress },
+                            color = DevError,
+                            trackColor = DevError.copy(alpha = 0.2f),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(8.dp)
+                                .clip(RoundedCornerShape(4.dp))
                         )
+                        Spacer(modifier = Modifier.height(14.dp))
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = exitStatusText,
+                                fontSize = 12.sp,
+                                color = DevOnSurface,
+                                modifier = Modifier.weight(1f)
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                text = "${(exitProgress * 100).toInt()}%",
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = DevError
+                            )
+                        }
                     }
                 } else {
                     Text(
@@ -957,11 +981,24 @@ fun DashboardScreen(
                         onClick = {
                             scope.launch {
                                 isExiting = true
+                                exitProgress = 0.20f
+                                exitStatusText = "Menghentikan seluruh sesi terminal..."
                                 withContext(Dispatchers.IO) {
                                     com.arbdev.devbox.terminal.TerminalSessionManager.terminateAll()
+                                }
+                                exitProgress = 0.55f
+                                exitStatusText = "Menyapu bersih proses container di /proc..."
+                                withContext(Dispatchers.IO) {
                                     com.arbdev.devbox.data.ChrootManager.killDevboxProcessesAndUnmountSync()
+                                }
+                                exitProgress = 0.85f
+                                exitStatusText = "Melepas service background & penyimpanan..."
+                                withContext(Dispatchers.IO) {
                                     com.arbdev.devbox.service.KeepAliveService.stopService(context)
                                 }
+                                exitProgress = 1.0f
+                                exitStatusText = "Selesai. Menutup DevBox..."
+                                kotlinx.coroutines.delay(200)
                                 (context as? Activity)?.finishAndRemoveTask()
                             }
                         },

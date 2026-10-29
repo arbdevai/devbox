@@ -16,7 +16,7 @@ static const VTermRGB ansi_colors[] = {
   { 224,   0,   0 }, // red
   {   0, 224,   0 }, // green
   { 224, 224,   0 }, // yellow
-  {   0,   0, 224 }, // blue
+  {  88, 166, 255 }, // blue (high-contrast modern sky blue #58A6FF for crisp folder readability)
   { 224,   0, 224 }, // magenta
   {   0, 224, 224 }, // cyan
   { 224, 224, 224 }, // white == light grey
@@ -26,7 +26,7 @@ static const VTermRGB ansi_colors[] = {
   { 255,  64,  64 }, // red
   {  64, 255,  64 }, // green
   { 255, 255,  64 }, // yellow
-  {  64,  64, 255 }, // blue
+  { 122, 162, 247 }, // blue (high-contrast TokyoNight bright blue #7AA2F7)
   { 255,  64, 255 }, // magenta
   {  64, 255, 255 }, // cyan
   { 255, 255, 255 }, // white for real

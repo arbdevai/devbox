@@ -1072,9 +1072,10 @@ fun TerminalScreen(
 
                                 if (prevDist > 0f) {
                                     val scale = currentDist / prevDist
-                                    if (scale in 0.5f..2.0f && kotlin.math.abs(scale - 1f) > 0.005f) {
-                                        val delta = (scale - 1f) * (terminalFontSize * 1.5f)
-                                        updateFontSize(terminalFontSize + delta)
+                                    if (scale in 0.7f..1.4f && kotlin.math.abs(scale - 1f) > 0.008f) {
+                                        // Damping factor halus agar zoom in/out bertahap, terkendali, dan nyaman diatur
+                                        val delta = ((scale - 1f) * 6f).coerceIn(-0.35f, 0.35f)
+                                        updateFontSize((terminalFontSize + delta).coerceIn(8f, 26f))
                                         activePointers.forEach { it.consume() }
                                     }
                                 }
@@ -1172,9 +1173,15 @@ fun TerminalScreen(
                         val visibleBottom = currentScroll + visibleViewportPx
 
                         if (isImeVisible && autoScrollEnabled) {
-                            if (cursorYPx + charHeightPx > visibleBottom) {
-                                // Kursor di bawah viewport (terhalang keyboard) -> scroll secukupnya
-                                val targetScroll = (cursorYPx - visibleViewportPx + charHeightPx * 2).toInt().coerceAtLeast(0)
+                            if (historyCount == 0 && cursorYPx + charHeightPx <= visibleViewportPx) {
+                                // Layar aktif belum penuh scrollback dan kursor masih muat di atas keyboard:
+                                // Kunci posisi scroll di 0 agar prompt bash di atas TIDAK PERNAH tertarik ke atas!
+                                if (verticalScrollState.value != 0) {
+                                    verticalScrollState.scrollTo(0)
+                                }
+                            } else if (cursorYPx + charHeightPx > visibleBottom) {
+                                // Kursor di bawah viewport (terhalang keyboard) -> scroll presisi pas kursor terlihat
+                                val targetScroll = (cursorYPx + charHeightPx - visibleViewportPx).toInt().coerceAtLeast(0)
                                 if (targetScroll != verticalScrollState.value) {
                                     verticalScrollState.scrollTo(targetScroll)
                                 }

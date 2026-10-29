@@ -28,7 +28,7 @@ data class TerminalTheme(
                 Color(0xFFFF6B6B), // 1 Red
                 Color(0xFF7DFF4C), // 2 Green (#7DFF4C)
                 Color(0xFFFFD166), // 3 Yellow
-                Color(0xFFA8FF82), // 4 Accent Lime
+                Color(0xFF58A6FF), // 4 Blue (High contrast modern Sky Blue for readable directory names)
                 Color(0xFFC678DD), // 5 Magenta
                 Color(0xFF73F59F), // 6 Mint/Emerald
                 Color(0xFFE3E5E0), // 7 Light Gray
@@ -36,7 +36,7 @@ data class TerminalTheme(
                 Color(0xFFFF8E8E), // 9 Bright Red
                 Color(0xFF8FFF60), // 10 Bright Green
                 Color(0xFFFFE082), // 11 Bright Yellow
-                Color(0xFFB8FF96), // 12 Bright Lime
+                Color(0xFF7AA2F7), // 12 Bright Blue (High contrast bright Sky Blue)
                 Color(0xFFD896FF), // 13 Bright Magenta
                 Color(0xFF8BFFB5), // 14 Bright Mint
                 Color(0xFFFFFFFF)  // 15 Bright White
