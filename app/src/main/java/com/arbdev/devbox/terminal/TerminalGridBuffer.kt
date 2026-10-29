@@ -3,6 +3,7 @@ package com.arbdev.devbox.terminal
 import android.os.Handler
 import android.os.Looper
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.graphics.Color
 import java.nio.charset.StandardCharsets
 
@@ -81,8 +82,11 @@ class TerminalGridBuffer(
         private set
     var isCursorVisible: Boolean = true
         private set
-    var isAltBuffer: Boolean = false
-        private set
+
+    // DEC Mode 1049 Alternate Screen Buffer State (Reaktif untuk beralih layar Agent CLI vs Bash secara bersih)
+    val isAltBufferState = mutableStateOf(false)
+    val isAltBuffer: Boolean
+        get() = isAltBufferState.value
 
     // TUI Extension Modes
     @Volatile
@@ -202,7 +206,7 @@ class TerminalGridBuffer(
             cursorRow = 0
             cursorCol = 0
             isCursorVisible = true
-            isAltBuffer = false
+            isAltBufferState.value = false
             isBracketedPasteMode = false
             isMouseTrackingEnabled = false
             isSgrMouseMode = false
@@ -270,7 +274,12 @@ class TerminalGridBuffer(
         isSgrMouseMode = (modeArr[2] != 0)
         isApplicationCursorKeys = (modeArr[3] != 0)
 
-        isAltBuffer = vterm.isAltScreen()
+        val alt = vterm.isAltScreen()
+        if (Looper.myLooper() == Looper.getMainLooper()) {
+            if (isAltBufferState.value != alt) {
+                isAltBufferState.value = alt
+            }
+        }
 
         val vTitle = vterm.getTitle()
         if (!vTitle.isNullOrBlank() && vTitle != windowTitle) {
@@ -637,6 +646,10 @@ class TerminalGridBuffer(
                 synchronized(lock) {
                     updatePending = false
                     version.intValue++
+                    val alt = vterm.isAltScreen()
+                    if (isAltBufferState.value != alt) {
+                        isAltBufferState.value = alt
+                    }
                     val count = getLineCount()
                     if (lineCountState.intValue != count) {
                         lineCountState.intValue = count

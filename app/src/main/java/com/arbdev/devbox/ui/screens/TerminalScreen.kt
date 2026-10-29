@@ -359,6 +359,17 @@ fun TerminalScreen(
         previousLineCount = currentLines
     }
 
+    // DEC Mode 1049 Alternate Screen Buffer switching (Agent CLI full screen isolation & clean Bash restoration)
+    LaunchedEffect(activeSession.id, activeSession.buffer.isAltBufferState.value) {
+        if (activeSession.buffer.isAltBufferState.value) {
+            verticalScrollState.scrollTo(0)
+            horizontalScrollState.scrollTo(0)
+        } else {
+            autoScrollEnabled = true
+            verticalScrollState.scrollTo(verticalScrollState.maxValue)
+        }
+    }
+
     // Eksekusi initial command jika disediakan
     LaunchedEffect(initialCommand) {
         initialCommand?.let { cmd ->
@@ -2232,7 +2243,7 @@ fun TerminalCanvas(
     }
 
     // Trigger recompose HANYA jika jumlah baris atau buffer mode berubah (bukan per karakter)
-    val isAltBuffer = session.buffer.isAltBuffer
+    val isAltBuffer = session.buffer.isAltBufferState.value
     val lineCount = if (isAltBuffer) session.buffer.maxRows else session.buffer.lineCountState.intValue.coerceAtLeast(1)
     val totalWidthPx = (session.buffer.maxCols * charWidth).toInt().coerceAtLeast(1)
     val totalHeightPx = (lineCount * charHeight).toInt().coerceAtLeast(1)
@@ -2601,7 +2612,7 @@ fun TerminalCanvas(
         // 1. Menu Kontekstual Seleksi Teks (In-Tree Overlay Surface)
         if (hasSelection && selMin != null && selMax != null && showSelectionMenu && !isDraggingHandle) {
             val scrollX = horizontalScrollState.value.toFloat()
-            val scrollY = if (!isAltBuffer) verticalScrollState.value else 0
+            val scrollY = verticalScrollState.value.toFloat()
 
             val topTextScreenY = selMin.line * charHeight - scrollY
             val bottomTextScreenY = (selMax.line + 1) * charHeight - scrollY
@@ -2737,7 +2748,7 @@ fun TerminalCanvas(
         val pastePos = pasteMenuOffset
         if (pastePos != null && selectionStart == null) {
             val scrollX = horizontalScrollState.value.toFloat()
-            val scrollY = if (!isAltBuffer) verticalScrollState.value else 0
+            val scrollY = verticalScrollState.value.toFloat()
             val screenX = pastePos.x - scrollX
             val screenY = pastePos.y - scrollY
 
