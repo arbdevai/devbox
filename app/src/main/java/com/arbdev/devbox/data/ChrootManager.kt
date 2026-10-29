@@ -50,21 +50,29 @@ object ChrootManager {
         AppLogger.i("ChrootManager", "Memuat rootfs [${com.arbdev.devbox.FlavorConfig.FLAVOR_NAME}]: $activeRootfs")
     }
 
-    fun findSuPath(): String {
-        val candidates = arrayOf(
-            "/system/bin/su",
-            "/system/xbin/su",
-            "/data/adb/ksu/bin/su",
-            "/data/adb/ap/bin/su",
-            "su"
-        )
-        for (candidate in candidates) {
-            if (candidate == "su" || File(candidate).exists()) {
-                return candidate
+    val environment: com.arbdev.devbox.backend.LinuxEnvironment
+        get() = try {
+            org.koin.core.context.GlobalContext.get().get()
+        } catch (_: Exception) {
+            object : com.arbdev.devbox.backend.LinuxEnvironment {
+                override val backendType: String = com.arbdev.devbox.FlavorConfig.FLAVOR_NAME
+                override val isRootBackend: Boolean = com.arbdev.devbox.FlavorConfig.IS_ROOT_FLAVOR
+                override val defaultRootfsPath: String = DEFAULT_ROOTFS
+                override fun init(context: Context) {}
+                override suspend fun isRootAvailable(forceCheck: Boolean): Boolean = isRootBackend
+                override fun startTerminalProcess(sessionId: String, targetRootfs: String, initCols: Int, initRows: Int): Process = ProcessBuilder("sh").start()
+                override fun updateTerminalWindowSize(sessionId: String, proc: Process?, cols: Int, rows: Int, targetRootfs: String) {}
+                override fun terminateSession(sessionId: String, targetRootfs: String) {}
+                override fun sendInterruptSignal(sessionId: String, targetRootfs: String) {}
+                override suspend fun getEnvironmentState(rootfs: String): ChrootState = ChrootState(isRootGranted = isRootBackend, rootfsPath = rootfs)
+                override suspend fun mountAll(rootfs: String): Result<String> = Result.success("OK")
+                override suspend fun unmountAll(rootfs: String): Result<String> = Result.success("OK")
+                override fun killProcessesAndUnmountSync(rootfs: String): Result<String> = Result.success("OK")
+                override suspend fun ensureEnvironmentReady(rootfs: String): Result<Unit> = Result.success(Unit)
+                override fun ensureEnvironmentReadySync(rootfs: String): Result<Unit> = Result.success(Unit)
+                override suspend fun runEnvironmentDiagnostics(): String = "Diagnostics Unavailable"
             }
         }
-        return "su"
-    }
 
     fun startTerminalProcess(
         sessionId: String,
@@ -72,60 +80,25 @@ object ChrootManager {
         initCols: Int,
         initRows: Int
     ): Process {
-        return if (com.arbdev.devbox.FlavorConfig.IS_ROOT_FLAVOR) {
-            val suBinary = findSuPath()
-            val chrootCmd = "mkdir -p '$targetRootfs/dev' '$targetRootfs/dev/pts' '$targetRootfs/proc' '$targetRootfs/sys' '$targetRootfs/mnt/sdcard' '$targetRootfs/tmp' 2>/dev/null; " +
-                    "chmod 1777 '$targetRootfs/tmp' 2>/dev/null; " +
-                    "mountpoint -q '$targetRootfs/dev' || { mount --bind /dev '$targetRootfs/dev' 2>/dev/null && mount --make-private '$targetRootfs/dev' 2>/dev/null; }; " +
-                    "mountpoint -q '$targetRootfs/dev/pts' || mount --bind /dev/pts '$targetRootfs/dev/pts' 2>/dev/null || mount -t devpts devpts '$targetRootfs/dev/pts' 2>/dev/null; " +
-                    "mountpoint -q '$targetRootfs/proc' || mount -t proc proc '$targetRootfs/proc' 2>/dev/null; " +
-                    "mountpoint -q '$targetRootfs/sys' || mount -t sysfs sysfs '$targetRootfs/sys' 2>/dev/null; " +
-                    "mountpoint -q '$targetRootfs/mnt/sdcard' || { mount --bind /sdcard '$targetRootfs/mnt/sdcard' 2>/dev/null && mount --make-private '$targetRootfs/mnt/sdcard' 2>/dev/null; }; " +
-                    "chown 1000:1000 '$targetRootfs/home/coder' 2>/dev/null; " +
-                    "cd '$targetRootfs' && exec chroot '$targetRootfs' /usr/bin/env -i HOME=/home/coder USER=coder LOGNAME=sahal SHELL=/bin/bash TERM=xterm-256color COLORTERM=truecolor DEVBOX=1 DEVBOX_SESSION_ID='$sessionId' GH_NO_KEYRING=1 PATH=/home/coder/.local/bin:/home/coder/.cargo/bin:/home/coder/go/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin /bin/bash -c 'cd /home/coder 2>/dev/null || cd /; if [ -x /usr/bin/script ]; then exec /usr/bin/script -qefc \"shopt -s checkwinsize 2>/dev/null; echo \\\$\\\$ > /tmp/.devbox_pid_$sessionId 2>/dev/null; tty > /tmp/.devbox_pts_$sessionId 2>/dev/null; echo \\\$(tty) > /home/coder/.devbox_pts_$sessionId 2>/dev/null; ws=\\\$(cat /tmp/.devbox_ws_$sessionId 2>/dev/null); if [ -n \\\"\\\$ws\\\" ]; then stty \\\$ws opost onlcr 2>/dev/null; else stty rows $initRows cols $initCols opost onlcr 2>/dev/null; fi; exec /bin/bash -l\" /dev/null; else exec /bin/bash -l; fi'"
-            val pb = ProcessBuilder(suBinary, "-c", chrootCmd)
-            pb.redirectErrorStream(true)
-            pb.start()
-        } else {
-            val ctx = appContext
-            val nativeLibDir = ctx?.applicationInfo?.nativeLibraryDir ?: "/data/data/com.arbdev.devbox.noroot/lib"
-            val prootBin = File(nativeLibDir, "libproot.so").absolutePath
-            val prootTmp = if (ctx != null) File(ctx.cacheDir, "proot_tmp").apply { mkdirs() }.absolutePath else "/tmp"
-            File(targetRootfs, "home/coder").mkdirs()
-            File(targetRootfs, "tmp").mkdirs()
+        return environment.startTerminalProcess(sessionId, targetRootfs, initCols, initRows)
+    }
 
-            val shellScript = "cd /home/coder 2>/dev/null || cd /; if [ -x /usr/bin/script ]; then exec /usr/bin/script -qefc \"shopt -s checkwinsize 2>/dev/null; echo \\\$\$ > /tmp/.devbox_pid_$sessionId 2>/dev/null; ws=\\\$(cat /tmp/.devbox_ws_$sessionId 2>/dev/null); if [ -n \\\"\\\$ws\\\" ]; then stty \\\$ws opost onlcr 2>/dev/null; else stty rows $initRows cols $initCols opost onlcr 2>/dev/null; fi; exec /bin/bash -l\" /dev/null; else exec /bin/bash -l; fi"
+    fun updateTerminalWindowSize(
+        sessionId: String,
+        proc: Process?,
+        cols: Int,
+        rows: Int,
+        targetRootfs: String = activeRootfs
+    ) {
+        environment.updateTerminalWindowSize(sessionId, proc, cols, rows, targetRootfs)
+    }
 
-            val pb = ProcessBuilder(
-                prootBin,
-                "--kill-on-exit",
-                "--link2symlink",
-                "-0",
-                "-r", targetRootfs,
-                "-b", "/dev",
-                "-b", "/proc",
-                "-b", "/sys",
-                "-b", "/sdcard:/mnt/sdcard",
-                "-b", "$prootTmp:/tmp",
-                "-w", "/home/coder",
-                "/usr/bin/env", "-i",
-                "HOME=/home/coder",
-                "USER=coder",
-                "LOGNAME=coder",
-                "SHELL=/bin/bash",
-                "TERM=xterm-256color",
-                "COLORTERM=truecolor",
-                "DEVBOX=1",
-                "DEVBOX_SESSION_ID=$sessionId",
-                "GH_NO_KEYRING=1",
-                "PATH=/home/coder/.local/bin:/home/coder/.cargo/bin:/home/coder/go/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
-                "/bin/bash", "-c",
-                shellScript
-            )
-            pb.environment()["PROOT_TMP_DIR"] = prootTmp
-            pb.redirectErrorStream(true)
-            pb.start()
-        }
+    fun terminateSession(sessionId: String, targetRootfs: String = activeRootfs) {
+        environment.terminateSession(sessionId, targetRootfs)
+    }
+
+    fun sendInterruptSignal(sessionId: String, targetRootfs: String = activeRootfs) {
+        environment.sendInterruptSignal(sessionId, targetRootfs)
     }
 
     fun setActiveRootfs(context: Context, newPath: String) {
@@ -188,284 +161,21 @@ object ChrootManager {
     var lastKnownState: ChrootState? = null
 
     suspend fun getChrootState(rootfs: String = activeRootfs): ChrootState {
-        val rootOk = if (com.arbdev.devbox.FlavorConfig.IS_ROOT_FLAVOR) RootExecutor.isRootAvailable() else true
-        if (!rootOk) {
-            AppLogger.w("ChrootManager", "Superuser (su) tidak terdeteksi.")
-            val state = ChrootState(isRootGranted = false, rootfsPath = rootfs)
-            lastKnownState = state
-            return state
-        }
-
-        // Optimasi atomic: Jalankan seluruh verifikasi status dalam 1 script bash kilat via su (<30ms)
-        val script = """
-            rf='$rootfs'
-            if [ -d "${'$'}rf" ] && { [ -x "${'$'}rf/bin/bash" ] || [ -x "${'$'}rf/usr/bin/bash" ] || [ -x "${'$'}rf/bin/sh" ]; }; then
-                status="EXISTS"
-            else
-                if [ -d "${'$'}rf" ]; then
-                    status="DIR_EMPTY"
-                else
-                    status="NOT_FOUND"
-                fi
-            fi
-
-            if [ -d '/data/local/ubuntu-chroot' ] && { [ -x '/data/local/ubuntu-chroot/bin/bash' ] || [ -x '/data/local/ubuntu-chroot/usr/bin/bash' ]; }; then
-                src_ok=1
-            else
-                src_ok=0
-            fi
-
-            if [ "${'$'}status" = "EXISTS" ]; then
-                grep -q " ${'$'}rf/proc " /proc/mounts 2>/dev/null && mnt=1 || mnt=${if (com.arbdev.devbox.FlavorConfig.IS_ROOT_FLAVOR) 0 else 1}
-
-                # Hitung proses chroot milik DevBox secara instan
-                procs=${'$'}(grep -sl "DEVBOX" /proc/[0-9]*/environ 2>/dev/null | wc -l)
-
-                ram=0
-                st=0
-                sf=0
-                while read -r key val rest; do
-                    case "${'$'}key" in
-                        MemAvailable:) ram=${'$'}((val / 1024)) ;;
-                        SwapTotal:) st=${'$'}((val / 1024)) ;;
-                        SwapFree:) sf=${'$'}((val / 1024)) ;;
-                    esac
-                done < /proc/meminfo
-                swap=${'$'}((st - sf))
-                [ ${'$'}swap -lt 0 ] && swap=0
-
-                # Cek port 8080 (1F90) & port 2222 (08AE) langsung via /proc/net/tcp (<1ms)
-                cs=0
-                ssh=0
-                if [ -f /proc/net/tcp ]; then
-                    grep -q ":1F90 " /proc/net/tcp && cs=1
-                    grep -q ":08AE " /proc/net/tcp && ssh=1
-                fi
-                echo "${'$'}status|${'$'}src_ok|${'$'}mnt|${'$'}procs|${'$'}ram|${'$'}swap|${'$'}cs|${'$'}ssh|${'$'}rf"
-            else
-                echo "${'$'}status|${'$'}src_ok|0|0|0|0|0|0|${'$'}rf"
-            fi
-        """.trimIndent()
-
-        val res = RootExecutor.execute(script)
-        val line = res.getOrNull()?.stdout?.trim()?.lines()?.lastOrNull() ?: ""
-        val parts = line.split("|")
-
-        if (parts.size >= 8) {
-            val statusText = parts[0]
-            val isSourceOk = parts[1] == "1"
-            val isMounted = parts[2] == "1"
-            val activeProcs = parts[3].toIntOrNull() ?: 0
-            val ramAvailable = parts[4].toLongOrNull() ?: 0L
-            val swapUsed = parts[5].toLongOrNull() ?: 0L
-            val isCodeServer = parts[6] == "1"
-            val isSsh = parts[7] == "1"
-            val isRootfsExists = statusText == "EXISTS"
-            if (!isRootfsExists) {
-                AppLogger.w("ChrootManager", "Status rootfs di $rootfs: $statusText")
-            }
-
-            val resultState = ChrootState(
-                isRootGranted = true,
-                isRootfsExists = isRootfsExists,
-                isMounted = isMounted,
-                activeProcesses = activeProcs,
-                ramAvailableMb = ramAvailable,
-                swapUsedMb = swapUsed,
-                isCodeServerRunning = isCodeServer,
-                isSshRunning = isSsh,
-                rootfsPath = activeRootfs,
-                isSourceChrootAvailable = isSourceOk
-            )
-            lastKnownState = resultState
-            return resultState
-        }
-
-        // Fallback jika parsing gagal
-        val fallbackState = ChrootState(
-            isRootGranted = true,
-            isRootfsExists = false,
-            rootfsPath = activeRootfs
-        )
-        lastKnownState = fallbackState
-        return fallbackState
+        val state = environment.getEnvironmentState(rootfs)
+        lastKnownState = state
+        return state
     }
 
     suspend fun mountAll(rootfs: String = activeRootfs): Result<String> {
-        AppLogger.i("ChrootManager", "Memasang mount points untuk $rootfs...")
-        val script = """
-            mkdir -p '$rootfs/dev' '$rootfs/dev/pts' '$rootfs/proc' '$rootfs/sys' '$rootfs/mnt/sdcard' '$rootfs/tmp'
-            chmod 1777 '$rootfs/tmp' 2>/dev/null || true
-            mountpoint -q '$rootfs/dev' || { mount --bind /dev '$rootfs/dev' && mount --make-private '$rootfs/dev'; }
-            mountpoint -q '$rootfs/dev/pts' || mount -t devpts devpts '$rootfs/dev/pts' 2>/dev/null || mount --bind /dev/pts '$rootfs/dev/pts'
-            mountpoint -q '$rootfs/proc' || mount -t proc proc '$rootfs/proc'
-            mountpoint -q '$rootfs/sys' || mount -t sysfs sysfs '$rootfs/sys'
-            mountpoint -q '$rootfs/mnt/sdcard' || { mount --bind /sdcard '$rootfs/mnt/sdcard' && mount --make-private '$rootfs/mnt/sdcard'; }
-            mount --make-rprivate '$rootfs' 2>/dev/null || true
-            grep -qE '^127\.0\.0\.1[[:space:]]+localhost' '$rootfs/etc/hosts' 2>/dev/null || echo '127.0.0.1 localhost' >> '$rootfs/etc/hosts' 2>/dev/null || true
-            android_dns1=${'$'}(getprop net.dns1 2>/dev/null || true)
-            android_dns2=${'$'}(getprop net.dns2 2>/dev/null || true)
-            if [ -n "${'$'}android_dns1" ] && ! grep -q "${'$'}android_dns1" '$rootfs/etc/resolv.conf' 2>/dev/null; then
-                printf "nameserver %s\n" "${'$'}android_dns1" > '$rootfs/etc/resolv.conf' 2>/dev/null || true
-                [ -n "${'$'}android_dns2" ] && printf "nameserver %s\n" "${'$'}android_dns2" >> '$rootfs/etc/resolv.conf' 2>/dev/null || true
-                printf "nameserver 8.8.8.8\nnameserver 1.1.1.1\n" >> '$rootfs/etc/resolv.conf' 2>/dev/null || true
-            else
-                grep -q 'nameserver' '$rootfs/etc/resolv.conf' 2>/dev/null || printf "nameserver 8.8.8.8\nnameserver 1.1.1.1\n" >> '$rootfs/etc/resolv.conf' 2>/dev/null || true
-            fi
-            if [ ! -f '$rootfs/usr/local/bin/xdg-open' ]; then
-                mkdir -p '$rootfs/usr/local/bin'
-                cat <<'XDG_EOF' > '$rootfs/usr/local/bin/xdg-open'
-#!/bin/bash
-TARGET="${'$'}1"
-if [ -z "${'$'}TARGET" ]; then exit 0; fi
-echo ""
-echo "=================================================="
-echo " [DevBox Browser / Open URL]"
-echo " URL: ${'$'}TARGET"
-echo "=================================================="
-echo ""
-echo "${'$'}TARGET" >> /tmp/.devbox_open_url 2>/dev/null || true
-chmod 666 /tmp/.devbox_open_url 2>/dev/null || true
-echo "${'$'}TARGET" > /tmp/devbox_latest_url 2>/dev/null || true
-if [ -x /system/bin/am ]; then
-    /system/bin/am start -a android.intent.action.VIEW -d "${'$'}TARGET" >/dev/null 2>&1 || true
-fi
-exit 0
-XDG_EOF
-                chmod 755 '$rootfs/usr/local/bin/xdg-open' 2>/dev/null || true
-                ln -sf /usr/local/bin/xdg-open '$rootfs/usr/bin/xdg-open' 2>/dev/null || true
-                ln -sf /usr/local/bin/xdg-open '$rootfs/usr/bin/x-www-browser' 2>/dev/null || true
-            fi
-
-            mkdir -p '$rootfs/tmp/devbox-bridge'
-            chmod 777 '$rootfs/tmp/devbox-bridge' 2>/dev/null || true
-            if [ ! -f '$rootfs/usr/local/bin/devbox-bridge' ]; then
-                mkdir -p '$rootfs/usr/local/bin'
-                cat <<'BRIDGE_EOF' > '$rootfs/usr/local/bin/devbox-bridge'
-#!/bin/sh
-BRIDGE_DIR="/tmp/devbox-bridge"
-mkdir -p "${'$'}BRIDGE_DIR" 2>/dev/null || true
-chmod 777 "${'$'}BRIDGE_DIR" 2>/dev/null || true
-
-CMD="${'$'}1"
-case "${'$'}CMD" in
-    copy|clip)
-        shift
-        TEXT="${'$'}*"
-        if [ -z "${'$'}TEXT" ]; then
-            TEXT=${'$'}(cat)
-        fi
-        printf "%s" "${'$'}TEXT" > "${'$'}BRIDGE_DIR/clipboard.txt" 2>/dev/null || true
-        printf "\033]52;c;%s\a" "${'$'}(printf "%s" "${'$'}TEXT" | base64 | tr -d '\r\n')" 2>/dev/null || true
-        echo "DevBox Bridge: Teks disalin ke clipboard."
-        ;;
-    notify)
-        shift
-        TITLE="${'$'}{1:-DevBox Agent}"
-        shift
-        MSG="${'$'}*"
-        printf "%s|%s\n" "${'$'}TITLE" "${'$'}MSG" >> "${'$'}BRIDGE_DIR/notify.txt" 2>/dev/null || true
-        chmod 666 "${'$'}BRIDGE_DIR/notify.txt" 2>/dev/null || true
-        echo "DevBox Bridge: Notifikasi dikirim: ${'$'}TITLE - ${'$'}MSG"
-        ;;
-    open|url)
-        shift
-        URL="${'$'}1"
-        if [ -n "${'$'}URL" ]; then
-            printf "%s\n" "${'$'}URL" > "${'$'}BRIDGE_DIR/url.txt" 2>/dev/null || true
-            printf "%s\n" "${'$'}URL" >> /tmp/.devbox_open_url 2>/dev/null || true
-            chmod 666 /tmp/.devbox_open_url 2>/dev/null || true
-            /usr/local/bin/xdg-open "${'$'}URL" 2>/dev/null || true
-        fi
-        ;;
-    transcript|last-agent)
-        BRAIN_DIR="${'$'}HOME/.gemini/antigravity-cli/brain"
-        [ -d "${'$'}BRAIN_DIR" ] || BRAIN_DIR="/home/coder/.gemini/antigravity-cli/brain"
-        LATEST_LOG=${'$'}(find "${'$'}BRAIN_DIR" -name "transcript.jsonl" -type f 2>/dev/null | xargs ls -t 2>/dev/null | head -n1)
-        if [ -f "${'$'}LATEST_LOG" ]; then
-            grep '"type":"PLANNER_RESPONSE"' "${'$'}LATEST_LOG" | tail -n1
-        else
-            echo "Belum ada riwayat Antigravity CLI."
-        fi
-        ;;
-    *)
-        echo "DevBox Bridge v1.0.80"
-        echo "Usage: devbox-bridge <copy|notify|open|transcript> [args...]"
-        ;;
-esac
-BRIDGE_EOF
-                chmod 755 '$rootfs/usr/local/bin/devbox-bridge' 2>/dev/null || true
-                ln -sf /usr/local/bin/devbox-bridge '$rootfs/usr/bin/devbox-bridge' 2>/dev/null || true
-                ln -sf /usr/local/bin/devbox-bridge '$rootfs/usr/local/bin/devbox-clip' 2>/dev/null || true
-            fi
-            echo 'SUCCESS'
-        """.trimIndent()
-
-        val res = RootExecutor.execute(script)
-        return if (res.getOrNull()?.isSuccess == true && res.getOrNull()?.stdout?.contains("SUCCESS") == true) {
-            ensureEnvironmentReady(rootfs)
-            AppLogger.i("ChrootManager", "Mount DevBox berhasil dipasang.")
-            Result.success("Mount chroot DevBox berhasil dipasang.")
-        } else {
-            val err = res.getOrNull()?.stderr ?: "Gagal memasang mount chroot DevBox."
-            AppLogger.e("ChrootManager", err)
-            Result.failure(Exception(err))
-        }
+        return environment.mountAll(rootfs)
     }
 
     suspend fun unmountAll(rootfs: String = activeRootfs): Result<String> {
-        AppLogger.i("ChrootManager", "Membersihkan mount points untuk $rootfs...")
-        val script = """
-            umount -l '$rootfs/mnt/sdcard' 2>/dev/null || true
-            umount -l '$rootfs/sdcard' 2>/dev/null || true
-            umount -l '$rootfs/sys' 2>/dev/null || true
-            umount -l '$rootfs/proc' 2>/dev/null || true
-            umount -l '$rootfs/dev/pts' 2>/dev/null || true
-            umount -l '$rootfs/dev' 2>/dev/null || true
-            echo 'CLEAN'
-        """.trimIndent()
-
-        val res = RootExecutor.execute(script)
-        return if (res.getOrNull()?.isSuccess == true) {
-            AppLogger.i("ChrootManager", "Mount DevBox berhasil dibersihkan.")
-            Result.success("Semua mount chroot DevBox berhasil dibersihkan.")
-        } else {
-            val err = res.getOrNull()?.stderr ?: "Gagal unmount chroot DevBox."
-            AppLogger.e("ChrootManager", err)
-            Result.failure(Exception(err))
-        }
+        return environment.unmountAll(rootfs)
     }
 
     fun killDevboxProcessesAndUnmountSync(rootfs: String = activeRootfs): Result<String> {
-        val script = """
-            # 1. Matikan HANYA proses yang diluncurkan oleh DevBox (memiliki tag DEVBOX di environ)
-            for p in /proc/[0-9]*; do
-                if grep -q 'DEVBOX' "${'$'}p/environ" 2>/dev/null; then
-                    kill -9 "${'$'}(basename ${'$'}p)" 2>/dev/null || true
-                fi
-            done
-
-            # 2. Lepaskan mountpoint jika ini container devbox-chroot mandiri, atau jika Termux tidak ada
-            if [ '$rootfs' = '/data/local/devbox-chroot' ] || [ ! -d '/data/data/com.termux' ]; then
-                umount -l '$rootfs/mnt/sdcard' 2>/dev/null || true
-                umount -l '$rootfs/sdcard' 2>/dev/null || true
-                umount -l '$rootfs/sys' 2>/dev/null || true
-                umount -l '$rootfs/proc' 2>/dev/null || true
-                umount -l '$rootfs/dev/pts' 2>/dev/null || true
-                umount -l '$rootfs/dev' 2>/dev/null || true
-            fi
-            echo 'TERMINATED'
-        """.trimIndent()
-
-        val res = RootExecutor.executeSync(script)
-        return if (res.getOrNull()?.isSuccess == true) {
-            AppLogger.i("ChrootManager", "Semua proses & container DevBox dimatikan total.")
-            Result.success("Semua proses dan container DevBox berhasil dihentikan total.")
-        } else {
-            val err = res.getOrNull()?.stderr ?: "Gagal mematikan container DevBox."
-            AppLogger.e("ChrootManager", err)
-            Result.failure(Exception(err))
-        }
+        return environment.killProcessesAndUnmountSync(rootfs)
     }
 
     suspend fun killDevboxProcessesAndUnmount(rootfs: String = activeRootfs): Result<String> {
@@ -1523,54 +1233,17 @@ PROFILE_EOF
     suspend fun ensureEnvironmentReady(rootfs: String = activeRootfs): Result<Unit> = withContext(Dispatchers.IO) {
         val script = getEnvironmentSetupScript(rootfs)
         RootExecutor.execute(script, silent = true)
-        Result.success(Unit)
+        environment.ensureEnvironmentReady(rootfs)
     }
 
     fun ensureEnvironmentReadySync(rootfs: String = activeRootfs): Result<Unit> {
         val script = getEnvironmentSetupScript(rootfs)
         RootExecutor.executeSync(script, silent = true)
-        return Result.success(Unit)
+        return environment.ensureEnvironmentReadySync(rootfs)
     }
 
     suspend fun runEnvironmentDiagnostics(): String = withContext(Dispatchers.IO) {
         AppLogger.i("Diagnostics", "Menjalankan diagnostik lingkungan menyeluruh...")
-        val diagScript = """
-            echo "=== INFORMASI SUPERUSER & KERNEL ==="
-            id
-            uname -a
-            which su
-            echo ""
-            echo "=== CEK DIREKTORI /data/local ==="
-            ls -la /data/local
-            echo ""
-            echo "=== CEK ROOTFS TARGET ($activeRootfs) ==="
-            if [ -d '$activeRootfs' ]; then
-                echo "Direktori $activeRootfs DITEMUKAN:"
-                ls -la '$activeRootfs'
-            else
-                echo "Direktori $activeRootfs TIDAK ADA."
-            fi
-            echo ""
-            echo "=== CEK CHROOT LAMA (/data/local/ubuntu-chroot) ==="
-            if [ -d '/data/local/ubuntu-chroot' ]; then
-                echo "ubuntu-chroot lama DITEMUKAN. File /bin/bash:"
-                ls -lh '/data/local/ubuntu-chroot/bin/bash' 2>/dev/null || echo "bash tidak ditemukan"
-            else
-                echo "ubuntu-chroot lama TIDAK DITEMUKAN."
-            fi
-            echo ""
-            echo "=== STATUS MEMORI & DISK ==="
-            free -m
-            df -h /data
-            echo ""
-            echo "=== ACTIVE MOUNTS TERKAIT CHROOT ==="
-            mount | grep -E 'chroot|ubuntu|devbox' || echo "Tidak ada mount chroot aktif"
-            echo "=== SELESAI ==="
-        """.trimIndent()
-
-        val res = RootExecutor.execute(diagScript)
-        val report = res.getOrNull()?.stdout ?: "Gagal mendapatkan laporan diagnostik."
-        AppLogger.i("Diagnostics", "Laporan diagnostik selesai didapatkan.")
-        report
+        environment.runEnvironmentDiagnostics()
     }
 }

@@ -323,7 +323,6 @@ class NativeTerminalSession(
         }
     }
 
-    private var cachedPtsDev: String? = null
     private var resizeJob: Job? = null
 
     fun updateWindowSize(cols: Int, rows: Int, isImmediate: Boolean = false) {
@@ -342,46 +341,7 @@ class NativeTerminalSession(
                 delay(debounceMs)
             }
             try {
-                val currentPtsFd = cachedPtsDev
-                if (currentPtsFd != null) {
-                    val directCmd = "echo 'rows $rows cols $cols' > '$targetRootfs/tmp/.devbox_ws_$sessionId' 2>/dev/null; " +
-                            "if [ -e '$currentPtsFd' ]; then " +
-                            "stty -F '$currentPtsFd' rows $rows cols $cols 2>/dev/null || chroot '$targetRootfs' /usr/bin/stty -F '$currentPtsFd' rows $rows cols $cols 2>/dev/null; " +
-                            "else exit 1; fi"
-                    val res = com.arbdev.devbox.data.RootExecutor.executeSync(directCmd, silent = true)
-                    if (res.isSuccess) return@launch
-                    cachedPtsDev = null
-                }
-
-                // Resolusi PTY slave via /proc/<pid>/fd/0 sehingga 100% menembus isolasi mount namespace su
-                val resolveAndSetCmd = "echo 'rows $rows cols $cols' > '$targetRootfs/tmp/.devbox_ws_$sessionId' 2>/dev/null; " +
-                        "pts_fd=''; " +
-                        "spid=\$(cat '$targetRootfs/tmp/.devbox_pid_$sessionId' 2>/dev/null); " +
-                        "if [ -n \"\$spid\" ] && [ -e \"/proc/\$spid/fd/0\" ]; then " +
-                        "pts_fd=\"/proc/\$spid/fd/0\"; " +
-                        "else " +
-                        "for env_file in \$(grep -l 'DEVBOX_SESSION_ID=$sessionId' /proc/[0-9]*/environ 2>/dev/null); do " +
-                        "p=\$(echo \"\$env_file\" | cut -d/ -f3); " +
-                        "for fd in /proc/\$p/fd/0 /proc/\$p/fd/1 /proc/\$p/fd/2; do " +
-                        "t=\$(readlink \$fd 2>/dev/null); " +
-                        "if [[ \$t == */dev/pts/* ]]; then pts_fd=\"\$fd\"; break 2; fi; " +
-                        "done; done; fi; " +
-                        "if [ -n \"\$pts_fd\" ]; then " +
-                        "stty -F \"\$pts_fd\" rows $rows cols $cols 2>/dev/null || chroot '$targetRootfs' /usr/bin/stty -F \"\$pts_fd\" rows $rows cols $cols 2>/dev/null; " +
-                        "echo \"\$pts_fd\"; " +
-                        "fi"
-
-                var res = com.arbdev.devbox.data.RootExecutor.executeSync(resolveAndSetCmd, silent = true)
-                var resolvedFd = res.getOrNull()?.stdout?.trim()
-                if (resolvedFd.isNullOrBlank()) {
-                    // Jika sesi baru saja diluncurkan dan /usr/bin/script belum selesai inisialisasi, tunggu sebentar lalu coba sekali lagi
-                    delay(220)
-                    res = com.arbdev.devbox.data.RootExecutor.executeSync(resolveAndSetCmd, silent = true)
-                    resolvedFd = res.getOrNull()?.stdout?.trim()
-                }
-                if (!resolvedFd.isNullOrBlank() && resolvedFd.startsWith("/proc/")) {
-                    cachedPtsDev = resolvedFd
-                }
+                ChrootManager.updateTerminalWindowSize(sessionId, process, cols, rows, targetRootfs)
             } catch (_: Exception) {}
         }
     }
@@ -405,17 +365,8 @@ class NativeTerminalSession(
         val pid = getProcessPid() ?: return
         sessionScope.launch(Dispatchers.IO) {
             try {
-                // Kirim juga sinyal kernel SIGINT (kill -2) langsung ke foreground child process di sesi ini
                 val targetRootfs = ChrootManager.activeRootfs
-                val sessionId = id
-                val cmd = "for p in /proc/[0-9]*; do " +
-                        "if [ \"\$(readlink \$p/root 2>/dev/null)\" = '$targetRootfs' ]; then " +
-                        "if grep -z '^DEVBOX_SESSION_ID=$sessionId' \"\$p/environ\" 2>/dev/null >/dev/null; then " +
-                        "comm=\$(cat \$p/comm 2>/dev/null); " +
-                        "if [ \"\$comm\" != 'script' ] && [ \"\$comm\" != 'bash' ] && [ \"\$comm\" != 'stty' ] && [ \"\$comm\" != 'su' ]; then " +
-                        "kill -2 \${p##*/} 2>/dev/null || true; " +
-                        "fi; fi; fi; done"
-                com.arbdev.devbox.data.RootExecutor.executeSync(cmd, silent = true)
+                ChrootManager.sendInterruptSignal(id, targetRootfs)
             } catch (_: Exception) {}
         }
     }
@@ -441,15 +392,10 @@ class NativeTerminalSession(
         val sessionId = id
         val targetRootfs = ChrootManager.activeRootfs
 
-        // Matikan seluruh pohon proses turunan (agy, python, node, script, bash) di dalam chroot
+        // Matikan seluruh pohon proses turunan di dalam container
         sessionScope.launch(Dispatchers.IO) {
             try {
-                val killCmd = "for p in /proc/[0-9]*; do " +
-                        "if [ \"\$(readlink \$p/root 2>/dev/null)\" = '$targetRootfs' ]; then " +
-                        "if grep -z '^DEVBOX_SESSION_ID=$sessionId' \"\$p/environ\" 2>/dev/null >/dev/null; then " +
-                        "kill -9 \"\$(basename \$p)\" 2>/dev/null; " +
-                        "fi; fi; done"
-                com.arbdev.devbox.data.RootExecutor.executeSync(killCmd, silent = true)
+                ChrootManager.terminateSession(sessionId, targetRootfs)
             } catch (_: Exception) {}
         }
 
@@ -457,12 +403,7 @@ class NativeTerminalSession(
             outputStream?.close()
             inputStream?.close()
             process?.destroy()
-            cachedPtsDev = null
             buffer.destroy()
-            sessionScope.launch(Dispatchers.IO) {
-                val cleanupCmd = "rm -f '$targetRootfs/tmp/.devbox_pts_$sessionId' '$targetRootfs/tmp/.devbox_pid_$sessionId' '$targetRootfs/tmp/.devbox_ws_$sessionId' '$targetRootfs/tmp/.devbox_cwd_$sessionId' '$targetRootfs/tmp/.devbox_active_agent_$sessionId' '$targetRootfs/home/coder/.devbox_pts_$sessionId' 2>/dev/null"
-                com.arbdev.devbox.data.RootExecutor.executeSync(cleanupCmd, silent = true)
-            }
         } catch (_: Exception) {}
     }
 

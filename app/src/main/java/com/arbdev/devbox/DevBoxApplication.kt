@@ -1,6 +1,7 @@
 package com.arbdev.devbox
 
 import android.app.Application
+import com.arbdev.devbox.backend.backendModule
 import org.koin.android.ext.koin.androidContext
 import org.koin.android.ext.koin.androidLogger
 import org.koin.core.context.startKoin
@@ -11,7 +12,6 @@ val devBoxAppModule = module {
     // Definisi dependensi Koin untuk arsitektur terstruktur & bebas memory leak
     single { com.arbdev.devbox.data.ChrootManager }
     single { com.arbdev.devbox.terminal.TerminalSessionManager }
-    single { com.arbdev.devbox.data.RootExecutor }
 }
 
 class DevBoxApplication : Application() {
@@ -21,7 +21,7 @@ class DevBoxApplication : Application() {
             startKoin {
                 androidLogger(Level.ERROR)
                 androidContext(this@DevBoxApplication)
-                modules(devBoxAppModule)
+                modules(devBoxAppModule, backendModule)
             }
         } catch (_: Exception) {}
     }
