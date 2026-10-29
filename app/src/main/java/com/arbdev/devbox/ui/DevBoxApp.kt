@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.isImeVisible
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.statusBars
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.BugReport
 import androidx.compose.material.icons.filled.Code
@@ -86,6 +87,7 @@ fun DevBoxApp() {
     Scaffold(
         modifier = Modifier.fillMaxSize(),
         containerColor = DevBackground,
+        contentWindowInsets = WindowInsets.statusBars,
         bottomBar = {
             if (!isImeVisible) {
                 Column(modifier = Modifier.fillMaxWidth()) {

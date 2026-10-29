@@ -25,6 +25,15 @@ class TerminalInputView(context: Context) : View(context) {
         isFocusableInTouchMode = true
     }
 
+    override fun requestRectangleOnScreen(rectangle: android.graphics.Rect?): Boolean = false
+
+    override fun requestRectangleOnScreen(rectangle: android.graphics.Rect?, immediate: Boolean): Boolean = false
+
+    override fun getFocusedRect(r: android.graphics.Rect) {
+        // Mencegah WindowManager / IME menganggap View berada di area terhalang yang memicu PAN DecorView
+        r.set(0, 0, 0, 0)
+    }
+
     override fun onCheckIsTextEditor(): Boolean = true
 
     override fun onCreateInputConnection(outAttrs: EditorInfo): InputConnection {

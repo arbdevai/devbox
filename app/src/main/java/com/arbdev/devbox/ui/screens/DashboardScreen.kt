@@ -982,22 +982,22 @@ fun DashboardScreen(
                             scope.launch {
                                 isExiting = true
                                 exitProgress = 0.20f
-                                exitStatusText = "Menghentikan seluruh sesi terminal..."
+                                exitStatusText = "Terminating all terminal sessions..."
                                 withContext(Dispatchers.IO) {
                                     com.arbdev.devbox.terminal.TerminalSessionManager.terminateAll()
                                 }
                                 exitProgress = 0.55f
-                                exitStatusText = "Menyapu bersih proses container di /proc..."
+                                exitStatusText = "Killing container processes in /proc..."
                                 withContext(Dispatchers.IO) {
                                     com.arbdev.devbox.data.ChrootManager.killDevboxProcessesAndUnmountSync()
                                 }
                                 exitProgress = 0.85f
-                                exitStatusText = "Melepas service background & penyimpanan..."
+                                exitStatusText = "Unmounting filesystems & stopping services..."
                                 withContext(Dispatchers.IO) {
                                     com.arbdev.devbox.service.KeepAliveService.stopService(context)
                                 }
                                 exitProgress = 1.0f
-                                exitStatusText = "Selesai. Menutup DevBox..."
+                                exitStatusText = "Shutdown complete. Exiting DevBox..."
                                 kotlinx.coroutines.delay(200)
                                 (context as? Activity)?.finishAndRemoveTask()
                             }

@@ -33,6 +33,8 @@ class MainActivity : ComponentActivity() {
             statusBarStyle = SystemBarStyle.dark(0xFF141414.toInt()),
             navigationBarStyle = SystemBarStyle.dark(0xFF1C1E1B.toInt())
         )
+        // Kunci eksplisit SOFT_INPUT_ADJUST_RESIZE untuk mencegah sistem Android melakukan adjustPan (window shift)
+        window.setSoftInputMode(android.view.WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE)
 
         // Inisialisasi path rootfs persisten dari SharedPreferences dan tema terminal
         ChrootManager.init(applicationContext)

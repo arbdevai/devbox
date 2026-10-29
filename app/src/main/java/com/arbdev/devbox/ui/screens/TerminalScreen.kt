@@ -1179,6 +1179,9 @@ fun TerminalScreen(
                                 if (verticalScrollState.value != 0) {
                                     verticalScrollState.scrollTo(0)
                                 }
+                            } else if (cursorYPx >= visibleTop && cursorYPx + charHeightPx <= visibleBottom) {
+                                // Kursor sudah sepenuhnya terlihat di viewport aktif di atas keyboard:
+                                // Pertahankan posisi scroll saat ini, jangan ubah apa pun (anti-geser)!
                             } else if (cursorYPx + charHeightPx > visibleBottom) {
                                 // Kursor di bawah viewport (terhalang keyboard) -> scroll presisi pas kursor terlihat
                                 val targetScroll = (cursorYPx + charHeightPx - visibleViewportPx).toInt().coerceAtLeast(0)
