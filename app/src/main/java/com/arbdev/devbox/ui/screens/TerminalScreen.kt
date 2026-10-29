@@ -629,6 +629,7 @@ fun TerminalScreen(
                     DropdownMenu(
                         expanded = showOverflowMenu,
                         onDismissRequest = { showOverflowMenu = false },
+                        properties = PopupProperties(focusable = false),
                         modifier = Modifier
                             .background(DevSurface)
                             .border(1.dp, DevBorder, RoundedCornerShape(12.dp))
@@ -802,43 +803,62 @@ fun TerminalScreen(
                             }
                         )
 
-                        DropdownMenuItem(
-                            text = {
-                                Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Icon(
-                                        imageVector = Icons.Default.ZoomIn,
-                                        contentDescription = null,
-                                        tint = DevPrimary,
-                                        modifier = Modifier.size(18.dp)
-                                    )
-                                    Spacer(modifier = Modifier.width(10.dp))
-                                    Text("Zoom In (A+)", color = DevOnSurface, fontSize = 13.sp)
-                                }
-                            },
-                            onClick = {
-                                showOverflowMenu = false
-                                updateFontSize(terminalFontSize + 0.5f)
+                        // Kontrol Ukuran Font Interaktif (Multi-klik persisten tanpa menutup menu atau keyboard)
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 12.dp, vertical = 6.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(
+                                    imageVector = Icons.Default.ZoomIn,
+                                    contentDescription = null,
+                                    tint = DevPrimary,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                                Spacer(modifier = Modifier.width(10.dp))
+                                Text("Font Size", color = DevOnSurface, fontSize = 13.sp)
                             }
-                        )
-
-                        DropdownMenuItem(
-                            text = {
-                                Row(verticalAlignment = Alignment.CenterVertically) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier
+                                    .background(DevBackground, RoundedCornerShape(8.dp))
+                                    .border(1.dp, DevBorder, RoundedCornerShape(8.dp))
+                                    .padding(horizontal = 2.dp, vertical = 1.dp)
+                            ) {
+                                IconButton(
+                                    onClick = { updateFontSize(terminalFontSize - 0.5f) },
+                                    modifier = Modifier.size(28.dp)
+                                ) {
                                     Icon(
                                         imageVector = Icons.Default.ZoomOut,
-                                        contentDescription = null,
+                                        contentDescription = "Zoom Out",
                                         tint = DevPrimary,
-                                        modifier = Modifier.size(18.dp)
+                                        modifier = Modifier.size(16.dp)
                                     )
-                                    Spacer(modifier = Modifier.width(10.dp))
-                                    Text("Zoom Out (A-)", color = DevOnSurface, fontSize = 13.sp)
                                 }
-                            },
-                            onClick = {
-                                showOverflowMenu = false
-                                updateFontSize(terminalFontSize - 0.5f)
+                                Text(
+                                    text = String.format(java.util.Locale.US, "%.1f", terminalFontSize),
+                                    color = DevOnSurface,
+                                    fontSize = 12.sp,
+                                    fontFamily = FontFamily.Monospace,
+                                    modifier = Modifier.padding(horizontal = 4.dp)
+                                )
+                                IconButton(
+                                    onClick = { updateFontSize(terminalFontSize + 0.5f) },
+                                    modifier = Modifier.size(28.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Add,
+                                        contentDescription = "Zoom In",
+                                        tint = DevPrimary,
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                }
                             }
-                        )
+                        }
 
                         DropdownMenuItem(
                             text = {
