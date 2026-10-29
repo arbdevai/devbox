@@ -1167,6 +1167,9 @@ BRIDGE_EOF
             ln -sf /usr/local/bin/devbox-bridge "${'$'}rf/usr/bin/devbox-bridge" 2>/dev/null || true
             ln -sf /usr/local/bin/devbox-bridge "${'$'}rf/usr/local/bin/devbox-clip" 2>/dev/null || true
 
+            # Hapus symlink rekursif /bin/X11 -> . warisan paket Debian lama (cegah loop folder X11 tanpa batas di file manager)
+            rm -f "${'$'}rf/bin/X11" "${'$'}rf/usr/bin/X11" 2>/dev/null || true
+
             # 8. Shortcut direktori storage Android (/sdcard)
             mkdir -p "${'$'}rf/home/coder/storage" 2>/dev/null || true
             ln -sf /mnt/sdcard/Download "${'$'}rf/home/coder/storage/downloads" 2>/dev/null || true

@@ -309,63 +309,31 @@ class TerminalGridBuffer(
             maxCols = c
             maxRows = r
 
-            // 1. Selalu resize main grid (agar saat keluar dari altScreen ukuran grid selalu sinkron)
+            // 1. Resize main grid (In-place copy tanpa mutasi artifisial, anti-teks berantakan)
             val newGrid = Array(maxRows) { Array(maxCols) { TerminalCell() } }
-            val refCursorRow = if (!isAltBuffer) cursorRow.coerceIn(0, (oldGridRows - 1).coerceAtLeast(0)) else savedCursorRow.coerceIn(0, (oldGridRows - 1).coerceAtLeast(0))
-            val newMainCursorRow: Int
-            if (r < oldGridRows) {
-                // Layar mengecil (misal keyboard virtual terbuka):
-                // Geser baris di atas kursor ke scrollback agar kursor dan prompt tetap berada di layar aktif
-                val shift = (refCursorRow - (r - 1)).coerceIn(0, oldGridRows - r)
-                for (row in 0 until shift) {
-                    scrollback.push(grid[row], oldGridCols)
+            val copyRows = minOf(oldGridRows, maxRows)
+            val copyCols = minOf(oldGridCols, maxCols)
+            for (row in 0 until copyRows) {
+                for (col in 0 until copyCols) {
+                    newGrid[row][col].copyFrom(grid[row][col])
                 }
-                for (row in 0 until r) {
-                    val srcRow = row + shift
-                    if (srcRow < oldGridRows) {
-                        for (col in 0 until maxCols.coerceAtMost(oldGridCols)) {
-                            newGrid[row][col].copyFrom(grid[srcRow][col])
-                        }
-                    }
-                }
-                newMainCursorRow = (refCursorRow - shift).coerceIn(0, maxRows - 1)
-            } else {
-                // Layar membesar (misal keyboard virtual ditutup):
-                // Tarik kembali baris dari scrollback untuk mengisi ruang baris atas yang bertambah
-                val unwind = if (!isAltBuffer) (r - oldGridRows).coerceAtMost(scrollback.size) else 0
-                val pulledLines = scrollback.takeLast(unwind)
-                for (row in 0 until pulledLines.size) {
-                    val pulledLine = pulledLines[row]
-                    for (col in 0 until maxCols.coerceAtMost(pulledLine.size)) {
-                        newGrid[row][col].copyFrom(pulledLine[col])
-                    }
-                }
-                for (row in 0 until oldGridRows.coerceAtMost(maxRows - unwind)) {
-                    for (col in 0 until maxCols.coerceAtMost(oldGridCols)) {
-                        newGrid[row + unwind][col].copyFrom(grid[row][col])
-                    }
-                }
-                newMainCursorRow = (refCursorRow + unwind).coerceIn(0, maxRows - 1)
             }
             grid = newGrid
 
-            // 2. Selalu resize alternate grid (agar saat masuk \x1b[?1049h di agy/vim/htop tidak pernah ArrayIndexOutOfBoundsException!)
+            // 2. Resize alternate grid
             val newAltGrid = Array(maxRows) { Array(maxCols) { TerminalCell() } }
-            for (row in 0 until maxRows.coerceAtMost(oldAltRows)) {
-                for (col in 0 until maxCols.coerceAtMost(oldAltCols)) {
+            val copyAltRows = minOf(oldAltRows, maxRows)
+            val copyAltCols = minOf(oldAltCols, maxCols)
+            for (row in 0 until copyAltRows) {
+                for (col in 0 until copyAltCols) {
                     newAltGrid[row][col].copyFrom(altGrid[row][col])
                 }
             }
             altGrid = newAltGrid
 
-            if (!isAltBuffer) {
-                cursorRow = newMainCursorRow
-            } else {
-                savedCursorRow = newMainCursorRow
-                cursorRow = cursorRow.coerceIn(0, maxRows - 1)
-            }
-
+            cursorRow = cursorRow.coerceIn(0, maxRows - 1)
             cursorCol = cursorCol.coerceIn(0, maxCols - 1)
+            savedCursorRow = savedCursorRow.coerceIn(0, maxRows - 1)
             savedCursorCol = savedCursorCol.coerceIn(0, maxCols - 1)
             wrapPending = false
             scrollTop = 0
@@ -1318,9 +1286,6 @@ class TerminalGridBuffer(
                 if (lineCountState.intValue != curLines) {
                     lineCountState.intValue = curLines
                 }
-                try {
-                    Snapshot.sendApplyNotifications()
-                } catch (_: Exception) {}
             }
         }
     }
@@ -1341,12 +1306,11 @@ class TerminalGridBuffer(
             notifyHandler.post {
                 version.intValue++
                 val curLines = if (isAltBuffer) maxRows else (scrollback.size + getLastActiveRow() + 1).coerceAtLeast(1)
-                if (lineCountState.intValue != curLines) {
+                val diff = Math.abs(lineCountState.intValue - curLines)
+                // Throttle re-layout Compose agar tidak re-measure ribuan kali saat streaming cepat
+                if (diff >= 5 || forceImmediate || curLines == maxRows) {
                     lineCountState.intValue = curLines
                 }
-                try {
-                    Snapshot.sendApplyNotifications()
-                } catch (_: Exception) {}
             }
         } else {
             if (!hasPendingUpdate) {
@@ -1568,7 +1532,16 @@ class TerminalGridBuffer(
             if (isAltBuffer) return maxRows - 1
             var last = cursorRow
             for (r in maxRows - 1 downTo cursorRow + 1) {
-                if (activeGrid[r].any { it.char != ' ' || it.bgColor != Color.Transparent || it.isInverse || it.isWideContinuation }) {
+                val rowCells = activeGrid[r]
+                var hasContent = false
+                for (c in 0 until maxCols) {
+                    val cell = rowCells[c]
+                    if (cell.char != ' ' || cell.bgColor != Color.Transparent || cell.isInverse || cell.isWideContinuation) {
+                        hasContent = true
+                        break
+                    }
+                }
+                if (hasContent) {
                     last = r
                     break
                 }
