@@ -115,7 +115,7 @@ class KeepAliveService : Service() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         when (intent?.action) {
             ACTION_KILL_ALL -> {
-                serviceScope.launch {
+                serviceScope.launch(Dispatchers.IO) {
                     try {
                         isRunning = false
                         releaseWakeLock()
@@ -127,8 +127,6 @@ class KeepAliveService : Service() {
                         ChrootManager.killDevboxProcessesAndUnmountSync()
                     } catch (_: Exception) {}
                     stopSelf()
-                    kotlinx.coroutines.delay(400)
-                    android.os.Process.killProcess(android.os.Process.myPid())
                 }
                 return START_NOT_STICKY
             }

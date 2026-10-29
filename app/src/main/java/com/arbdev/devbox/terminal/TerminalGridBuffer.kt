@@ -82,6 +82,9 @@ class TerminalGridBuffer(
         private set
     var isApplicationCursorKeys: Boolean = false
         private set
+    var isSynchronizedUpdate: Boolean = false
+        private set
+    private var syncStartTime: Long = 0L
 
     // Protocols & Callbacks (OSC 0/1/2, OSC 52, OSC 8, OSC 777 DevBox Bridge)
     var windowTitle: String = "coder@devbox:~"
@@ -142,6 +145,8 @@ class TerminalGridBuffer(
             isMouseTrackingEnabled = false
             isSgrMouseMode = false
             isApplicationCursorKeys = false
+            isSynchronizedUpdate = false
+            syncStartTime = 0L
             inOsc = false
             oscBuffer.setLength(0)
             notifyUpdate()
@@ -214,11 +219,28 @@ class TerminalGridBuffer(
         while (i < end) {
             val b = bytes[i].toInt() and 0xFF
             if (!inOsc) {
-                if (b == 0x1B && i + 1 < end && bytes[i + 1] == ']'.code.toByte()) {
-                    inOsc = true
-                    oscBuffer.setLength(0)
-                    i += 2
-                    continue
+                if (b == 0x1B && i + 1 < end) {
+                    if (bytes[i + 1] == ']'.code.toByte()) {
+                        inOsc = true
+                        oscBuffer.setLength(0)
+                        i += 2
+                        continue
+                    } else if (i + 7 < end && bytes[i + 1] == '['.code.toByte() && bytes[i + 2] == '?'.code.toByte()
+                        && bytes[i + 3] == '2'.code.toByte() && bytes[i + 4] == '0'.code.toByte()
+                        && bytes[i + 5] == '2'.code.toByte() && bytes[i + 6] == '6'.code.toByte()
+                    ) {
+                        // DEC Mode 2026: Synchronized Update (Bubble Tea / agy atomic frame rendering)
+                        val modeChar = bytes[i + 7].toInt().toChar()
+                        if (modeChar == 'h') {
+                            isSynchronizedUpdate = true
+                            syncStartTime = System.currentTimeMillis()
+                        } else if (modeChar == 'l') {
+                            isSynchronizedUpdate = false
+                            notifyUpdate()
+                        }
+                        i += 8
+                        continue
+                    }
                 }
             } else {
                 if (b == 0x07) { // BEL terminates OSC
@@ -356,6 +378,10 @@ class TerminalGridBuffer(
     }
 
     private fun notifyUpdate() {
+        if (isSynchronizedUpdate && (System.currentTimeMillis() - syncStartTime < 60)) {
+            // Tahan rendering saat batch frame DEC Mode 2026 sedang berlangsung (anti-tearing / anti-flicker)
+            return
+        }
         if (!updatePending) {
             updatePending = true
             mainHandler.post {

@@ -117,8 +117,10 @@ import com.arbdev.devbox.updater.UpdateInfo
 import com.arbdev.devbox.updater.UpdateManager
 import com.arbdev.devbox.updater.UpdateStatus
 import com.arbdev.devbox.util.AppLogger
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 @Composable
 fun DashboardScreen(
@@ -955,9 +957,12 @@ fun DashboardScreen(
                         onClick = {
                             scope.launch {
                                 isExiting = true
-                                KeepAliveService.killAllAndExit(context)
-                                kotlinx.coroutines.delay(600)
-                                (context as? Activity)?.finishAffinity()
+                                withContext(Dispatchers.IO) {
+                                    com.arbdev.devbox.terminal.TerminalSessionManager.terminateAll()
+                                    com.arbdev.devbox.data.ChrootManager.killDevboxProcessesAndUnmountSync()
+                                    com.arbdev.devbox.service.KeepAliveService.stopService(context)
+                                }
+                                (context as? Activity)?.finishAndRemoveTask()
                             }
                         },
                         colors = ButtonDefaults.buttonColors(containerColor = DevError),

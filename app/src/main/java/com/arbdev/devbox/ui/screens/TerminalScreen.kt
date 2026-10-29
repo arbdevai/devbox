@@ -1154,17 +1154,42 @@ fun TerminalScreen(
                 }
             }
 
-            // Saat keyboard virtual aktif, geser scroll canvas ke posisi kursor HANYA saat keyboard baru terbuka atau baris kursor berpindah (anti-jitter saat mengetik)
+            // Manajemen Viewport & Auto-Scroll Cerdas:
+            // 1. Saat keyboard muncul, scroll HANYA jika kursor tertutup keyboard di bawah atau di luar viewport.
+            // 2. Jika kursor sudah berada di area pandang aktif, pertahankan posisi teks (anti-ketarik ke atas).
+            // 3. Saat keyboard ditutup, kembalikan posisi scroll jika konten muat di layar penuh.
             LaunchedEffect(isImeVisible, activeSession.buffer.cursorRow) {
-                if (isImeVisible && autoScrollEnabled && charHeightPx > 0f) {
-                    val historyCount = activeSession.buffer.getScrollbackSize()
-                    val cursorRow = activeSession.buffer.cursorRow
-                    val cursorYPx = (historyCount + cursorRow) * charHeightPx
+                if (charHeightPx > 0f) {
                     with(density) {
                         val visibleViewportPx = maxHeight.toPx()
-                        val targetScroll = (cursorYPx - visibleViewportPx + charHeightPx * 2).toInt().coerceAtLeast(0)
-                        if (targetScroll != verticalScrollState.value) {
-                            verticalScrollState.scrollTo(targetScroll)
+                        val historyCount = activeSession.buffer.getScrollbackSize()
+                        val cursorRow = activeSession.buffer.cursorRow
+                        val cursorYPx = (historyCount + cursorRow) * charHeightPx
+                        val currentScroll = verticalScrollState.value.toFloat()
+                        val visibleTop = currentScroll
+                        val visibleBottom = currentScroll + visibleViewportPx
+
+                        if (isImeVisible && autoScrollEnabled) {
+                            if (cursorYPx + charHeightPx > visibleBottom) {
+                                // Kursor di bawah viewport (terhalang keyboard) -> scroll secukupnya
+                                val targetScroll = (cursorYPx - visibleViewportPx + charHeightPx * 2).toInt().coerceAtLeast(0)
+                                if (targetScroll != verticalScrollState.value) {
+                                    verticalScrollState.scrollTo(targetScroll)
+                                }
+                            } else if (cursorYPx < visibleTop) {
+                                // Kursor di atas viewport -> scroll ke atas agar kursor terlihat
+                                val targetScroll = cursorYPx.toInt().coerceAtLeast(0)
+                                if (targetScroll != verticalScrollState.value) {
+                                    verticalScrollState.scrollTo(targetScroll)
+                                }
+                            }
+                        } else if (!isImeVisible) {
+                            // Saat keyboard ditutup, jika total konten muat di layar penuh dan scroll sempat terdorong, kembalikan ke 0
+                            val totalLines = if (activeSession.buffer.isAltBuffer) activeSession.buffer.maxRows else activeSession.buffer.getLineCount()
+                            val totalContentHeightPx = totalLines * charHeightPx
+                            if (totalContentHeightPx <= visibleViewportPx && verticalScrollState.value > 0) {
+                                verticalScrollState.scrollTo(0)
+                            }
                         }
                     }
                 }
@@ -2335,8 +2360,9 @@ fun TerminalCanvas(
                                                     session.sendMouseEvent(0, col, activeRow, true)
                                                     session.sendMouseEvent(0, col, activeRow, false)
                                                 }
+                                            } else {
+                                                onFocusRequest()
                                             }
-                                            onFocusRequest()
                                         }
                                     }
                                 }
