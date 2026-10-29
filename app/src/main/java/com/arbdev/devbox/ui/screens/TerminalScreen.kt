@@ -130,8 +130,10 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.graphics.toArgb
+import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
@@ -2507,6 +2509,22 @@ fun TerminalCanvas(
                                 color = Color(0xFF7DFF4C),
                                 topLeft = Offset((maxCols - 1) * charWidth, yTop),
                                 size = Size(charWidth, charHeight)
+                            )
+                        }
+                    }
+
+                    // 3. Render Kitty Graphics Protocol Images (Pixel-Perfect Inline Images)
+                    val visibleImages = session.buffer.getVisibleImages(firstVisibleLine, lastVisibleLine)
+                    for (img in visibleImages) {
+                        if (!img.bitmap.isRecycled) {
+                            val x = img.startCol * charWidth
+                            val y = img.startLine * charHeight
+                            val w = img.cellWidth * charWidth
+                            val h = img.cellHeight * charHeight
+                            drawImage(
+                                image = img.bitmap.asImageBitmap(),
+                                dstOffset = IntOffset(x.toInt(), y.toInt()),
+                                dstSize = IntSize(w.toInt(), h.toInt())
                             )
                         }
                     }
