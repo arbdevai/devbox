@@ -25,6 +25,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
@@ -1099,20 +1100,22 @@ fun DashboardScreen(
                                 )
                                 .padding(8.dp)
                         ) {
-                            LazyColumn(state = logListState) {
-                                items(uninstallLogs) { line ->
-                                    Text(
-                                        text = line,
-                                        fontFamily = FontFamily.Monospace,
-                                        fontSize = 11.sp,
-                                        lineHeight = 15.sp,
-                                        color = when {
-                                            line.contains("SUCCESS", ignoreCase = true) || line.contains("selesai", ignoreCase = true) || line.contains("berhasil", ignoreCase = true) -> DevPrimary
-                                            line.contains("GAGAL", ignoreCase = true) || line.contains("ERROR", ignoreCase = true) || line.contains("PERINGATAN", ignoreCase = true) -> DevError
-                                            line.startsWith("[") -> DevOnPrimaryContainer
-                                            else -> DevOnSurface
-                                        }
-                                    )
+                            SelectionContainer {
+                                LazyColumn(state = logListState) {
+                                    items(uninstallLogs) { line ->
+                                        Text(
+                                            text = line,
+                                            fontFamily = FontFamily.Monospace,
+                                            fontSize = 11.sp,
+                                            lineHeight = 15.sp,
+                                            color = when {
+                                                line.contains("SUCCESS", ignoreCase = true) || line.contains("selesai", ignoreCase = true) || line.contains("berhasil", ignoreCase = true) -> DevPrimary
+                                                line.contains("GAGAL", ignoreCase = true) || line.contains("ERROR", ignoreCase = true) || line.contains("PERINGATAN", ignoreCase = true) -> DevError
+                                                line.startsWith("[") -> DevOnPrimaryContainer
+                                                else -> DevOnSurface
+                                            }
+                                        )
+                                    }
                                 }
                             }
                         }
@@ -1121,7 +1124,7 @@ fun DashboardScreen(
                     if (ChrootManager.activeRootfs == ChrootManager.LEGACY_ROOTFS) {
                         Column {
                             Text(
-                                text = "🛡️ TERMUX CHROOT PROTECTION ACTIVE",
+                                text = "TERMUX CHROOT PROTECTION ACTIVE",
                                 fontSize = 13.sp,
                                 fontWeight = FontWeight.Bold,
                                 color = DevPrimary
@@ -1211,7 +1214,7 @@ fun DashboardScreen(
                 when {
                     isUninstalling -> {}
                     uninstallFinished -> {
-                        if (!uninstallSuccess && uninstallLogs.isNotEmpty()) {
+                        if (uninstallLogs.isNotEmpty()) {
                             OutlinedButton(
                                 onClick = {
                                     val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
@@ -1335,6 +1338,34 @@ fun DashboardScreen(
                         Spacer(modifier = Modifier.height(8.dp))
                     }
 
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "Console Output (${installLogs.size} lines):",
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = DevOnSurfaceVariant
+                        )
+                        if (installLogs.isNotEmpty()) {
+                            TextButton(
+                                onClick = {
+                                    val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
+                                    val clip = ClipData.newPlainText("DevBox Install Log", installLogs.joinToString("\n"))
+                                    clipboard?.setPrimaryClip(clip)
+                                    Toast.makeText(context, "Log copied to clipboard", Toast.LENGTH_SHORT).show()
+                                }
+                            ) {
+                                Icon(Icons.Default.ContentCopy, contentDescription = null, modifier = Modifier.size(14.dp), tint = DevPrimary)
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text("Copy All", fontSize = 11.sp, color = DevPrimary, fontWeight = FontWeight.Bold)
+                            }
+                        }
+                    }
+                    Spacer(modifier = Modifier.height(4.dp))
+
                     Box(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -1351,20 +1382,22 @@ fun DashboardScreen(
                             )
                             .padding(8.dp)
                     ) {
-                        LazyColumn(state = logListState) {
-                            items(installLogs) { line ->
-                                Text(
-                                    text = line,
-                                    fontFamily = FontFamily.Monospace,
-                                    fontSize = 11.sp,
-                                    lineHeight = 15.sp,
-                                    color = when {
-                                        line.contains("BERHASIL", ignoreCase = true) || line.contains("SUCCESS", ignoreCase = true) -> DevPrimary
-                                        line.contains("GAGAL", ignoreCase = true) || line.contains("FAILED", ignoreCase = true) || line.contains("ERROR", ignoreCase = true) -> DevError
-                                        line.startsWith("[") -> DevOnPrimaryContainer
-                                        else -> DevOnSurface
-                                    }
-                                )
+                        SelectionContainer {
+                            LazyColumn(state = logListState) {
+                                items(installLogs) { line ->
+                                    Text(
+                                        text = line,
+                                        fontFamily = FontFamily.Monospace,
+                                        fontSize = 11.sp,
+                                        lineHeight = 15.sp,
+                                        color = when {
+                                            line.contains("BERHASIL", ignoreCase = true) || line.contains("SUCCESS", ignoreCase = true) -> DevPrimary
+                                            line.contains("GAGAL", ignoreCase = true) || line.contains("FAILED", ignoreCase = true) || line.contains("ERROR", ignoreCase = true) -> DevError
+                                            line.startsWith("[") -> DevOnPrimaryContainer
+                                            else -> DevOnSurface
+                                        }
+                                    )
+                                }
                             }
                         }
                     }
@@ -1392,24 +1425,19 @@ fun DashboardScreen(
                 }
             },
             dismissButton = {
-                when {
-                    isInstalling -> {}
-                    installFinished -> {
-                        if (!installSuccess && installLogs.isNotEmpty()) {
-                            OutlinedButton(
-                                onClick = {
-                                    val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
-                                    val clip = ClipData.newPlainText("DevBox Install Log", installLogs.joinToString("\n"))
-                                    clipboard?.setPrimaryClip(clip)
-                                    Toast.makeText(context, "Log copied to clipboard", Toast.LENGTH_SHORT).show()
-                                },
-                                shape = RoundedCornerShape(50)
-                            ) {
-                                Icon(Icons.Default.ContentCopy, contentDescription = null, modifier = Modifier.size(16.dp))
-                                Spacer(modifier = Modifier.width(6.dp))
-                                Text("Copy Log")
-                            }
-                        }
+                if (installLogs.isNotEmpty()) {
+                    OutlinedButton(
+                        onClick = {
+                            val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
+                            val clip = ClipData.newPlainText("DevBox Install Log", installLogs.joinToString("\n"))
+                            clipboard?.setPrimaryClip(clip)
+                            Toast.makeText(context, "Log copied to clipboard", Toast.LENGTH_SHORT).show()
+                        },
+                        shape = RoundedCornerShape(50)
+                    ) {
+                        Icon(Icons.Default.ContentCopy, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text("Copy Log")
                     }
                 }
             }
