@@ -13,8 +13,8 @@ android {
         applicationId = "com.arbdev.devbox"
         minSdk = 26
         targetSdk = 36
-        versionCode = 10203
-        versionName = "1.2.3"
+        versionCode = 10204
+        versionName = "1.2.4"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables {
@@ -135,6 +135,7 @@ dependencies {
     "rootImplementation"(libs.libsu.core)
     implementation(libs.androidx.webkit)
     implementation(libs.koin.compose)
+    implementation(libs.commons.compress)
 
     testImplementation(libs.junit)
     debugImplementation(libs.androidx.compose.ui.tooling)

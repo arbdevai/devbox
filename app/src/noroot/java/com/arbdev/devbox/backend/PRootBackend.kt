@@ -3,6 +3,7 @@ package com.arbdev.devbox.backend
 import android.content.Context
 import com.arbdev.devbox.data.ChrootState
 import com.arbdev.devbox.util.AppLogger
+import com.arbdev.devbox.util.TarExtractor
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.File
@@ -79,33 +80,52 @@ class PRootBackend(private val context: Context) : LinuxEnvironment {
 
         val shellScript = "cd /home/coder 2>/dev/null || cd /; if [ -x /usr/bin/script ]; then exec /usr/bin/script -qefc \"shopt -s checkwinsize 2>/dev/null; echo \\\$\$ > /tmp/.devbox_pid_$sessionId 2>/dev/null; ws=\\\$(cat /tmp/.devbox_ws_$sessionId 2>/dev/null); if [ -n \\\"\\\$ws\\\" ]; then stty \\\$ws opost onlcr 2>/dev/null; else stty rows $initRows cols $initCols opost onlcr 2>/dev/null; fi; exec /bin/bash -l\" /dev/null; else exec /bin/bash -l; fi"
 
-        val pb = ProcessBuilder(
+        val pbArgs = mutableListOf(
             prootBin,
             "--kill-on-exit",
             "--link2symlink",
             "-0",
             "-r", targetRootfs,
             "-b", "/dev",
-            "-b", "/proc",
-            "-b", "/sys",
-            "-b", "/sdcard:/mnt/sdcard",
+            "-b", "/proc"
+        )
+
+        // Hanya bind /sys jika diizinkan oleh kernel dan SELinux Android
+        if (File("/sys").canRead()) {
+            pbArgs.addAll(listOf("-b", "/sys"))
+        }
+
+        // Hanya bind /sdcard jika dapat dibaca dan direktori mountpoint tersedia
+        val sdcard = File("/sdcard")
+        if (sdcard.canRead()) {
+            val mntSdcard = File(targetRootfs, "mnt/sdcard").apply { mkdirs() }
+            if (mntSdcard.exists()) {
+                pbArgs.addAll(listOf("-b", "/sdcard:/mnt/sdcard"))
+            }
+        }
+
+        // Bind folder temporary khusus PRoot ke /tmp di dalam rootfs
+        pbArgs.addAll(listOf(
             "-b", "$prootTmp:/tmp",
             "-w", "/home/coder",
-            "/usr/bin/env", "-i",
-            "HOME=/home/coder",
-            "USER=coder",
-            "LOGNAME=coder",
-            "SHELL=/bin/bash",
-            "TERM=xterm-256color",
-            "COLORTERM=truecolor",
-            "DEVBOX=1",
-            "DEVBOX_SESSION_ID=$sessionId",
-            "GH_NO_KEYRING=1",
-            "PATH=/home/coder/.local/bin:/home/coder/.cargo/bin:/home/coder/go/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
             "/bin/bash", "-c",
             shellScript
-        )
-        pb.environment()["PROOT_TMP_DIR"] = prootTmp
+        ))
+
+        val pb = ProcessBuilder(pbArgs)
+        pb.environment().apply {
+            put("HOME", "/home/coder")
+            put("USER", "coder")
+            put("LOGNAME", "coder")
+            put("SHELL", "/bin/bash")
+            put("TERM", "xterm-256color")
+            put("COLORTERM", "truecolor")
+            put("DEVBOX", "1")
+            put("DEVBOX_SESSION_ID", sessionId)
+            put("GH_NO_KEYRING", "1")
+            put("PATH", "/home/coder/.local/bin:/home/coder/.cargo/bin:/home/coder/go/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin")
+            put("PROOT_TMP_DIR", prootTmp)
+        }
         pb.redirectErrorStream(true)
         return pb.start()
     }
@@ -275,6 +295,77 @@ exit 0
             }
         } catch (_: Exception) {}
         return Result.success(Unit)
+    }
+
+    override suspend fun extractRootfs(
+        tarPath: String,
+        targetRootfs: String,
+        onProgress: ((Float, String) -> Unit)?,
+        onLogLine: ((String) -> Unit)?
+    ): Result<Unit> = withContext(Dispatchers.IO) {
+        val targetDir = File(targetRootfs)
+        targetDir.mkdirs()
+
+        onLogLine?.invoke("Membuat direktori target $targetRootfs...")
+        onLogLine?.invoke("Mengekstrak file archive ke $targetRootfs via TarExtractor...")
+
+        val archiveFile = File(tarPath)
+        val extractRes = TarExtractor.extractTarGz(archiveFile, targetDir, onProgress, onLogLine)
+        if (extractRes.isFailure) {
+            val err = extractRes.exceptionOrNull()?.message ?: "Gagal mengekstrak archive"
+            onLogLine?.invoke("INSTALL_FAILED: $err")
+            return@withContext Result.failure(Exception(err))
+        }
+
+        onLogLine?.invoke("Konfigurasi dasar jaringan dan user...")
+        try {
+            ensureEnvironmentReadySync(targetRootfs)
+
+            val etcDir = File(targetDir, "etc").apply { mkdirs() }
+            val sudoersDir = File(etcDir, "sudoers.d").apply { mkdirs() }
+            File(targetDir, "home/coder").mkdirs()
+            File(targetDir, "tmp").mkdirs()
+
+            // Setup resolv.conf
+            File(etcDir, "resolv.conf").writeText("nameserver 8.8.8.8\nnameserver 1.1.1.1\n")
+
+            // Setup hosts
+            File(etcDir, "hosts").writeText("127.0.0.1 localhost\n")
+
+            // Setup passwd
+            val passwdFile = File(etcDir, "passwd")
+            val passwdContent = if (passwdFile.exists()) passwdFile.readText() else ""
+            if (!passwdContent.contains("coder:")) {
+                passwdFile.appendText("coder:x:1000:1000:DevBox User:/home/coder:/bin/bash\n")
+            }
+
+            // Setup group
+            val groupFile = File(etcDir, "group")
+            val groupContent = if (groupFile.exists()) groupFile.readText() else ""
+            if (!groupContent.contains("coder:")) {
+                groupFile.appendText("coder:x:1000:\n")
+            }
+
+            // Setup passwordless sudo untuk coder
+            val sudoersCoder = File(sudoersDir, "coder")
+            sudoersCoder.writeText("coder ALL=(ALL:ALL) NOPASSWD:ALL\n")
+            try {
+                android.system.Os.chmod(sudoersCoder.absolutePath, 288) // 0440 octal
+            } catch (_: Exception) {}
+        } catch (e: Exception) {
+            AppLogger.w("PRootBackend", "Peringatan pasca konfigurasi rootfs: ${e.message}")
+        }
+
+        val bashExists = File(targetDir, "bin/bash").exists() || File(targetDir, "usr/bin/bash").exists()
+        if (bashExists) {
+            onLogLine?.invoke("INSTALL_SUCCESS")
+            onLogLine?.invoke("=== UBUNTU BASE RESMI BERHASIL DIPASANG ===")
+            Result.success(Unit)
+        } else {
+            val err = "INSTALL_FAILED: Binary bash tidak ditemukan setelah ekstraksi."
+            onLogLine?.invoke(err)
+            Result.failure(Exception(err))
+        }
     }
 
     override suspend fun runEnvironmentDiagnostics(): String = withContext(Dispatchers.IO) {

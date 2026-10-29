@@ -45,5 +45,12 @@ interface LinuxEnvironment {
     suspend fun ensureEnvironmentReady(rootfs: String): Result<Unit>
     fun ensureEnvironmentReadySync(rootfs: String): Result<Unit>
 
+    suspend fun extractRootfs(
+        tarPath: String,
+        targetRootfs: String,
+        onProgress: ((Float, String) -> Unit)? = null,
+        onLogLine: ((String) -> Unit)? = null
+    ): Result<Unit>
+
     suspend fun runEnvironmentDiagnostics(): String
 }

@@ -17,6 +17,7 @@ junit = "4.13.2"
 libsu = "5.2.2"
 webkit = "1.12.1"
 koin = "4.0.0"
+commons-compress = "1.27.1"
 
 [libraries]
 androidx-core-ktx = { module = "androidx.core:core-ktx", version.ref = "core-ktx" }
@@ -46,6 +47,7 @@ junit = { module = "junit:junit", version.ref = "junit" }
 libsu-core = { module = "com.github.topjohnwu.libsu:core", version.ref = "libsu" }
 androidx-webkit = { module = "androidx.webkit:webkit", version.ref = "webkit" }
 koin-compose = { module = "io.insert-koin:koin-androidx-compose", version.ref = "koin" }
+commons-compress = { module = "org.apache.commons:commons-compress", version.ref = "commons-compress" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }

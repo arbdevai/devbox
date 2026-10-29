@@ -359,6 +359,74 @@ BRIDGE_EOF
         return Result.success(Unit)
     }
 
+    override suspend fun extractRootfs(
+        tarPath: String,
+        targetRootfs: String,
+        onProgress: ((Float, String) -> Unit)?,
+        onLogLine: ((String) -> Unit)?
+    ): Result<Unit> = withContext(Dispatchers.IO) {
+        val script = """
+            echo "Membuat direktori target $targetRootfs..."
+            mkdir -p '$targetRootfs'
+
+            # Unmount sub-mount lama jika ada
+            awk -v r='$targetRootfs/' '${'$'}2 ~ ("^" r) {print ${'$'}2}' /proc/mounts 2>/dev/null | sort -r | while read -r m; do
+                umount -l "${'$'}m" 2>/dev/null || true
+            done
+
+            TAR_BIN=""
+            if [ -x /data/adb/magisk/busybox ]; then
+                TAR_BIN="/data/adb/magisk/busybox tar"
+            elif [ -x /data/local/ubuntu-chroot/usr/bin/tar ]; then
+                TAR_BIN="/data/local/ubuntu-chroot/usr/bin/tar"
+            elif which tar >/dev/null 2>&1; then
+                TAR_BIN="tar"
+            fi
+
+            echo "Mengekstrak file archive ke $targetRootfs..."
+            if [ -n "${'$'}TAR_BIN" ]; then
+                ${'$'}TAR_BIN -xzf '$tarPath' -C '$targetRootfs' 2>&1 || gzip -dc '$tarPath' | ${'$'}TAR_BIN -xf - -C '$targetRootfs' 2>&1
+            else
+                gzip -dc '$tarPath' | tar -xf - -C '$targetRootfs' 2>&1 || tar -xzf '$tarPath' -C '$targetRootfs' 2>&1
+            fi
+
+            echo "Konfigurasi dasar jaringan dan user..."
+            mkdir -p '$targetRootfs/dev' '$targetRootfs/dev/pts' '$targetRootfs/proc' '$targetRootfs/sys' '$targetRootfs/mnt/sdcard' '$targetRootfs/tmp' '$targetRootfs/home/coder'
+            chmod 1777 '$targetRootfs/tmp' 2>/dev/null || true
+            echo "nameserver 8.8.8.8" > '$targetRootfs/etc/resolv.conf' 2>/dev/null || true
+            echo "127.0.0.1 localhost" > '$targetRootfs/etc/hosts' 2>/dev/null || true
+
+            if ! grep -q "^coder:" '$targetRootfs/etc/passwd' 2>/dev/null; then
+                echo "coder:x:1000:1000:DevBox User:/home/coder:/bin/bash" >> '$targetRootfs/etc/passwd' 2>/dev/null || true
+                echo "coder:x:1000:" >> '$targetRootfs/etc/group' 2>/dev/null || true
+            fi
+            chown -R 1000:1000 '$targetRootfs/home/coder' 2>/dev/null || true
+            chmod 755 '$targetRootfs/home/coder' 2>/dev/null || true
+
+            if [ -x '$targetRootfs/bin/bash' ] || [ -x '$targetRootfs/usr/bin/bash' ]; then
+                echo "INSTALL_SUCCESS"
+                echo "=== UBUNTU BASE RESMI BERHASIL DIPASANG ==="
+            else
+                echo "INSTALL_FAILED: Binary bash tidak ditemukan setelah ekstraksi."
+                exit 1
+            fi
+        """.trimIndent()
+
+        var isSuccess = false
+        val exitCode = RootExecutor.executeStream(script) { line ->
+            onLogLine?.invoke(line)
+            if (line.contains("INSTALL_SUCCESS")) {
+                isSuccess = true
+            }
+        }
+
+        if (isSuccess || exitCode == 0) {
+            Result.success(Unit)
+        } else {
+            Result.failure(Exception("Gagal ekstraksi Ubuntu Base via root tar (Exit code: $exitCode)"))
+        }
+    }
+
     override suspend fun runEnvironmentDiagnostics(): String = withContext(Dispatchers.IO) {
         val diagScript = """
             echo "=== INFORMASI SUPERUSER & KERNEL ==="
