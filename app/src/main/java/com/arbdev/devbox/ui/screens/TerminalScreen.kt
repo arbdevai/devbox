@@ -1172,9 +1172,10 @@ fun TerminalScreen(
                         val visibleTop = currentScroll
                         val visibleBottom = currentScroll + visibleViewportPx
 
+                        val isAlt = activeSession.buffer.isAltBuffer
                         if (isImeVisible && autoScrollEnabled) {
-                            if (historyCount == 0 && cursorYPx + charHeightPx <= visibleViewportPx) {
-                                // Layar aktif belum penuh scrollback dan kursor masih muat di atas keyboard:
+                            if (!isAlt && historyCount == 0 && cursorYPx + charHeightPx <= visibleViewportPx) {
+                                // Layar aktif belum penuh scrollback dan kursor masih muat di atas keyboard (HANYA UNTUK BASH):
                                 // Kunci posisi scroll di 0 agar prompt bash di atas TIDAK PERNAH tertarik ke atas!
                                 if (verticalScrollState.value != 0) {
                                     verticalScrollState.scrollTo(0)
@@ -1183,7 +1184,7 @@ fun TerminalScreen(
                                 // Kursor sudah sepenuhnya terlihat di viewport aktif di atas keyboard:
                                 // Pertahankan posisi scroll saat ini, jangan ubah apa pun (anti-geser)!
                             } else if (cursorYPx + charHeightPx > visibleBottom) {
-                                // Kursor di bawah viewport (terhalang keyboard) -> scroll presisi pas kursor terlihat
+                                // Kursor / menu TUI di bawah viewport (terhalang keyboard) -> scroll presisi agar kursor/menu terlihat tepat di atas keyboard
                                 val targetScroll = (cursorYPx + charHeightPx - visibleViewportPx).toInt().coerceAtLeast(0)
                                 if (targetScroll != verticalScrollState.value) {
                                     verticalScrollState.scrollTo(targetScroll)
