@@ -242,8 +242,14 @@ class NativeTerminalSession(
                             isAgentRunning = false
                             if (exitCode != 0) {
                                 val outSnippet = initialOutput.toString().trim()
+                                val debugFile = File(targetRootfs).parentFile?.let { File(it, "proot_debug.log") }
+                                val debugText = if (debugFile != null && debugFile.exists()) debugFile.readText().trim() else ""
                                 if (outSnippet.isNotEmpty()) {
                                     AppLogger.e("NativeTerminal", "Sesi [$name] keluar (exit code: $exitCode). Output:\n$outSnippet")
+                                } else if (debugText.isNotEmpty()) {
+                                    AppLogger.e("NativeTerminal", "Sesi [$name] keluar (exit code: $exitCode). Stderr PRoot:\n$debugText")
+                                    val errBytes = "\r\n[DevBox PRoot Stderr]:\r\n$debugText\r\n".toByteArray(Charsets.UTF_8)
+                                    try { buffer.write(errBytes, 0, errBytes.size) } catch (_: Throwable) {}
                                 } else {
                                     AppLogger.e("NativeTerminal", "Sesi [$name] keluar (exit code: $exitCode, stream output kosong)")
                                     sessionScope.launch(Dispatchers.IO) {

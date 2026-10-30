@@ -121,32 +121,25 @@ class PRootBackend(private val context: Context) : LinuxEnvironment {
         }.absolutePath
         File(targetRootfs, "home/coder").mkdirs()
         File(targetRootfs, "tmp").mkdirs()
+        File(targetRootfs, "dev").mkdirs()
+        File(targetRootfs, "proc").mkdirs()
+
+        val debugLog = File(context.filesDir, "proot_debug.log")
+        try {
+            if (debugLog.exists()) debugLog.delete()
+            debugLog.createNewFile()
+        } catch (_: Exception) {}
 
         val pbArgs = mutableListOf(
             prootBin,
-            "--kill-on-exit",
-            "--link2symlink",
             "-0",
             "-r", targetRootfs,
             "-b", "/dev",
-            "-b", "/proc"
-        )
-
-        // Hanya bind /sdcard jika dapat dibaca dan direktori mountpoint tersedia
-        val sdcard = File("/sdcard")
-        if (sdcard.canRead()) {
-            val mntSdcard = File(targetRootfs, "mnt/sdcard").apply { mkdirs() }
-            if (mntSdcard.exists()) {
-                pbArgs.addAll(listOf("-b", "/sdcard:/mnt/sdcard"))
-            }
-        }
-
-        // Bind folder temporary khusus PRoot ke /tmp di dalam rootfs dan luncurkan interactive login shell
-        pbArgs.addAll(listOf(
+            "-b", "/proc",
             "-b", "$prootTmp:/tmp",
             "-w", "/home/coder",
-            "/bin/bash", "-i", "-l"
-        ))
+            "/bin/bash", "-l"
+        )
 
         val pb = ProcessBuilder(pbArgs)
         pb.environment().apply {
@@ -173,7 +166,7 @@ class PRootBackend(private val context: Context) : LinuxEnvironment {
             remove("LD_PRELOAD")
             remove("LD_LIBRARY_PATH")
         }
-        pb.redirectErrorStream(true)
+        pb.redirectError(ProcessBuilder.Redirect.to(debugLog))
         return pb.start()
     }
 

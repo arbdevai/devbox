@@ -496,6 +496,9 @@ object ChrootManager {
         activePids: List<Long> = emptyList(),
         rootfs: String = activeRootfs
     ): List<ChrootProcessInfo> = withContext(Dispatchers.IO) {
+        if (!com.arbdev.devbox.FlavorConfig.IS_ROOT_FLAVOR) {
+            return@withContext emptyList()
+        }
         val pidListStr = activePids.filter { it > 0 }.joinToString(" ")
         val script = """
             active_pids="$pidListStr"
