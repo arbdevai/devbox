@@ -133,7 +133,7 @@ class PRootBackend(private val context: Context) : LinuxEnvironment {
         val pbArgs = mutableListOf(
             prootBin,
             "-v", "2",
-            "-k", "4.19.0",
+            "-k", "4.14.0",
             "-0",
             "-r", targetRootfs,
             "-b", "/dev",
@@ -145,6 +145,7 @@ class PRootBackend(private val context: Context) : LinuxEnvironment {
 
         val pb = ProcessBuilder(pbArgs)
         pb.environment().apply {
+            put("GLIBC_TUNABLES", "glibc.pthread.rseq=0")
             put("HOME", "/home/coder")
             put("USER", "coder")
             put("LOGNAME", "coder")
@@ -361,6 +362,14 @@ exit 0
                 sudoersCoder.writeText("coder ALL=(ALL:ALL) NOPASSWD:ALL\n")
             }
 
+            // Setup /etc/environment dengan GLIBC_TUNABLES untuk cegah SIGSYS seccomp
+            val etcEnv = File(base, "etc/environment")
+            if (!etcEnv.exists()) {
+                etcEnv.writeText("GLIBC_TUNABLES=\"glibc.pthread.rseq=0\"\n")
+            } else if (!etcEnv.readText().contains("GLIBC_TUNABLES")) {
+                etcEnv.appendText("GLIBC_TUNABLES=\"glibc.pthread.rseq=0\"\n")
+            }
+
             // Setup .bashrc, .profile, .bash_profile modern DevBox untuk user coder
             val homeCoder = File(base, "home/coder").apply { mkdirs() }
             val bashrcFile = File(homeCoder, ".bashrc")
@@ -527,7 +536,7 @@ exit 0
             val pb2Args = mutableListOf(
                 prootPath,
                 "-v", "2",
-                "-k", "4.19.0",
+                "-k", "4.14.0",
                 "-0",
                 "-r", defaultRootfsPath,
                 "-b", "/dev",
@@ -536,6 +545,7 @@ exit 0
             )
             val pb2 = ProcessBuilder(pb2Args)
             pb2.environment().apply {
+                put("GLIBC_TUNABLES", "glibc.pthread.rseq=0")
                 loaderPath?.let { put("PROOT_LOADER", it) }
                 put("PROOT_IGNORE_MISSING_BINDINGS", "1")
                 put("PROOT_TMP_DIR", prootTmp)
