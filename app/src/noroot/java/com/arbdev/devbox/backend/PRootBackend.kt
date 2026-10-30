@@ -78,7 +78,7 @@ class PRootBackend(private val context: Context) : LinuxEnvironment {
         File(targetRootfs, "home/coder").mkdirs()
         File(targetRootfs, "tmp").mkdirs()
 
-        val shellScript = "cd /home/coder 2>/dev/null || cd /; if [ -x /usr/bin/script ]; then exec /usr/bin/script -qefc \"shopt -s checkwinsize 2>/dev/null; echo \\\$\$ > /tmp/.devbox_pid_$sessionId 2>/dev/null; ws=\\\$(cat /tmp/.devbox_ws_$sessionId 2>/dev/null); if [ -n \\\"\\\$ws\\\" ]; then stty \\\$ws opost onlcr 2>/dev/null; else stty rows $initRows cols $initCols opost onlcr 2>/dev/null; fi; exec /bin/bash -l\" /dev/null; else exec /bin/bash -l; fi"
+        val shellScript = "cd /home/coder 2>/dev/null || cd /; echo \$\$ > /tmp/.devbox_pid_$sessionId 2>/dev/null; exec /bin/bash -i -l"
 
         val pbArgs = mutableListOf(
             prootBin,
@@ -125,6 +125,12 @@ class PRootBackend(private val context: Context) : LinuxEnvironment {
             put("GH_NO_KEYRING", "1")
             put("PATH", "/home/coder/.local/bin:/home/coder/.cargo/bin:/home/coder/go/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin")
             put("PROOT_TMP_DIR", prootTmp)
+            put("PROOT_NO_SECCOMP", "1")
+            put("PROOT_IGNORE_MISSING_BINDINGS", "1")
+            put("COLUMNS", initCols.toString())
+            put("LINES", initRows.toString())
+            remove("LD_PRELOAD")
+            remove("LD_LIBRARY_PATH")
         }
         pb.redirectErrorStream(true)
         return pb.start()
