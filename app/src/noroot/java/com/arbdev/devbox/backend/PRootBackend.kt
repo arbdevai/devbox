@@ -29,36 +29,47 @@ class PRootBackend(private val context: Context) : LinuxEnvironment {
     private fun getProotBinaryPath(): String {
         val nativeLibDir = context.applicationInfo.nativeLibraryDir
         val primaryProot = File(nativeLibDir, "libproot.so")
-        if (primaryProot.exists() && primaryProot.length() > 100_000) {
+        if (primaryProot.exists() && primaryProot.length() > 50_000) {
             return primaryProot.absolutePath
         }
 
         // Fail-safe 1: Periksa direktori lib turunan dari sourceDir APK
         val parentLib = File(context.applicationInfo.sourceDir).parentFile?.let { File(it, "lib/arm64/libproot.so") }
-        if (parentLib != null && parentLib.exists() && parentLib.length() > 100_000) {
+        if (parentLib != null && parentLib.exists() && parentLib.length() > 50_000) {
             return parentLib.absolutePath
         }
 
         // Fail-safe 2: Ekstraksi darurat langsung dari APK sourceDir jika installer OS tidak mengekstraknya
         try {
-            val fallbackBin = File(context.filesDir, "bin/libproot.so")
-            if (fallbackBin.exists() && fallbackBin.length() > 100_000) {
+            val binDir = File(context.filesDir, "bin").apply { mkdirs() }
+            val fallbackBin = File(binDir, "libproot.so")
+            if (fallbackBin.exists() && fallbackBin.length() > 50_000) {
                 fallbackBin.setExecutable(true, false)
                 return fallbackBin.absolutePath
             }
-            fallbackBin.parentFile?.mkdirs()
             java.util.zip.ZipFile(context.applicationInfo.sourceDir).use { zip ->
-                val entry = zip.getEntry("lib/arm64-v8a/libproot.so")
-                if (entry != null) {
-                    zip.getInputStream(entry).use { input ->
-                        fallbackBin.outputStream().use { output ->
-                            input.copyTo(output)
+                val libsToExtract = listOf(
+                    "libproot.so",
+                    "libproot-loader.so",
+                    "libtalloc.so",
+                    "libandroid-shmem.so"
+                )
+                for (libName in libsToExtract) {
+                    val entry = zip.getEntry("lib/arm64-v8a/$libName")
+                    if (entry != null) {
+                        val outFile = File(binDir, libName)
+                        zip.getInputStream(entry).use { input ->
+                            outFile.outputStream().use { output ->
+                                input.copyTo(output)
+                            }
                         }
+                        outFile.setExecutable(true, false)
                     }
-                    fallbackBin.setExecutable(true, false)
-                    AppLogger.i("PRootBackend", "Ekstraksi fail-safe libproot.so selesai: ${fallbackBin.absolutePath}")
-                    return fallbackBin.absolutePath
                 }
+            }
+            if (fallbackBin.exists() && fallbackBin.length() > 50_000) {
+                AppLogger.i("PRootBackend", "Ekstraksi fail-safe libproot.so selesai: ${fallbackBin.absolutePath}")
+                return fallbackBin.absolutePath
             }
         } catch (e: Exception) {
             AppLogger.e("PRootBackend", "Gagal ekstraksi darurat libproot.so: ${e.message}")
@@ -132,20 +143,31 @@ class PRootBackend(private val context: Context) : LinuxEnvironment {
 
         val pbArgs = mutableListOf(
             prootBin,
-            "-v", "3",
-            "-k", "4.14.0",
+            "-v", "1",
             "-0",
+            "--link2symlink",
+            "--sysvipc",
             "-r", targetRootfs,
             "-b", "/dev",
             "-b", "/proc",
             "-b", "/sys",
+            "-b", "/dev/urandom:/dev/random",
+            "-b", "/proc/self/fd:/dev/fd",
+            "-b", "/proc/self/fd/0:/dev/stdin",
+            "-b", "/proc/self/fd/1:/dev/stdout",
+            "-b", "/proc/self/fd/2:/dev/stderr",
             "-b", "$prootTmp:/tmp",
             "-w", "/home/coder",
+            "-U", "LD_LIBRARY_PATH",
+            "-U", "LD_PRELOAD",
             "/bin/bash", "-l"
         )
 
         val pb = ProcessBuilder(pbArgs)
+        val nativeLibDir = context.applicationInfo.nativeLibraryDir
+        val binDir = File(context.filesDir, "bin").absolutePath
         pb.environment().apply {
+            put("LD_LIBRARY_PATH", "$nativeLibDir:$binDir:/system/lib64")
             put("GLIBC_TUNABLES", "glibc.pthread.rseq=0")
             put("HOME", "/home/coder")
             put("USER", "coder")
@@ -167,7 +189,6 @@ class PRootBackend(private val context: Context) : LinuxEnvironment {
             put("COLUMNS", initCols.toString())
             put("LINES", initRows.toString())
             remove("LD_PRELOAD")
-            remove("LD_LIBRARY_PATH")
         }
         pb.redirectError(ProcessBuilder.Redirect.to(debugLog))
         return pb.start()
@@ -519,9 +540,13 @@ exit 0
         report.appendLine("FilesDir: ${context.filesDir.absolutePath}")
         report.appendLine("OS Architecture: ${System.getProperty("os.arch")}")
 
+        val nativeLibDir = context.applicationInfo.nativeLibraryDir
+        val binDir = File(context.filesDir, "bin").absolutePath
+
         // Test 1: Jalankan binary proot mandiri (proot --version)
         try {
             val pb1 = ProcessBuilder(prootPath, "--version")
+            pb1.environment()["LD_LIBRARY_PATH"] = "$nativeLibDir:$binDir:/system/lib64"
             pb1.redirectErrorStream(true)
             val p1 = pb1.start()
             val out1 = p1.inputStream.bufferedReader().readText().trim()
@@ -536,17 +561,27 @@ exit 0
         try {
             val pb2Args = mutableListOf(
                 prootPath,
-                "-v", "3",
-                "-k", "4.14.0",
+                "-v", "1",
                 "-0",
+                "--link2symlink",
+                "--sysvipc",
                 "-r", defaultRootfsPath,
                 "-b", "/dev",
                 "-b", "/proc",
                 "-b", "/sys",
+                "-b", "/dev/urandom:/dev/random",
+                "-b", "/proc/self/fd:/dev/fd",
+                "-b", "/proc/self/fd/0:/dev/stdin",
+                "-b", "/proc/self/fd/1:/dev/stdout",
+                "-b", "/proc/self/fd/2:/dev/stderr",
+                "-b", "$prootTmp:/tmp",
+                "-U", "LD_LIBRARY_PATH",
+                "-U", "LD_PRELOAD",
                 "/bin/sh", "-c", "echo PROOT_BASIC_OK"
             )
             val pb2 = ProcessBuilder(pb2Args)
             pb2.environment().apply {
+                put("LD_LIBRARY_PATH", "$nativeLibDir:$binDir:/system/lib64")
                 put("GLIBC_TUNABLES", "glibc.pthread.rseq=0")
                 loaderPath?.let { put("PROOT_LOADER", it) }
                 put("PROOT_IGNORE_MISSING_BINDINGS", "1")
