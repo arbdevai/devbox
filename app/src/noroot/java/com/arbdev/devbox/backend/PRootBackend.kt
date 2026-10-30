@@ -132,6 +132,7 @@ class PRootBackend(private val context: Context) : LinuxEnvironment {
 
         val pbArgs = mutableListOf(
             prootBin,
+            "-v", "1",
             "-0",
             "-r", targetRootfs,
             "-b", "/dev",
@@ -525,6 +526,7 @@ exit 0
         try {
             val pb2Args = mutableListOf(
                 prootPath,
+                "-v", "1",
                 "-0",
                 "-r", defaultRootfsPath,
                 "-b", "/dev",

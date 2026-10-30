@@ -244,6 +244,9 @@ class NativeTerminalSession(
                                 val outSnippet = initialOutput.toString().trim()
                                 val debugFile = File(targetRootfs).parentFile?.let { File(it, "proot_debug.log") }
                                 val debugText = if (debugFile != null && debugFile.exists()) debugFile.readText().trim() else ""
+                                if (debugText.isNotEmpty()) {
+                                    AppLogger.e("NativeTerminal", "Stderr PRoot:\n$debugText")
+                                }
                                 if (outSnippet.isNotEmpty()) {
                                     AppLogger.e("NativeTerminal", "Sesi [$name] keluar (exit code: $exitCode). Output:\n$outSnippet")
                                 } else if (debugText.isNotEmpty()) {
