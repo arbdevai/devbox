@@ -241,6 +241,20 @@ class NativeTerminalSession(
                                     AppLogger.e("NativeTerminal", "Sesi [$name] keluar (exit code: $exitCode). Output:\n$outSnippet")
                                 } else {
                                     AppLogger.e("NativeTerminal", "Sesi [$name] keluar (exit code: $exitCode, stream output kosong)")
+                                    sessionScope.launch(Dispatchers.IO) {
+                                        try {
+                                            val pLog = Runtime.getRuntime().exec(arrayOf("logcat", "-d", "-t", "50", "-v", "brief"))
+                                            val lines = pLog.inputStream.bufferedReader().readLines().filter {
+                                                val l = it.lowercase()
+                                                l.contains("proot") || l.contains("seccomp") || l.contains("audit") ||
+                                                l.contains("denied") || l.contains("fatal") || l.contains("sig") ||
+                                                l.contains("linker") || l.contains("crash") || l.contains("tombstone")
+                                            }.takeLast(15)
+                                            if (lines.isNotEmpty()) {
+                                                AppLogger.e("NativeTerminal", "Logcat sistem saat exit:\n" + lines.joinToString("\n"))
+                                            }
+                                        } catch (_: Exception) {}
+                                    }
                                 }
                             } else {
                                 AppLogger.i("NativeTerminal", "Sesi [$name] telah selesai (exit code: 0)")

@@ -450,14 +450,80 @@ exit 0
         val prootPath = getProotBinaryPath()
         val prootBin = File(prootPath)
         val loaderPath = getProotLoaderPath()
-        """
-=== INFORMASI ENVIRONMENT NO-ROOT ===
-Mode: PRoot Userspace (No Root Required)
-PRoot Binary: $prootPath (Ukuran: ${prootBin.length()} bytes, Exists: ${prootBin.exists()})
-PRoot Loader: ${loaderPath ?: "Embedded Fallback"}
-Default Rootfs: $defaultRootfsPath
-FilesDir: ${context.filesDir.absolutePath}
-OS Architecture: ${System.getProperty("os.arch")}
-        """.trimIndent()
+        val prootTmp = File(context.filesDir, "proot_tmp").apply { mkdirs() }.absolutePath
+
+        val report = StringBuilder()
+        report.appendLine("=== INFORMASI ENVIRONMENT NO-ROOT ===")
+        report.appendLine("Mode: PRoot Userspace (No Root Required)")
+        report.appendLine("PRoot Binary: $prootPath (Ukuran: ${prootBin.length()} bytes, Exists: ${prootBin.exists()}, Executable: ${prootBin.canExecute()})")
+        report.appendLine("PRoot Loader: ${loaderPath ?: "Embedded Fallback"}")
+        report.appendLine("Default Rootfs: $defaultRootfsPath")
+        report.appendLine("FilesDir: ${context.filesDir.absolutePath}")
+        report.appendLine("OS Architecture: ${System.getProperty("os.arch")}")
+
+        // Test 1: Jalankan binary proot mandiri (proot --version)
+        try {
+            val pb1 = ProcessBuilder(prootPath, "--version")
+            pb1.redirectErrorStream(true)
+            val p1 = pb1.start()
+            val out1 = p1.inputStream.bufferedReader().readText().trim()
+            val code1 = p1.waitFor()
+            report.appendLine("--- TEST 1: proot --version ---")
+            report.appendLine("Exit code: $code1, Output:\n$out1")
+        } catch (e: Exception) {
+            report.appendLine("--- TEST 1 ERROR: ${e.message} ---")
+        }
+
+        // Test 2: Jalankan proot dengan command minimal
+        try {
+            val pb2Args = mutableListOf(
+                prootPath,
+                "-0",
+                "-r", defaultRootfsPath,
+                "-b", "/dev",
+                "-b", "/proc",
+                "/bin/sh", "-c", "echo PROOT_BASIC_OK"
+            )
+            val pb2 = ProcessBuilder(pb2Args)
+            pb2.environment().apply {
+                loaderPath?.let { put("PROOT_LOADER", it) }
+                put("PROOT_NO_SECCOMP", "1")
+                put("PROOT_IGNORE_MISSING_BINDINGS", "1")
+                put("PROOT_TMP_DIR", prootTmp)
+            }
+            pb2.redirectErrorStream(true)
+            val p2 = pb2.start()
+            val out2 = p2.inputStream.bufferedReader().readText().trim()
+            val code2 = p2.waitFor()
+            report.appendLine("--- TEST 2: proot minimal shell ---")
+            report.appendLine("Exit code: $code2, Output:\n$out2")
+        } catch (e: Exception) {
+            report.appendLine("--- TEST 2 ERROR: ${e.message} ---")
+        }
+
+        // Test 3: Tarik Logcat Sistem Android (Kernel audit, seccomp, linker errors)
+        try {
+            val pLog = Runtime.getRuntime().exec(arrayOf("logcat", "-d", "-t", "100", "-v", "threadtime"))
+            val lines = pLog.inputStream.bufferedReader().readLines()
+            val filtered = lines.filter { line ->
+                val l = line.lowercase()
+                l.contains("proot") || l.contains("seccomp") || l.contains("audit") ||
+                l.contains("denied") || l.contains("fatal") || l.contains("sig") ||
+                l.contains("linker") || l.contains("crash") || l.contains("tombstone") ||
+                l.contains("devbox")
+            }.takeLast(35)
+            report.appendLine("--- RELEVANT LOGCAT (Entri Sistem: ${filtered.size}) ---")
+            if (filtered.isNotEmpty()) {
+                filtered.forEach { report.appendLine(it) }
+            } else {
+                report.appendLine("Tidak ada catatan penolakan seccomp/audit kernel di 100 baris logcat terakhir.")
+            }
+        } catch (e: Exception) {
+            report.appendLine("--- LOGCAT READ ERROR: ${e.message} ---")
+        }
+
+        val fullReport = report.toString()
+        AppLogger.i("Diagnostics", fullReport)
+        fullReport
     }
 }
