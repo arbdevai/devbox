@@ -1216,17 +1216,6 @@ devbox_banner
 # End DevBox Configuration
 # ============================================================
     """.trimIndent()
-            cp "${'$'}rf/home/coder/.profile" "${'$'}rf/home/coder/.bash_profile" 2>/dev/null || true
-            cp "${'$'}rf/home/coder/.profile" "${'$'}rf/root/.profile" 2>/dev/null || true
-            cp "${'$'}rf/home/coder/.profile" "${'$'}rf/root/.bash_profile" 2>/dev/null || true
-            cp "${'$'}rf/home/coder/.profile" "${'$'}rf/etc/skel/.profile" 2>/dev/null || true
-
-            # Hak milik direktori home coder (non-rekursif untuk mencegah disk freeze & menjaga izin SSH key 600)
-            chown 1000:1000 "${'$'}rf/home/coder" "${'$'}rf/home/coder/.bashrc" "${'$'}rf/home/coder/.profile" 2>/dev/null || true
-            chmod 755 "${'$'}rf/home/coder" 2>/dev/null || true
-            chmod 644 "${'$'}rf/home/coder/.bashrc" "${'$'}rf/home/coder/.profile" 2>/dev/null || true
-        """.trimIndent()
-    }
 
     suspend fun ensureEnvironmentReady(rootfs: String = activeRootfs): Result<Unit> = withContext(Dispatchers.IO) {
         if (com.arbdev.devbox.FlavorConfig.IS_ROOT_FLAVOR) {
