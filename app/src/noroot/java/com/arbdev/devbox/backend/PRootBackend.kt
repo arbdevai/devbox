@@ -67,6 +67,45 @@ class PRootBackend(private val context: Context) : LinuxEnvironment {
         return primaryProot.absolutePath
     }
 
+    private fun getProotLoaderPath(): String? {
+        val nativeLibDir = context.applicationInfo.nativeLibraryDir
+        val primaryLoader = File(nativeLibDir, "libproot-loader.so")
+        if (primaryLoader.exists() && primaryLoader.length() > 10_000) {
+            return primaryLoader.absolutePath
+        }
+
+        val parentLib = File(context.applicationInfo.sourceDir).parentFile?.let { File(it, "lib/arm64/libproot-loader.so") }
+        if (parentLib != null && parentLib.exists() && parentLib.length() > 10_000) {
+            return parentLib.absolutePath
+        }
+
+        try {
+            val fallbackBin = File(context.filesDir, "bin/libproot-loader.so")
+            if (fallbackBin.exists() && fallbackBin.length() > 10_000) {
+                fallbackBin.setExecutable(true, false)
+                return fallbackBin.absolutePath
+            }
+            fallbackBin.parentFile?.mkdirs()
+            java.util.zip.ZipFile(context.applicationInfo.sourceDir).use { zip ->
+                val entry = zip.getEntry("lib/arm64-v8a/libproot-loader.so")
+                if (entry != null) {
+                    zip.getInputStream(entry).use { input ->
+                        fallbackBin.outputStream().use { output ->
+                            input.copyTo(output)
+                        }
+                    }
+                    fallbackBin.setExecutable(true, false)
+                    AppLogger.i("PRootBackend", "Ekstraksi fail-safe libproot-loader.so selesai: ${fallbackBin.absolutePath}")
+                    return fallbackBin.absolutePath
+                }
+            }
+        } catch (e: Exception) {
+            AppLogger.e("PRootBackend", "Gagal ekstraksi darurat libproot-loader.so: ${e.message}")
+        }
+
+        return if (primaryLoader.exists()) primaryLoader.absolutePath else null
+    }
+
     override fun startTerminalProcess(
         sessionId: String,
         targetRootfs: String,
@@ -128,6 +167,11 @@ class PRootBackend(private val context: Context) : LinuxEnvironment {
             put("GH_NO_KEYRING", "1")
             put("PATH", "/home/coder/.local/bin:/home/coder/.cargo/bin:/home/coder/go/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin")
             put("PROOT_TMP_DIR", prootTmp)
+            val loaderPath = getProotLoaderPath()
+            if (loaderPath != null) {
+                put("PROOT_LOADER", loaderPath)
+                AppLogger.i("PRootBackend", "Menggunakan PROOT_LOADER: $loaderPath")
+            }
             put("PROOT_NO_SECCOMP", "1")
             put("PROOT_IGNORE_MISSING_BINDINGS", "1")
             put("COLUMNS", initCols.toString())
@@ -147,7 +191,7 @@ class PRootBackend(private val context: Context) : LinuxEnvironment {
         targetRootfs: String
     ) {
         try {
-            val prootTmp = File(context.cacheDir, "proot_tmp")
+            val prootTmp = File(context.filesDir, "proot_tmp")
             File(prootTmp, ".devbox_ws_$sessionId").writeText("rows $rows cols $cols")
             File(targetRootfs, "tmp/.devbox_ws_$sessionId").writeText("rows $rows cols $cols")
         } catch (_: Exception) {}
@@ -155,7 +199,7 @@ class PRootBackend(private val context: Context) : LinuxEnvironment {
 
     override fun terminateSession(sessionId: String, targetRootfs: String) {
         try {
-            val prootTmp = File(context.cacheDir, "proot_tmp")
+            val prootTmp = File(context.filesDir, "proot_tmp")
             File(prootTmp, ".devbox_ws_$sessionId").delete()
             File(prootTmp, ".devbox_pid_$sessionId").delete()
             File(targetRootfs, "tmp/.devbox_ws_$sessionId").delete()
@@ -405,10 +449,12 @@ exit 0
     override suspend fun runEnvironmentDiagnostics(): String = withContext(Dispatchers.IO) {
         val prootPath = getProotBinaryPath()
         val prootBin = File(prootPath)
+        val loaderPath = getProotLoaderPath()
         """
 === INFORMASI ENVIRONMENT NO-ROOT ===
 Mode: PRoot Userspace (No Root Required)
 PRoot Binary: $prootPath (Ukuran: ${prootBin.length()} bytes, Exists: ${prootBin.exists()})
+PRoot Loader: ${loaderPath ?: "Embedded Fallback"}
 Default Rootfs: $defaultRootfsPath
 FilesDir: ${context.filesDir.absolutePath}
 OS Architecture: ${System.getProperty("os.arch")}
