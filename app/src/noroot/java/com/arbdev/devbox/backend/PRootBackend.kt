@@ -143,7 +143,6 @@ class PRootBackend(private val context: Context) : LinuxEnvironment {
 
         val pbArgs = mutableListOf(
             prootBin,
-            "-v", "1",
             "-0",
             "--link2symlink",
             "--sysvipc",
@@ -158,8 +157,6 @@ class PRootBackend(private val context: Context) : LinuxEnvironment {
             "-b", "/proc/self/fd/2:/dev/stderr",
             "-b", "$prootTmp:/tmp",
             "-w", "/home/coder",
-            "-U", "LD_LIBRARY_PATH",
-            "-U", "LD_PRELOAD",
             "/bin/bash", "-l"
         )
 
@@ -561,7 +558,6 @@ exit 0
         try {
             val pb2Args = mutableListOf(
                 prootPath,
-                "-v", "1",
                 "-0",
                 "--link2symlink",
                 "--sysvipc",
@@ -575,8 +571,6 @@ exit 0
                 "-b", "/proc/self/fd/1:/dev/stdout",
                 "-b", "/proc/self/fd/2:/dev/stderr",
                 "-b", "$prootTmp:/tmp",
-                "-U", "LD_LIBRARY_PATH",
-                "-U", "LD_PRELOAD",
                 "/bin/sh", "-c", "echo PROOT_BASIC_OK"
             )
             val pb2 = ProcessBuilder(pb2Args)
