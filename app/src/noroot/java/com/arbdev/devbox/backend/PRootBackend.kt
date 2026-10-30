@@ -132,12 +132,13 @@ class PRootBackend(private val context: Context) : LinuxEnvironment {
 
         val pbArgs = mutableListOf(
             prootBin,
-            "-v", "2",
+            "-v", "3",
             "-k", "4.14.0",
             "-0",
             "-r", targetRootfs,
             "-b", "/dev",
             "-b", "/proc",
+            "-b", "/sys",
             "-b", "$prootTmp:/tmp",
             "-w", "/home/coder",
             "/bin/bash", "-l"
@@ -535,12 +536,13 @@ exit 0
         try {
             val pb2Args = mutableListOf(
                 prootPath,
-                "-v", "2",
+                "-v", "3",
                 "-k", "4.14.0",
                 "-0",
                 "-r", defaultRootfsPath,
                 "-b", "/dev",
                 "-b", "/proc",
+                "-b", "/sys",
                 "/bin/sh", "-c", "echo PROOT_BASIC_OK"
             )
             val pb2 = ProcessBuilder(pb2Args)

@@ -125,11 +125,14 @@ class NativeTerminalSession(
         initializeProcess()
     }
 
+    private var lastProcessStartTime = 0L
+
     fun initializeProcess() {
         synchronized(initLock) {
             if (isInitializing || (isRunning && outputStream != null)) return
             isInitializing = true
         }
+        lastProcessStartTime = System.currentTimeMillis()
         if (Looper.myLooper() == Looper.getMainLooper()) {
             isRunning = true
             activeAgentName = null
@@ -255,20 +258,20 @@ class NativeTerminalSession(
                                     try { buffer.write(errBytes, 0, errBytes.size) } catch (_: Throwable) {}
                                 } else {
                                     AppLogger.e("NativeTerminal", "Sesi [$name] keluar (exit code: $exitCode, stream output kosong)")
-                                    sessionScope.launch(Dispatchers.IO) {
-                                        try {
-                                            val pLog = Runtime.getRuntime().exec(arrayOf("logcat", "-d", "-t", "50", "-v", "brief"))
-                                            val lines = pLog.inputStream.bufferedReader().readLines().filter {
-                                                val l = it.lowercase()
-                                                l.contains("proot") || l.contains("seccomp") || l.contains("audit") ||
-                                                l.contains("denied") || l.contains("fatal") || l.contains("sig") ||
-                                                l.contains("linker") || l.contains("crash") || l.contains("tombstone")
-                                            }.takeLast(15)
-                                            if (lines.isNotEmpty()) {
-                                                AppLogger.e("NativeTerminal", "Logcat sistem saat exit:\n" + lines.joinToString("\n"))
-                                            }
-                                        } catch (_: Exception) {}
-                                    }
+                                }
+                                sessionScope.launch(Dispatchers.IO) {
+                                    try {
+                                        val pLog = Runtime.getRuntime().exec(arrayOf("logcat", "-d", "-t", "50", "-v", "brief"))
+                                        val lines = pLog.inputStream.bufferedReader().readLines().filter {
+                                            val l = it.lowercase()
+                                            l.contains("proot") || l.contains("seccomp") || l.contains("audit") ||
+                                            l.contains("denied") || l.contains("fatal") || l.contains("sig") ||
+                                            l.contains("linker") || l.contains("crash") || l.contains("tombstone")
+                                        }.takeLast(15)
+                                        if (lines.isNotEmpty()) {
+                                            AppLogger.e("NativeTerminal", "Logcat sistem saat exit:\n" + lines.joinToString("\n"))
+                                        }
+                                    } catch (_: Exception) {}
                                 }
                             } else {
                                 AppLogger.i("NativeTerminal", "Sesi [$name] telah selesai (exit code: 0)")
@@ -294,7 +297,11 @@ class NativeTerminalSession(
         private set
 
     fun sendText(text: String) {
+        val now = System.currentTimeMillis()
         if (!isRunning && !isInitializing) {
+            if (now - lastProcessStartTime < 3000L) {
+                return
+            }
             AppLogger.w("NativeTerminal", "Sesi [$name] mati/terputus. Meluncurkan ulang sesi...")
             initializeProcess()
         }
@@ -316,7 +323,11 @@ class NativeTerminalSession(
     }
 
     fun sendBytes(bytes: ByteArray) {
+        val now = System.currentTimeMillis()
         if (!isRunning && !isInitializing) {
+            if (now - lastProcessStartTime < 3000L) {
+                return
+            }
             AppLogger.w("NativeTerminal", "Sesi [$name] mati/terputus. Meluncurkan ulang sesi...")
             initializeProcess()
         }
