@@ -129,14 +129,8 @@ class PRootBackend(private val context: Context) : LinuxEnvironment {
             "-0",
             "-r", targetRootfs,
             "-b", "/dev",
-            "-b", "/dev/pts",
             "-b", "/proc"
         )
-
-        // Hanya bind /sys jika diizinkan oleh kernel dan SELinux Android
-        if (File("/sys").canRead()) {
-            pbArgs.addAll(listOf("-b", "/sys"))
-        }
 
         // Hanya bind /sdcard jika dapat dibaca dan direktori mountpoint tersedia
         val sdcard = File("/sdcard")
@@ -147,11 +141,11 @@ class PRootBackend(private val context: Context) : LinuxEnvironment {
             }
         }
 
-        // Bind folder temporary khusus PRoot ke /tmp di dalam rootfs
+        // Bind folder temporary khusus PRoot ke /tmp di dalam rootfs dan luncurkan interactive login shell
         pbArgs.addAll(listOf(
             "-b", "$prootTmp:/tmp",
             "-w", "/home/coder",
-            "/bin/bash", "--login"
+            "/bin/bash", "-i", "-l"
         ))
 
         val pb = ProcessBuilder(pbArgs)
@@ -347,10 +341,70 @@ exit 0
                 bridge.setExecutable(true, false)
             }
 
+            // Setup /etc/passwd dan /etc/group untuk user coder
+            val etcDir = File(base, "etc").apply { mkdirs() }
+            val passwdFile = File(etcDir, "passwd")
+            if (passwdFile.exists()) {
+                val content = passwdFile.readText()
+                if (!content.contains("coder:")) {
+                    passwdFile.appendText("coder:x:1000:1000:DevBox User:/home/coder:/bin/bash\n")
+                }
+            } else {
+                passwdFile.writeText("root:x:0:0:root:/root:/bin/bash\ncoder:x:1000:1000:DevBox User:/home/coder:/bin/bash\n")
+            }
+            val groupFile = File(etcDir, "group")
+            if (groupFile.exists()) {
+                val content = groupFile.readText()
+                if (!content.contains("coder:")) {
+                    groupFile.appendText("coder:x:1000:\n")
+                }
+            } else {
+                groupFile.writeText("root:x:0:\ncoder:x:1000:\n")
+            }
+            val sudoersDir = File(etcDir, "sudoers.d").apply { mkdirs() }
+            val sudoersCoder = File(sudoersDir, "coder")
+            if (!sudoersCoder.exists()) {
+                sudoersCoder.writeText("coder ALL=(ALL:ALL) NOPASSWD:ALL\n")
+            }
+
+            // Setup .bashrc, .profile, .bash_profile modern DevBox untuk user coder
+            val homeCoder = File(base, "home/coder").apply { mkdirs() }
+            val bashrcFile = File(homeCoder, ".bashrc")
+            if (!bashrcFile.exists() || !bashrcFile.readText().contains("Environment v4")) {
+                bashrcFile.writeText(com.arbdev.devbox.data.ChrootManager.getBashrcContent())
+                bashrcFile.setReadable(true, false)
+                bashrcFile.setWritable(true, true)
+            }
+            val profileFile = File(homeCoder, ".profile")
+            if (!profileFile.exists()) {
+                profileFile.writeText(com.arbdev.devbox.data.ChrootManager.getProfileContent())
+                profileFile.setReadable(true, false)
+                profileFile.setWritable(true, true)
+            }
+            val bashProfileFile = File(homeCoder, ".bash_profile")
+            if (!bashProfileFile.exists()) {
+                bashProfileFile.writeText(com.arbdev.devbox.data.ChrootManager.getProfileContent())
+                bashProfileFile.setReadable(true, false)
+                bashProfileFile.setWritable(true, true)
+            }
+
+            // Sediakan juga di /root/.bashrc & /root/.profile
+            val rootDir = File(base, "root").apply { mkdirs() }
+            val rootBashrc = File(rootDir, ".bashrc")
+            if (!rootBashrc.exists()) {
+                rootBashrc.writeText(com.arbdev.devbox.data.ChrootManager.getBashrcContent())
+            }
+            val rootProfile = File(rootDir, ".profile")
+            if (!rootProfile.exists()) {
+                rootProfile.writeText(com.arbdev.devbox.data.ChrootManager.getProfileContent())
+            }
+
             // Pastikan binary bash dan direktori esensial selalu executable
             File(base, "usr/bin/bash").let { if (it.exists()) it.setExecutable(true, false) }
             File(base, "bin/bash").let { if (it.exists()) it.setExecutable(true, false) }
-            File(base, "home/coder").let { if (it.exists()) { it.setReadable(true, false); it.setWritable(true, true); it.setExecutable(true, false) } }
+            homeCoder.setReadable(true, false)
+            homeCoder.setWritable(true, true)
+            homeCoder.setExecutable(true, false)
             File(base, "tmp").let { if (it.exists()) { it.setReadable(true, false); it.setWritable(true, true); it.setExecutable(true, false) } }
         } catch (_: Exception) {}
         return Result.success(Unit)

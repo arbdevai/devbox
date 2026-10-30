@@ -225,6 +225,12 @@ class NativeTerminalSession(
                     } catch (e: Exception) {
                         AppLogger.w("NativeTerminal", "Stream pembaca sesi [$name] terputus: ${e.message}")
                     } finally {
+                        val exitCode = try {
+                            proc.waitFor(400, java.util.concurrent.TimeUnit.MILLISECONDS)
+                            proc.exitValue()
+                        } catch (_: Exception) {
+                            try { proc.exitValue() } catch (_: Exception) { -1 }
+                        }
                         synchronized(initLock) {
                             isInitializing = false
                             outputStream = null
@@ -234,7 +240,6 @@ class NativeTerminalSession(
                             isRunning = false
                             activeAgentName = null
                             isAgentRunning = false
-                            val exitCode = try { proc.exitValue() } catch (_: Exception) { -1 }
                             if (exitCode != 0) {
                                 val outSnippet = initialOutput.toString().trim()
                                 if (outSnippet.isNotEmpty()) {

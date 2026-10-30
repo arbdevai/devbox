@@ -309,6 +309,19 @@ object ChrootManager {
         activeSessionIds: List<String> = emptyList(),
         rootfs: String = activeRootfs
     ): Int = withContext(Dispatchers.IO) {
+        if (!com.arbdev.devbox.FlavorConfig.IS_ROOT_FLAVOR) {
+            try {
+                val tmpDir = File(rootfs, "tmp")
+                if (tmpDir.exists()) {
+                    tmpDir.listFiles()?.forEach { f ->
+                        if (f.name.startsWith(".devbox_active_agent") && (activeSessionIds.isEmpty() || !activeSessionIds.any { f.name.contains(it) })) {
+                            f.delete()
+                        }
+                    }
+                }
+            } catch (_: Exception) {}
+            return@withContext 0
+        }
         val activeSidsStr = activeSessionIds.joinToString(" ")
         val script = """
             count=0
@@ -385,6 +398,22 @@ object ChrootManager {
         activePids: List<Long> = emptyList(),
         rootfs: String = activeRootfs
     ): Int = withContext(Dispatchers.IO) {
+        if (!com.arbdev.devbox.FlavorConfig.IS_ROOT_FLAVOR) {
+            try {
+                val tmpDir = File(rootfs, "tmp")
+                if (tmpDir.exists()) {
+                    tmpDir.listFiles()?.forEach { f ->
+                        if (f.name.startsWith(".devbox_pid_") || f.name.startsWith(".devbox_pts_") || f.name.startsWith(".devbox_ws_")) {
+                            val sid = f.name.substringAfterLast("_")
+                            if (!activeSessionIds.contains(sid)) {
+                                f.delete()
+                            }
+                        }
+                    }
+                }
+            } catch (_: Exception) {}
+            return@withContext 0
+        }
         val activeSidsStr = activeSessionIds.joinToString(" ")
         val activePidsStr = activePids.filter { it > 0 }.joinToString(" ")
         val script = """
@@ -946,6 +975,38 @@ BRIDGE_EOF
             # Hanya buat jika belum ada, atau jika masih memakai template lama / template v1-v3
             if [ ! -f "${'$'}rf/home/coder/.bashrc" ] || grep -q 'DevBox Bash Configuration' "${'$'}rf/home/coder/.bashrc" 2>/dev/null || ( grep -q 'DEVBOX | Custom Bash Environment' "${'$'}rf/home/coder/.bashrc" 2>/dev/null && ! grep -q 'Environment v4' "${'$'}rf/home/coder/.bashrc" 2>/dev/null ); then
                 cat << 'BASHRC_EOF' > "${'$'}rf/home/coder/.bashrc"
+${getBashrcContent()}
+BASHRC_EOF
+
+                # Salin ke root dan skel agar konsisten
+                cp "${'$'}rf/home/coder/.bashrc" "${'$'}rf/root/.bashrc" 2>/dev/null || true
+                mkdir -p "${'$'}rf/etc/skel"
+                cp "${'$'}rf/home/coder/.bashrc" "${'$'}rf/etc/skel/.bashrc" 2>/dev/null || true
+            fi
+
+            # Pastikan .profile dan .bash_profile mengeksekusi .bashrc
+            cat << 'PROFILE_EOF' > "${'$'}rf/home/coder/.profile"
+${getProfileContent()}
+PROFILE_EOF
+            cp "${'$'}rf/home/coder/.profile" "${'$'}rf/home/coder/.bash_profile" 2>/dev/null || true
+            cp "${'$'}rf/home/coder/.profile" "${'$'}rf/root/.profile" 2>/dev/null || true
+            cp "${'$'}rf/home/coder/.profile" "${'$'}rf/root/.bash_profile" 2>/dev/null || true
+            cp "${'$'}rf/home/coder/.profile" "${'$'}rf/etc/skel/.profile" 2>/dev/null || true
+
+            # Hak milik direktori home coder (non-rekursif untuk mencegah disk freeze & menjaga izin SSH key 600)
+            chown 1000:1000 "${'$'}rf/home/coder" "${'$'}rf/home/coder/.bashrc" "${'$'}rf/home/coder/.profile" 2>/dev/null || true
+            chmod 755 "${'$'}rf/home/coder" 2>/dev/null || true
+            chmod 644 "${'$'}rf/home/coder/.bashrc" "${'$'}rf/home/coder/.profile" 2>/dev/null || true
+        """.trimIndent()
+    }
+
+    fun getProfileContent(): String = """
+if [ -f "${'$'}HOME/.bashrc" ]; then
+    . "${'$'}HOME/.bashrc"
+fi
+    """.trimIndent()
+
+    fun getBashrcContent(): String = """
 # ============================================================
 # DEVBOX | Custom Bash Environment v4
 # Ubuntu 24.04 LTS ARM64
@@ -970,17 +1031,17 @@ fi
 export LS_COLORS='rs=0:di=01;34:ln=01;36:mh=00:pi=40;33:so=01;35:do=01;35:bd=40;33;01:cd=40;33;01:or=40;31;01:mi=00:su=37;41:sg=30;43:ca=30;41:tw=01;34:ow=01;34:st=01;34:ex=01;32:*.tar=01;31:*.tgz=01;31:*.zip=01;31:*.z=01;31:*.gz=01;31:*.bz2=01;31:*.deb=01;31:'
 
 # ANSI Raw Colors (for echo / printf / system banner)
-if [[ -t 1 ]]; then
-    CLR_RESET=$'\033[0m'
-    CLR_BOLD=$'\033[1m'
-    CLR_BLUE=$'\033[38;5;75m'
-    CLR_CYAN=$'\033[38;5;81m'
-    CLR_GREEN=$'\033[38;5;114m'
-    CLR_YELLOW=$'\033[38;5;221m'
-    CLR_PURPLE=$'\033[38;5;183m'
-    CLR_WHITE=$'\033[38;5;255m'
-    CLR_GRAY=$'\033[38;5;245m'
-    CLR_PANEL=$'\033[38;5;39m'
+if [[ -t 1 ]] || [[ -n "${'$'}{DEVBOX:-}" ]]; then
+    CLR_RESET=${'$'}'\033[0m'
+    CLR_BOLD=${'$'}'\033[1m'
+    CLR_BLUE=${'$'}'\033[38;5;75m'
+    CLR_CYAN=${'$'}'\033[38;5;81m'
+    CLR_GREEN=${'$'}'\033[38;5;114m'
+    CLR_YELLOW=${'$'}'\033[38;5;221m'
+    CLR_PURPLE=${'$'}'\033[38;5;183m'
+    CLR_WHITE=${'$'}'\033[38;5;255m'
+    CLR_GRAY=${'$'}'\033[38;5;245m'
+    CLR_PANEL=${'$'}'\033[38;5;39m'
 
     # Readline-escaped colors (strictly for PS1 prompt)
     C_RESET='\[\033[0m\]'
@@ -1118,7 +1179,9 @@ devbox-install-tools() {
 
 # DevBox system panel
 devbox_banner() {
-    [[ -t 1 ]] || return 0
+    if [[ ! -t 1 ]] && [[ -z "${'$'}{DEVBOX:-}" ]]; then
+        return 0
+    fi
     [[ -z "${'$'}{DEVBOX_BANNER_SHOWN:-}" ]] || return 0
     export DEVBOX_BANNER_SHOWN=1
 
@@ -1152,20 +1215,7 @@ devbox_banner
 # ============================================================
 # End DevBox Configuration
 # ============================================================
-BASHRC_EOF
-
-                # Salin ke root dan skel agar konsisten
-                cp "${'$'}rf/home/coder/.bashrc" "${'$'}rf/root/.bashrc" 2>/dev/null || true
-                mkdir -p "${'$'}rf/etc/skel"
-                cp "${'$'}rf/home/coder/.bashrc" "${'$'}rf/etc/skel/.bashrc" 2>/dev/null || true
-            fi
-
-            # Pastikan .profile dan .bash_profile mengeksekusi .bashrc
-            cat << 'PROFILE_EOF' > "${'$'}rf/home/coder/.profile"
-if [ -f "${'$'}HOME/.bashrc" ]; then
-    . "${'$'}HOME/.bashrc"
-fi
-PROFILE_EOF
+    """.trimIndent()
             cp "${'$'}rf/home/coder/.profile" "${'$'}rf/home/coder/.bash_profile" 2>/dev/null || true
             cp "${'$'}rf/home/coder/.profile" "${'$'}rf/root/.profile" 2>/dev/null || true
             cp "${'$'}rf/home/coder/.profile" "${'$'}rf/root/.bash_profile" 2>/dev/null || true
@@ -1179,14 +1229,18 @@ PROFILE_EOF
     }
 
     suspend fun ensureEnvironmentReady(rootfs: String = activeRootfs): Result<Unit> = withContext(Dispatchers.IO) {
-        val script = getEnvironmentSetupScript(rootfs)
-        RootExecutor.execute(script, silent = true)
+        if (com.arbdev.devbox.FlavorConfig.IS_ROOT_FLAVOR) {
+            val script = getEnvironmentSetupScript(rootfs)
+            RootExecutor.execute(script, silent = true)
+        }
         environment.ensureEnvironmentReady(rootfs)
     }
 
     fun ensureEnvironmentReadySync(rootfs: String = activeRootfs): Result<Unit> {
-        val script = getEnvironmentSetupScript(rootfs)
-        RootExecutor.executeSync(script, silent = true)
+        if (com.arbdev.devbox.FlavorConfig.IS_ROOT_FLAVOR) {
+            val script = getEnvironmentSetupScript(rootfs)
+            RootExecutor.executeSync(script, silent = true)
+        }
         return environment.ensureEnvironmentReadySync(rootfs)
     }
 
