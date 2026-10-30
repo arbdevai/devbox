@@ -141,6 +141,8 @@ class PRootBackend(private val context: Context) : LinuxEnvironment {
             debugLog.createNewFile()
         } catch (_: Exception) {}
 
+        val shellCmd = """if [ -x /usr/bin/script ] && /usr/bin/script -qefc "exit 0" /dev/null 2>/dev/null; then exec /usr/bin/script -qefc "shopt -s checkwinsize 2>/dev/null; stty rows $initRows cols $initCols opost onlcr icrnl 2>/dev/null; exec /bin/bash -l" /dev/null; else exec /bin/bash -l -i; fi"""
+
         val pbArgs = mutableListOf(
             prootBin,
             "-0",
@@ -157,7 +159,7 @@ class PRootBackend(private val context: Context) : LinuxEnvironment {
             "-b", "/proc/self/fd/2:/dev/stderr",
             "-b", "$prootTmp:/tmp",
             "-w", "/home/coder",
-            "/bin/bash", "-l"
+            "/bin/bash", "-c", shellCmd
         )
 
         val pb = ProcessBuilder(pbArgs)
