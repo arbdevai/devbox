@@ -190,6 +190,16 @@ object UpdateManager {
         return remote != local && remote.isNotBlank()
     }
 
+    private fun isApkValid(context: Context, apkFile: File): Boolean {
+        if (!apkFile.exists() || !apkFile.isFile || apkFile.length() < 10_000_000) return false
+        return try {
+            val pkg = context.packageManager.getPackageArchiveInfo(apkFile.absolutePath, 0)
+            pkg != null && pkg.packageName.startsWith("com.arbdev.devbox")
+        } catch (_: Exception) {
+            false
+        }
+    }
+
     suspend fun startDownload(context: Context, info: UpdateInfo) = withContext(Dispatchers.IO) {
         cleanupOldApks(context, keepVersion = info.latestVersion)
 
@@ -199,9 +209,9 @@ object UpdateManager {
         val fileName = "devbox-${info.latestVersion}.apk"
         val apkFile = File(downloadDir, fileName)
 
-        // Cek anti double-download: Jika file sudah pernah diunduh dan valid
-        if (apkFile.exists() && apkFile.length() > 5_000_000) {
-            AppLogger.i("UpdateManager", "File APK rilis sudah ada di lokal (${apkFile.length()} bytes). Langsung ke instalasi.")
+        // Cek anti double-download: Pastikan file APK valid dan parseable sebelum dilempar ke installer
+        if (isApkValid(context, apkFile)) {
+            AppLogger.i("UpdateManager", "File APK rilis sudah ada dan valid (${apkFile.length()} bytes). Langsung ke instalasi.")
             _updateStatus.value = UpdateStatus.ReadyToInstall(apkFile)
             installApk(context, apkFile)
             return@withContext
@@ -244,9 +254,16 @@ object UpdateManager {
                 when (status) {
                     DownloadManager.STATUS_SUCCESSFUL -> {
                         downloading = false
-                        AppLogger.i("UpdateManager", "Unduhan selesai. File: ${apkFile.absolutePath}")
-                        _updateStatus.value = UpdateStatus.ReadyToInstall(apkFile)
-                        installApk(context, apkFile)
+                        if (isApkValid(context, apkFile)) {
+                            AppLogger.i("UpdateManager", "Unduhan selesai dan terverifikasi valid. File: ${apkFile.absolutePath}")
+                            _updateStatus.value = UpdateStatus.ReadyToInstall(apkFile)
+                            installApk(context, apkFile)
+                        } else {
+                            val err = "Unduhan APK korup atau tidak lengkap (${apkFile.length()} bytes). Membersihkan file..."
+                            AppLogger.e("UpdateManager", err)
+                            apkFile.delete()
+                            _updateStatus.value = UpdateStatus.Error(err)
+                        }
                     }
                     DownloadManager.STATUS_FAILED -> {
                         downloading = false

@@ -132,7 +132,8 @@ class PRootBackend(private val context: Context) : LinuxEnvironment {
 
         val pbArgs = mutableListOf(
             prootBin,
-            "-v", "1",
+            "-v", "2",
+            "-k", "4.19.0",
             "-0",
             "-r", targetRootfs,
             "-b", "/dev",
@@ -160,7 +161,6 @@ class PRootBackend(private val context: Context) : LinuxEnvironment {
                 put("PROOT_LOADER", loaderPath)
                 AppLogger.i("PRootBackend", "Menggunakan PROOT_LOADER: $loaderPath")
             }
-            put("PROOT_NO_SECCOMP", "1")
             put("PROOT_IGNORE_MISSING_BINDINGS", "1")
             put("COLUMNS", initCols.toString())
             put("LINES", initRows.toString())
@@ -526,7 +526,8 @@ exit 0
         try {
             val pb2Args = mutableListOf(
                 prootPath,
-                "-v", "1",
+                "-v", "2",
+                "-k", "4.19.0",
                 "-0",
                 "-r", defaultRootfsPath,
                 "-b", "/dev",
@@ -536,7 +537,6 @@ exit 0
             val pb2 = ProcessBuilder(pb2Args)
             pb2.environment().apply {
                 loaderPath?.let { put("PROOT_LOADER", it) }
-                put("PROOT_NO_SECCOMP", "1")
                 put("PROOT_IGNORE_MISSING_BINDINGS", "1")
                 put("PROOT_TMP_DIR", prootTmp)
             }
