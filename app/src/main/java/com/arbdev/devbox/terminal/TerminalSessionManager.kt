@@ -205,11 +205,16 @@ class NativeTerminalSession(
                 readerJob = sessionScope.launch {
                     val byteBuffer = ByteArray(8192)
                     val stream = inputStream ?: return@launch
+                    val initialOutput = StringBuilder()
                     try {
                         while (isActive && isRunning) {
                             val count = stream.read(byteBuffer)
                             if (count == -1) break
                             if (count > 0) {
+                                if (initialOutput.length < 2048) {
+                                    val text = String(byteBuffer, 0, minOf(count, 2048 - initialOutput.length), Charsets.UTF_8)
+                                    initialOutput.append(text)
+                                }
                                 try {
                                     buffer.write(byteBuffer, 0, count)
                                 } catch (t: Throwable) {
@@ -230,7 +235,16 @@ class NativeTerminalSession(
                             activeAgentName = null
                             isAgentRunning = false
                             val exitCode = try { proc.exitValue() } catch (_: Exception) { -1 }
-                            AppLogger.i("NativeTerminal", "Sesi [$name] telah selesai (exit code: $exitCode)")
+                            if (exitCode != 0) {
+                                val outSnippet = initialOutput.toString().trim()
+                                if (outSnippet.isNotEmpty()) {
+                                    AppLogger.e("NativeTerminal", "Sesi [$name] keluar (exit code: $exitCode). Output:\n$outSnippet")
+                                } else {
+                                    AppLogger.e("NativeTerminal", "Sesi [$name] keluar (exit code: $exitCode, stream output kosong)")
+                                }
+                            } else {
+                                AppLogger.i("NativeTerminal", "Sesi [$name] telah selesai (exit code: 0)")
+                            }
                         }
                     }
                 }
@@ -246,8 +260,10 @@ class NativeTerminalSession(
         }
     }
 
-    private var lastCols = 0
-    private var lastRows = 0
+    var lastCols = 0
+        private set
+    var lastRows = 0
+        private set
 
     fun sendText(text: String) {
         if (!isRunning && !isInitializing) {

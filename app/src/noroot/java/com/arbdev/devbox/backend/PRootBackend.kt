@@ -74,11 +74,14 @@ class PRootBackend(private val context: Context) : LinuxEnvironment {
         initRows: Int
     ): Process {
         val prootBin = getProotBinaryPath()
-        val prootTmp = File(context.cacheDir, "proot_tmp").apply { mkdirs() }.absolutePath
+        val prootTmp = File(context.filesDir, "proot_tmp").apply {
+            mkdirs()
+            setReadable(true, false)
+            setWritable(true, false)
+            setExecutable(true, false)
+        }.absolutePath
         File(targetRootfs, "home/coder").mkdirs()
         File(targetRootfs, "tmp").mkdirs()
-
-        val shellScript = "cd /home/coder 2>/dev/null || cd /; echo \$\$ > /tmp/.devbox_pid_$sessionId 2>/dev/null; exec /bin/bash -i -l"
 
         val pbArgs = mutableListOf(
             prootBin,
@@ -87,6 +90,7 @@ class PRootBackend(private val context: Context) : LinuxEnvironment {
             "-0",
             "-r", targetRootfs,
             "-b", "/dev",
+            "-b", "/dev/pts",
             "-b", "/proc"
         )
 
@@ -108,8 +112,7 @@ class PRootBackend(private val context: Context) : LinuxEnvironment {
         pbArgs.addAll(listOf(
             "-b", "$prootTmp:/tmp",
             "-w", "/home/coder",
-            "/bin/bash", "-c",
-            shellScript
+            "/bin/bash", "--login"
         ))
 
         val pb = ProcessBuilder(pbArgs)

@@ -1173,11 +1173,19 @@ fun TerminalScreen(
                     val vPaddingPx = 4.dp.toPx() // 2.dp vertical margin di setiap sisi
                     if (charWidthPx > 0 && charHeightPx > 0) {
                         val cols = ((maxWidth.toPx() - hPaddingPx).coerceAtLeast(1f) / charWidthPx).toInt().coerceIn(20, 300)
+                        val isColsChanged = activeSession.lastCols > 0 && cols != activeSession.lastCols
+
+                        // KUNCI ROWS LINUX & ANTI-FLICKER AGY:
+                        // Jangan pernah kirim SIGWINCH / stty resize ke Linux saat keyboard virtual HP terbuka/tertutup atau keluar/masuk APK!
+                        // Resize terminal HANYA diizinkan jika font di-zoom atau orientasi layar (cols) berubah.
+                        if (isImeVisible && activeSession.lastRows > 0 && !isFontZoom && !isColsChanged) {
+                            return@LaunchedEffect
+                        }
+
                         // KUNCI ROWS LINUX (Virtual Viewport Panning):
-                        // Saat keyboard virtual HP muncul, JANGAN mengecilkan rows terminal di Linux!
                         // Tetap gunakan tinggi layar penuh unconstrainedMaxHeightPx agar PTY tidak menerima SIGWINCH
                         // dan Bubble Tea/agy tidak pernah terbentur baris 0 (Solusi 1 Dokumen Audit Master).
-                        val targetHeightPx = if (isImeVisible && unconstrainedMaxHeightPx > 0f) {
+                        val targetHeightPx = if (unconstrainedMaxHeightPx > 0f) {
                             unconstrainedMaxHeightPx
                         } else {
                             maxHeight.toPx()
