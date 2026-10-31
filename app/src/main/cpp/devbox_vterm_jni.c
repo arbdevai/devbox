@@ -4,6 +4,9 @@
 #include <string.h>
 #include <stdint.h>
 #include <stdbool.h>
+#include <sys/ioctl.h>
+#include <fcntl.h>
+#include <unistd.h>
 #include <android/log.h>
 #include "vterm.h"
 #include "vterm_internal.h"
@@ -274,6 +277,30 @@ Java_com_arbdev_devbox_terminal_NativeVTerm_nativeClearScrollback(JNIEnv *env, j
     DevBoxTerminal *term = (DevBoxTerminal *)(intptr_t)ptr;
     if (!term) return;
     cb_sb_clear(term);
+}
+
+JNIEXPORT jboolean JNICALL
+Java_com_arbdev_devbox_terminal_NativeVTerm_nativeSetWindowSize(JNIEnv *env, jclass clazz, jstring ptsPath, jint cols, jint rows) {
+    (void)clazz;
+    if (!ptsPath) return JNI_FALSE;
+    const char *path = (*env)->GetStringUTFChars(env, ptsPath, NULL);
+    if (!path) return JNI_FALSE;
+
+    int fd = open(path, O_RDWR | O_NOCTTY);
+    if (fd < 0) {
+        (*env)->ReleaseStringUTFChars(env, ptsPath, path);
+        return JNI_FALSE;
+    }
+
+    struct winsize ws;
+    memset(&ws, 0, sizeof(ws));
+    ws.ws_col = (unsigned short)cols;
+    ws.ws_row = (unsigned short)rows;
+
+    int res = ioctl(fd, TIOCSWINSZ, &ws);
+    close(fd);
+    (*env)->ReleaseStringUTFChars(env, ptsPath, path);
+    return (res == 0) ? JNI_TRUE : JNI_FALSE;
 }
 
 JNIEXPORT jint JNICALL

@@ -72,11 +72,39 @@ class ChrootBackend(private val context: Context) : LinuxEnvironment {
         rows: Int,
         targetRootfs: String
     ) {
+        val ptsFile = File("$targetRootfs/tmp/.devbox_pts_$sessionId")
+        val pidFile = File("$targetRootfs/tmp/.devbox_pid_$sessionId")
+        var nativeSuccess = false
+        if (ptsFile.exists()) {
+            val ptsDev = try { ptsFile.readText().trim() } catch (_: Throwable) { "" }
+            if (ptsDev.isNotBlank() && ptsDev.startsWith("/dev/pts/")) {
+                if (com.arbdev.devbox.terminal.NativeVTerm.setPtyWindowSize(ptsDev, cols, rows)) {
+                    nativeSuccess = true
+                    val pidStr = try { pidFile.readText().trim() } catch (_: Throwable) { "" }
+                    val pid = pidStr.toIntOrNull()
+                    if (pid != null && pid > 0) {
+                        try {
+                            android.system.Os.kill(pid, 28) // SIGWINCH
+                        } catch (_: Throwable) {}
+                    }
+                }
+            }
+        }
+
+        if (nativeSuccess) {
+            try {
+                File("$targetRootfs/tmp/.devbox_ws_$sessionId").writeText("rows $rows cols $cols")
+            } catch (_: Throwable) {}
+            return
+        }
+
         val currentPtsFd = cachedPtsDev
         if (currentPtsFd != null) {
             val directCmd = "echo 'rows $rows cols $cols' > '$targetRootfs/tmp/.devbox_ws_$sessionId' 2>/dev/null; " +
+                    "spid=\$(cat '$targetRootfs/tmp/.devbox_pid_$sessionId' 2>/dev/null); " +
                     "if [ -e '$currentPtsFd' ]; then " +
                     "stty -F '$currentPtsFd' rows $rows cols $cols 2>/dev/null || chroot '$targetRootfs' /usr/bin/stty -F '$currentPtsFd' rows $rows cols $cols 2>/dev/null; " +
+                    "[ -n \"\$spid\" ] && kill -28 \"\$spid\" 2>/dev/null || true; " +
                     "else exit 1; fi"
             val res = RootExecutor.executeSync(directCmd, silent = true)
             if (res.isSuccess) return
@@ -97,6 +125,7 @@ class ChrootBackend(private val context: Context) : LinuxEnvironment {
                 "done; done; fi; " +
                 "if [ -n \"\$pts_fd\" ]; then " +
                 "stty -F \"\$pts_fd\" rows $rows cols $cols 2>/dev/null || chroot '$targetRootfs' /usr/bin/stty -F \"\$pts_fd\" rows $rows cols $cols 2>/dev/null; " +
+                "[ -n \"\$spid\" ] && kill -28 \"\$spid\" 2>/dev/null || true; " +
                 "echo \"\$pts_fd\"; " +
                 "fi"
 

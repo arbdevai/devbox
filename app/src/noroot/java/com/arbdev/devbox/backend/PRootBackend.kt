@@ -141,7 +141,7 @@ class PRootBackend(private val context: Context) : LinuxEnvironment {
             debugLog.createNewFile()
         } catch (_: Exception) {}
 
-        val shellCmd = """export TMPDIR=/tmp TEMP=/tmp TMP=/tmp LANG=C.UTF-8 LC_ALL=C.UTF-8 DEBIAN_FRONTEND=noninteractive; if [ -f /var/lib/dpkg/status ] && grep -q "half-configured" /var/lib/dpkg/status 2>/dev/null; then dpkg --configure -a 2>/dev/null || true; fi; if [ ! -f /etc/ssl/certs/ca-certificates.crt ] && [ -x /usr/sbin/update-ca-certificates ]; then update-ca-certificates --fresh 2>/dev/null || true; fi; if [ -x /usr/bin/script ] && /usr/bin/script -qefc "exit 0" /dev/null 2>/dev/null; then exec /usr/bin/script -qefc "shopt -s checkwinsize 2>/dev/null; stty rows $initRows cols $initCols opost onlcr icrnl 2>/dev/null; exec /bin/bash -l" /dev/null; else exec /bin/bash -l -i; fi"""
+        val shellCmd = """export TMPDIR=/tmp TEMP=/tmp TMP=/tmp LANG=C.UTF-8 LC_ALL=C.UTF-8 DEBIAN_FRONTEND=noninteractive; if [ -f /var/lib/dpkg/status ] && grep -q "half-configured" /var/lib/dpkg/status 2>/dev/null; then dpkg --configure -a 2>/dev/null || true; fi; if [ ! -f /etc/ssl/certs/ca-certificates.crt ] && [ -x /usr/sbin/update-ca-certificates ]; then update-ca-certificates --fresh 2>/dev/null || true; fi; if [ -x /usr/bin/script ] && /usr/bin/script -qefc "exit 0" /dev/null 2>/dev/null; then exec /usr/bin/script -qefc "shopt -s checkwinsize 2>/dev/null; tty > /tmp/.devbox_pts_$sessionId 2>/dev/null; echo ${'$'}${'$'} > /tmp/.devbox_pid_$sessionId 2>/dev/null; stty rows $initRows cols $initCols opost onlcr icrnl 2>/dev/null; exec /bin/bash -l" /dev/null; else exec /bin/bash -l -i; fi""""
 
         val pbArgs = mutableListOf(
             prootBin,
@@ -235,6 +235,24 @@ class PRootBackend(private val context: Context) : LinuxEnvironment {
             val prootTmp = File(context.filesDir, "proot_tmp")
             File(prootTmp, ".devbox_ws_$sessionId").writeText("rows $rows cols $cols")
             File(targetRootfs, "tmp/.devbox_ws_$sessionId").writeText("rows $rows cols $cols")
+
+            val ptsFile = File(prootTmp, ".devbox_pts_$sessionId")
+            val pidFile = File(prootTmp, ".devbox_pid_$sessionId")
+            val ptsDev = if (ptsFile.exists()) ptsFile.readText().trim() else null
+            val bashPidStr = if (pidFile.exists()) pidFile.readText().trim() else null
+
+            if (!ptsDev.isNullOrBlank() && ptsDev.startsWith("/dev/pts/")) {
+                com.arbdev.devbox.terminal.NativeVTerm.setPtyWindowSize(ptsDev, cols, rows)
+            }
+
+            if (!bashPidStr.isNullOrBlank()) {
+                val pid = bashPidStr.toIntOrNull()
+                if (pid != null && pid > 0) {
+                    try {
+                        android.system.Os.kill(pid, 28) // 28 = SIGWINCH
+                    } catch (_: Exception) {}
+                }
+            }
         } catch (_: Exception) {}
     }
 

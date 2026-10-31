@@ -13,8 +13,8 @@ android {
         applicationId = "com.arbdev.devbox"
         minSdk = 26
         targetSdk = 36
-        versionCode = 10223
-        versionName = "1.2.23" // v1.2.23: cross-row URL stitching and instant direct paste
+        versionCode = 10224
+        versionName = "1.2.24" // v1.2.24: multi-line indented URL reconstruction and native TIOCSWINSZ window resize
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables {

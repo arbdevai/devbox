@@ -76,6 +76,18 @@ class NativeVTerm(
         }
 
         @JvmStatic
+        fun setPtyWindowSize(ptsPath: String, cols: Int, rows: Int): Boolean {
+            return try {
+                nativeSetWindowSize(ptsPath, cols, rows)
+            } catch (_: Exception) {
+                false
+            }
+        }
+
+        @JvmStatic
+        private external fun nativeSetWindowSize(ptsPath: String, cols: Int, rows: Int): Boolean
+
+        @JvmStatic
         private external fun nativeCreate(rows: Int, cols: Int): Long
 
         @JvmStatic

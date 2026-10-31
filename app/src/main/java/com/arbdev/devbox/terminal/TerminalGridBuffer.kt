@@ -773,102 +773,72 @@ class TerminalGridBuffer(
 
             val urlRegex = Regex("(?:https?|file)://[^\\s<>\"]+|localhost:\\d+[^\\s<>\"]*")
 
-            // Cari kolom acuan (jika sel yang diklik spasi, cari sel non-spasi terdekat di baris yang sama)
-            var startCol = col.coerceIn(0, maxCols - 1)
-            if (targetLine[startCol].char == ' ') {
-                val searchOffsets = listOf(-1, 1, -2, 2, -3, 3, -4, 4, -5, 5)
-                val foundOffset = searchOffsets.firstOrNull { offset ->
-                    val c = startCol + offset
-                    c in 0 until maxCols && targetLine[c].char != ' '
-                }
-                if (foundOffset != null) {
-                    startCol += foundOffset
-                }
-            }
+            // Kumpulan baris kandidat di sekitar baris yang diklik (hingga 15 baris ke atas dan ke bawah)
+            val windowStart = (absoluteRow - 15).coerceAtLeast(0)
+            val windowEnd = (absoluteRow + 15).coerceAtMost(totalLines - 1)
 
-            // Jika sel tetap spasi, lakukan fallback pencocokan regex pada baris saat ini
-            if (targetLine[startCol].char == ' ') {
-                val sbSingle = StringBuilder()
+            val stitchedSb = StringBuilder()
+            var stitchedTargetOffset = -1
+
+            for (r in windowStart..windowEnd) {
+                val l = getLineAt(r) ?: continue
+                val lineStr = StringBuilder()
+                var lastNonSpace = -1
                 for (c in 0 until maxCols) {
-                    if (!targetLine[c].isWideContinuation) sbSingle.append(targetLine[c].char)
+                    if (!l[c].isWideContinuation) {
+                        lineStr.append(l[c].char)
+                        if (l[c].char != ' ') lastNonSpace = lineStr.length - 1
+                    }
                 }
-                val m = urlRegex.find(sbSingle.toString())
-                return m?.let { cleanUrl(it.value) }
+
+                val trimmedEnd = if (lastNonSpace >= 0) lineStr.substring(0, lastNonSpace + 1) else ""
+                val leadingSpaces = trimmedEnd.takeWhile { it == ' ' }.length
+                val contentWithoutIndent = trimmedEnd.trimStart()
+
+                // Cek apakah baris r adalah kelanjutan pembungkusan URL dari baris sebelumnya:
+                val isContinuation = if (stitchedSb.isNotEmpty() && contentWithoutIndent.isNotEmpty()) {
+                    val prevLastChar = stitchedSb.last()
+                    val nextFirstChar = contentWithoutIndent.first()
+                    val prevIsUrlChar = prevLastChar in 'a'..'z' || prevLastChar in 'A'..'Z' || prevLastChar in '0'..'9' || prevLastChar in "-._~:/?#[]@!$&'()*+,;%="
+                    val nextIsUrlChar = nextFirstChar in 'a'..'z' || nextFirstChar in 'A'..'Z' || nextFirstChar in '0'..'9' || nextFirstChar in "-._~:/?#[]@!$&'()*+,;%="
+                    prevIsUrlChar && nextIsUrlChar && (leadingSpaces in 0..4) && !contentWithoutIndent.contains(" ")
+                } else false
+
+                if (r == absoluteRow) {
+                    stitchedTargetOffset = stitchedSb.length + (col - leadingSpaces).coerceAtLeast(0)
+                }
+
+                if (isContinuation) {
+                    stitchedSb.append(contentWithoutIndent)
+                } else {
+                    if (stitchedSb.isNotEmpty()) {
+                        stitchedSb.append(" ")
+                    }
+                    stitchedSb.append(contentWithoutIndent)
+                }
             }
 
-            // Rekonstruksi token non-spasi lintas baris (Cross-Row Boundary Stitching)
-            // 1. Telusuri ke depan (forward)
-            val forwardSb = StringBuilder()
-            var currR = absoluteRow
-            var currC = startCol
+            val stitchedText = stitchedSb.toString()
+            val matches = urlRegex.findAll(stitchedText).toList()
 
-            while (currR < totalLines) {
-                val curLine = getLineAt(currR) ?: break
-                var hitSpace = false
-                while (currC < maxCols) {
-                    val ch = curLine[currC].char
-                    if (ch == ' ' || curLine[currC].hyperlinkUrl != null) {
-                        hitSpace = true
-                        break
-                    }
-                    if (!curLine[currC].isWideContinuation) {
-                        forwardSb.append(ch)
-                    }
-                    currC++
+            if (stitchedTargetOffset >= 0 && matches.isNotEmpty()) {
+                val encompassing = matches.firstOrNull { m ->
+                    stitchedTargetOffset in (m.range.first - 15)..(m.range.last + 15)
                 }
-                if (hitSpace || currC < maxCols) {
-                    break
+                if (encompassing != null) {
+                    return cleanUrl(encompassing.value)
                 }
-                // Jika mencapai ujung baris tanpa spasi, lanjutkan ke kolom 0 baris berikutnya
-                currR++
-                currC = 0
+                val closest = matches.minByOrNull { m ->
+                    val mid = (m.range.first + m.range.last) / 2
+                    kotlin.math.abs(mid - stitchedTargetOffset)
+                }
+                if (closest != null) {
+                    return cleanUrl(closest.value)
+                }
             }
 
-            // 2. Telusuri ke belakang (backward)
-            val backwardSb = StringBuilder()
-            currR = absoluteRow
-            currC = startCol - 1
-
-            while (currR >= 0) {
-                val curLine = getLineAt(currR) ?: break
-                if (currC < 0) {
-                    // Cek apakah baris sebelumnya berlanjut hingga ujung kolom
-                    if (currR == absoluteRow) {
-                        currR--
-                        currC = maxCols - 1
-                        val prevLine = getLineAt(currR) ?: break
-                        if (prevLine[maxCols - 1].char == ' ') break
-                        continue
-                    } else {
-                        break
-                    }
-                }
-                var hitSpace = false
-                while (currC >= 0) {
-                    val ch = curLine[currC].char
-                    if (ch == ' ' || curLine[currC].hyperlinkUrl != null) {
-                        hitSpace = true
-                        break
-                    }
-                    if (!curLine[currC].isWideContinuation) {
-                        backwardSb.insert(0, ch)
-                    }
-                    currC--
-                }
-                if (hitSpace) {
-                    break
-                }
-                // Jika mencapai awal kolom tanpa spasi, cek apakah baris sebelumnya bersambung
-                currR--
-                currC = maxCols - 1
-                val prevLine = getLineAt(currR) ?: break
-                if (prevLine[maxCols - 1].char == ' ') break
-            }
-
-            val fullToken = backwardSb.toString() + forwardSb.toString()
-            val match = urlRegex.find(fullToken)
-            if (match != null) {
-                return cleanUrl(match.value)
+            if (matches.isNotEmpty()) {
+                return cleanUrl(matches.first().value)
             }
 
             return null
@@ -890,11 +860,27 @@ class TerminalGridBuffer(
                 }
                 var last = maxCols - 1
                 while (last >= 0 && line[last].char == ' ') last--
+                val lineContent = StringBuilder()
                 for (c in 0..last) {
-                    if (!line[c].isWideContinuation) textSb.append(line[c].char)
+                    if (!line[c].isWideContinuation) lineContent.append(line[c].char)
                 }
-                if (last < maxCols - 1) {
-                    textSb.append(' ')
+                val trimmedEnd = lineContent.toString()
+                val leadingSpaces = trimmedEnd.takeWhile { it == ' ' }.length
+                val contentWithoutIndent = trimmedEnd.trimStart()
+
+                val isContinuation = if (textSb.isNotEmpty() && contentWithoutIndent.isNotEmpty()) {
+                    val prevLastChar = textSb.last()
+                    val nextFirstChar = contentWithoutIndent.first()
+                    val prevIsUrlChar = prevLastChar in 'a'..'z' || prevLastChar in 'A'..'Z' || prevLastChar in '0'..'9' || prevLastChar in "-._~:/?#[]@!$&'()*+,;%="
+                    val nextIsUrlChar = nextFirstChar in 'a'..'z' || nextFirstChar in 'A'..'Z' || nextFirstChar in '0'..'9' || nextFirstChar in "-._~:/?#[]@!$&'()*+,;%="
+                    prevIsUrlChar && nextIsUrlChar && (leadingSpaces in 0..4) && !contentWithoutIndent.contains(" ")
+                } else false
+
+                if (isContinuation) {
+                    textSb.append(contentWithoutIndent)
+                } else {
+                    if (textSb.isNotEmpty()) textSb.append(' ')
+                    textSb.append(contentWithoutIndent)
                 }
             }
             urlRegex.findAll(textSb.toString()).forEach { m ->
