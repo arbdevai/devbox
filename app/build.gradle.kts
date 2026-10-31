@@ -14,7 +14,7 @@ android {
         minSdk = 26
         targetSdk = 36
         versionCode = 10221
-        versionName = "1.2.21"
+        versionName = "1.2.21" // v1.2.21: scrollback clear and viewport sync
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables {
