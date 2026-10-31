@@ -228,18 +228,7 @@ class TerminalGridBuffer(
             vterm.clearScrollback()
             for (line in scrollbackCache) {
                 for (cell in line) {
-                    cell.char = ' '
-                    cell.fgColor = Color.Transparent
-                    cell.bgColor = Color.Transparent
-                    cell.isBold = false
-                    cell.isUnderline = false
-                    cell.isItalic = false
-                    cell.isInverse = false
-                    cell.isDim = false
-                    cell.isWide = false
-                    cell.isWideContinuation = false
-                    cell.extraChar = null
-                    cell.hyperlinkUrl = null
+                    cell.reset()
                 }
             }
             clearImages()
