@@ -235,9 +235,6 @@ fun TerminalScreen(
     var isAltActive by remember { mutableStateOf(false) }
     var isShiftActive by remember { mutableStateOf(false) }
 
-    // Dialog proteksi teks clipboard sangat panjang (anti-loop CLI)
-    var pendingLargePaste by remember { mutableStateOf<String?>(null) }
-
     // Dialog ubah nama sesi
     var sessionToRename by remember { mutableStateOf<NativeTerminalSession?>(null) }
     var renameInputText by remember { mutableStateOf("") }
@@ -797,11 +794,7 @@ fun TerminalScreen(
                                 val clip = clipboardManager.getText()?.text
                                 val curSess = TerminalSessionManager.getActiveSession()
                                 if (!clip.isNullOrEmpty()) {
-                                    if (clip.length > 2000 || clip.count { it == '\n' } > 50) {
-                                        pendingLargePaste = clip
-                                    } else {
-                                        curSess.pasteText(clip)
-                                    }
+                                    curSess.pasteText(clip)
                                 } else {
                                     Toast.makeText(context, "Clipboard is empty", Toast.LENGTH_SHORT).show()
                                 }
@@ -1273,9 +1266,6 @@ fun TerminalScreen(
                     onTapUrl = { url ->
                         activeUrlPrompt = url
                     },
-                    onPasteLarge = { largeText ->
-                        pendingLargePaste = largeText
-                    },
                     modifier = Modifier.fillMaxSize()
                 )
             }
@@ -1348,45 +1338,6 @@ fun TerminalScreen(
                     }
                 }
             }
-        }
-
-        // Large Paste Protection Dialog
-        pendingLargePaste?.let { largeText ->
-            AlertDialog(
-                onDismissRequest = { pendingLargePaste = null },
-                containerColor = DevSurface,
-                titleContentColor = DevOnSurface,
-                textContentColor = DevOnSurfaceVariant,
-                title = { Text("Large Clipboard Text", fontWeight = FontWeight.Bold) },
-                text = {
-                    Text(
-                        "Clipboard contains ${largeText.length} characters (${largeText.lines().size} lines).\n\n" +
-                        "Pasting a large log/code block directly into an interactive shell may cause command loops.\n\n" +
-                        "Paste anyway?",
-                        fontSize = 13.sp
-                    )
-                },
-                confirmButton = {
-                    Button(
-                        onClick = {
-                            val text = pendingLargePaste
-                            pendingLargePaste = null
-                            if (text != null) {
-                                activeSession.pasteText(text)
-                            }
-                        },
-                        colors = ButtonDefaults.buttonColors(containerColor = DevPrimary),
-                        shape = RoundedCornerShape(50)
-                    ) {
-                        Text("Paste Anyway", color = DevOnPrimary, fontWeight = FontWeight.Bold)
-                    }
-                },
-                dismissButton = {
-                    TextButton(onClick = { pendingLargePaste = null }) {
-                        Text("Cancel", color = DevOnSurfaceVariant)
-                    }
-                }
-            )
         }
 
         // Rename Session Dialog
@@ -1486,13 +1437,35 @@ fun TerminalScreen(
                 titleContentColor = DevOnSurface,
                 textContentColor = DevOnSurfaceVariant,
                 title = { Text("Open Terminal Link", fontWeight = FontWeight.Bold) },
-                text = { Text(url, fontFamily = FontFamily.Monospace, fontSize = 12.sp, color = DevPrimary) },
+                text = {
+                    Surface(
+                        color = DevBackground,
+                        shape = RoundedCornerShape(8.dp),
+                        border = BorderStroke(1.dp, DevBorder),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text(
+                            text = url,
+                            fontFamily = FontFamily.Monospace,
+                            fontSize = 12.sp,
+                            color = DevPrimary,
+                            modifier = Modifier
+                                .padding(10.dp)
+                                .horizontalScroll(rememberScrollState())
+                        )
+                    }
+                },
                 confirmButton = {
                     Button(
                         onClick = {
                             activeUrlPrompt = null
                             try {
-                                val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url))
+                                val targetUri = if (url.startsWith("localhost:") || url.startsWith("127.0.0.1:")) {
+                                    Uri.parse("http://$url")
+                                } else {
+                                    Uri.parse(url)
+                                }
+                                val intent = Intent(Intent.ACTION_VIEW, targetUri)
                                 context.startActivity(intent)
                             } catch (e: Exception) {
                                 Toast.makeText(context, "Failed to open link: ${e.message}", Toast.LENGTH_SHORT).show()
@@ -1978,11 +1951,7 @@ fun TerminalScreen(
                 ) {
                     val clip = clipboardManager.getText()?.text
                     if (!clip.isNullOrEmpty()) {
-                        if (clip.length > 2000 || clip.count { it == '\n' } > 50) {
-                            pendingLargePaste = clip
-                        } else {
-                            TerminalSessionManager.getActiveSession().pasteText(clip)
-                        }
+                        TerminalSessionManager.getActiveSession().pasteText(clip)
                     } else {
                         Toast.makeText(context, "Clipboard is empty", Toast.LENGTH_SHORT).show()
                     }
@@ -2236,7 +2205,6 @@ fun TerminalCanvas(
     isShiftActive: Boolean = false,
     onFocusRequest: () -> Unit,
     onTapUrl: (String) -> Unit,
-    onPasteLarge: (String) -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val density = LocalDensity.current
@@ -2712,11 +2680,7 @@ fun TerminalCanvas(
                     if (!clipText.isNullOrEmpty()) {
                         TextButton(
                             onClick = {
-                                if (clipText.length > 2000 || clipText.count { it == '\n' } > 50) {
-                                    onPasteLarge(clipText)
-                                } else {
-                                    session.pasteText(clipText)
-                                }
+                                session.pasteText(clipText)
                                 selectionStart = null
                                 selectionEnd = null
                                 showSelectionMenu = false
@@ -2816,11 +2780,7 @@ fun TerminalCanvas(
                     onClick = {
                         val clipText = clipboardManager.getText()?.text
                         if (!clipText.isNullOrEmpty()) {
-                            if (clipText.length > 2000 || clipText.count { it == '\n' } > 50) {
-                                onPasteLarge(clipText)
-                            } else {
-                                session.pasteText(clipText)
-                            }
+                            session.pasteText(clipText)
                         }
                         pasteMenuOffset = null
                     },

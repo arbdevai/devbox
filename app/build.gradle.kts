@@ -13,8 +13,8 @@ android {
         applicationId = "com.arbdev.devbox"
         minSdk = 26
         targetSdk = 36
-        versionCode = 10222
-        versionName = "1.2.22" // v1.2.22: fix TMPDIR, auto-repair ca-certificates, bind /sdcard
+        versionCode = 10223
+        versionName = "1.2.23" // v1.2.23: cross-row URL stitching and instant direct paste
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables {

@@ -764,63 +764,111 @@ class TerminalGridBuffer(
 
     fun getUrlAt(absoluteRow: Int, col: Int): String? {
         synchronized(lock) {
-            val line = getLineAt(absoluteRow) ?: return null
-            val cell = line.getOrNull(col)
-            if (cell?.hyperlinkUrl != null) return cleanUrl(cell.hyperlinkUrl!!)
+            val totalLines = getLineCount()
+            if (absoluteRow !in 0 until totalLines) return null
 
-            fun extractLine(row: Int): String {
-                val l = getLineAt(row) ?: return ""
-                val sb = StringBuilder()
-                for (c in 0 until maxCols) {
-                    if (!l[c].isWideContinuation) {
-                        sb.append(l[c].char)
-                    }
-                }
-                return sb.toString()
-            }
-
-            val currentLine = extractLine(absoluteRow)
-            val prevLine = if (absoluteRow > 0) extractLine(absoluteRow - 1) else ""
-            val nextLine = extractLine(absoluteRow + 1)
+            val targetLine = getLineAt(absoluteRow) ?: return null
+            val targetCell = targetLine.getOrNull(col)
+            if (targetCell?.hyperlinkUrl != null) return cleanUrl(targetCell.hyperlinkUrl!!)
 
             val urlRegex = Regex("(?:https?|file)://[^\\s<>\"]+|localhost:\\d+[^\\s<>\"]*")
 
-            val matchesOnCurrent = urlRegex.findAll(currentLine).toList()
-            for (m in matchesOnCurrent) {
-                val expandedRange = (m.range.first - 6)..(m.range.last + 6)
-                if (col in expandedRange) {
-                    return cleanUrl(m.value)
+            // Cari kolom acuan (jika sel yang diklik spasi, cari sel non-spasi terdekat di baris yang sama)
+            var startCol = col.coerceIn(0, maxCols - 1)
+            if (targetLine[startCol].char == ' ') {
+                val searchOffsets = listOf(-1, 1, -2, 2, -3, 3, -4, 4, -5, 5)
+                val foundOffset = searchOffsets.firstOrNull { offset ->
+                    val c = startCol + offset
+                    c in 0 until maxCols && targetLine[c].char != ' '
+                }
+                if (foundOffset != null) {
+                    startCol += foundOffset
                 }
             }
 
-            if (matchesOnCurrent.size == 1) {
-                return cleanUrl(matchesOnCurrent[0].value)
-            } else if (matchesOnCurrent.size > 1) {
-                val closest = matchesOnCurrent.minByOrNull { m ->
-                    val mid = (m.range.first + m.range.last) / 2
-                    kotlin.math.abs(mid - col)
+            // Jika sel tetap spasi, lakukan fallback pencocokan regex pada baris saat ini
+            if (targetLine[startCol].char == ' ') {
+                val sbSingle = StringBuilder()
+                for (c in 0 until maxCols) {
+                    if (!targetLine[c].isWideContinuation) sbSingle.append(targetLine[c].char)
                 }
-                if (closest != null) return cleanUrl(closest.value)
+                val m = urlRegex.find(sbSingle.toString())
+                return m?.let { cleanUrl(it.value) }
             }
 
-            val prevMatches = urlRegex.findAll(prevLine).toList()
-            for (m in prevMatches) {
-                if (col in (m.range.first - 3)..(m.range.last + 3)) return cleanUrl(m.value)
-            }
-            val nextMatches = urlRegex.findAll(nextLine).toList()
-            for (m in nextMatches) {
-                if (col in (m.range.first - 3)..(m.range.last + 3)) return cleanUrl(m.value)
+            // Rekonstruksi token non-spasi lintas baris (Cross-Row Boundary Stitching)
+            // 1. Telusuri ke depan (forward)
+            val forwardSb = StringBuilder()
+            var currR = absoluteRow
+            var currC = startCol
+
+            while (currR < totalLines) {
+                val curLine = getLineAt(currR) ?: break
+                var hitSpace = false
+                while (currC < maxCols) {
+                    val ch = curLine[currC].char
+                    if (ch == ' ' || curLine[currC].hyperlinkUrl != null) {
+                        hitSpace = true
+                        break
+                    }
+                    if (!curLine[currC].isWideContinuation) {
+                        forwardSb.append(ch)
+                    }
+                    currC++
+                }
+                if (hitSpace || currC < maxCols) {
+                    break
+                }
+                // Jika mencapai ujung baris tanpa spasi, lanjutkan ke kolom 0 baris berikutnya
+                currR++
+                currC = 0
             }
 
-            val candidateStrings = listOf(
-                currentLine.trimEnd() + nextLine.trimStart(),
-                prevLine.trimEnd() + currentLine.trimStart()
-            )
-            for (cs in candidateStrings) {
-                val m = urlRegex.find(cs)
-                if (m != null) {
-                    return cleanUrl(m.value)
+            // 2. Telusuri ke belakang (backward)
+            val backwardSb = StringBuilder()
+            currR = absoluteRow
+            currC = startCol - 1
+
+            while (currR >= 0) {
+                val curLine = getLineAt(currR) ?: break
+                if (currC < 0) {
+                    // Cek apakah baris sebelumnya berlanjut hingga ujung kolom
+                    if (currR == absoluteRow) {
+                        currR--
+                        currC = maxCols - 1
+                        val prevLine = getLineAt(currR) ?: break
+                        if (prevLine[maxCols - 1].char == ' ') break
+                        continue
+                    } else {
+                        break
+                    }
                 }
+                var hitSpace = false
+                while (currC >= 0) {
+                    val ch = curLine[currC].char
+                    if (ch == ' ' || curLine[currC].hyperlinkUrl != null) {
+                        hitSpace = true
+                        break
+                    }
+                    if (!curLine[currC].isWideContinuation) {
+                        backwardSb.insert(0, ch)
+                    }
+                    currC--
+                }
+                if (hitSpace) {
+                    break
+                }
+                // Jika mencapai awal kolom tanpa spasi, cek apakah baris sebelumnya bersambung
+                currR--
+                currC = maxCols - 1
+                val prevLine = getLineAt(currR) ?: break
+                if (prevLine[maxCols - 1].char == ' ') break
+            }
+
+            val fullToken = backwardSb.toString() + forwardSb.toString()
+            val match = urlRegex.find(fullToken)
+            if (match != null) {
+                return cleanUrl(match.value)
             }
 
             return null
@@ -832,19 +880,25 @@ class TerminalGridBuffer(
             val urls = linkedSetOf<String>()
             val urlRegex = Regex("(?:https?|file)://[^\\s<>\"]+|localhost:\\d+[^\\s<>\"]*")
             val totalLines = getLineCount()
+
+            val textSb = StringBuilder()
             for (r in 0 until totalLines) {
                 val line = getLineAt(r) ?: continue
                 for (c in 0 until maxCols) {
                     val h = line[c].hyperlinkUrl
                     if (h != null) urls.add(cleanUrl(h))
                 }
-                val sb = StringBuilder()
-                for (c in 0 until maxCols) {
-                    if (!line[c].isWideContinuation) sb.append(line[c].char)
+                var last = maxCols - 1
+                while (last >= 0 && line[last].char == ' ') last--
+                for (c in 0..last) {
+                    if (!line[c].isWideContinuation) textSb.append(line[c].char)
                 }
-                urlRegex.findAll(sb.toString()).forEach { m ->
-                    urls.add(cleanUrl(m.value))
+                if (last < maxCols - 1) {
+                    textSb.append(' ')
                 }
+            }
+            urlRegex.findAll(textSb.toString()).forEach { m ->
+                urls.add(cleanUrl(m.value))
             }
             return urls.toList()
         }
