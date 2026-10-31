@@ -450,18 +450,27 @@ class NativeTerminalSession(
         processMonitorJob?.cancel()
         val sessionId = id
         val targetRootfs = ChrootManager.activeRootfs
+        val spawnedPid = getProcessPid()
 
-        // Matikan seluruh pohon proses turunan di dalam container
-        sessionScope.launch(Dispatchers.IO) {
+        // Matikan seluruh pohon proses turunan di dalam container secara langsung
+        try {
+            ChrootManager.terminateSession(sessionId, targetRootfs)
+        } catch (_: Exception) {}
+
+        if (spawnedPid != null && spawnedPid > 1) {
+            val pidInt = spawnedPid.toInt()
             try {
-                ChrootManager.terminateSession(sessionId, targetRootfs)
-            } catch (_: Exception) {}
+                android.system.Os.kill(-pidInt, 9)
+            } catch (_: Throwable) {}
+            try {
+                android.system.Os.kill(pidInt, 9)
+            } catch (_: Throwable) {}
         }
 
         try {
             outputStream?.close()
             inputStream?.close()
-            process?.destroy()
+            process?.destroyForcibly() ?: process?.destroy()
             buffer.destroy()
         } catch (_: Exception) {}
     }

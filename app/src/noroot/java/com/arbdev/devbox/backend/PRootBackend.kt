@@ -259,6 +259,20 @@ class PRootBackend(private val context: Context) : LinuxEnvironment {
     override fun terminateSession(sessionId: String, targetRootfs: String) {
         try {
             val prootTmp = File(context.filesDir, "proot_tmp")
+            val myPid = android.os.Process.myPid()
+            val pidFiles = listOf(
+                File(prootTmp, ".devbox_pid_$sessionId"),
+                File(targetRootfs, "tmp/.devbox_pid_$sessionId")
+            )
+            for (f in pidFiles) {
+                if (f.exists()) {
+                    val pid = try { f.readText().trim().toIntOrNull() } catch (_: Throwable) { null }
+                    if (pid != null && pid > 1 && pid != myPid) {
+                        try { android.system.Os.kill(-pid, 9) } catch (_: Throwable) {}
+                        try { android.system.Os.kill(pid, 9) } catch (_: Throwable) {}
+                    }
+                }
+            }
             File(prootTmp, ".devbox_ws_$sessionId").delete()
             File(prootTmp, ".devbox_pid_$sessionId").delete()
             File(targetRootfs, "tmp/.devbox_ws_$sessionId").delete()
@@ -296,15 +310,46 @@ class PRootBackend(private val context: Context) : LinuxEnvironment {
             swapUsed = (st - sf).coerceAtLeast(0L)
         } catch (_: Exception) {}
 
+        var activeProcs = 0
+        var isCodeServer = false
+        var isSsh = false
+        val myPid = android.os.Process.myPid()
+        val myUid = android.os.Process.myUid()
+
+        try {
+            val procDir = File("/proc")
+            procDir.listFiles()?.forEach { entry ->
+                val pid = entry.name.toIntOrNull() ?: return@forEach
+                if (pid <= 1 || pid == myPid) return@forEach
+                try {
+                    val statusFile = File(entry, "status")
+                    if (statusFile.exists()) {
+                        val uidLine = statusFile.bufferedReader().useLines { lines ->
+                            lines.firstOrNull { it.startsWith("Uid:") }
+                        }
+                        if (uidLine != null) {
+                            val uid = uidLine.substringAfter("Uid:").trim().split("\\s+".toRegex()).firstOrNull()?.toIntOrNull()
+                            if (uid == myUid) {
+                                activeProcs++
+                                val cmdline = try { File(entry, "cmdline").readText() } catch (_: Throwable) { "" }
+                                if (cmdline.contains("code-server")) isCodeServer = true
+                                if (cmdline.contains("sshd")) isSsh = true
+                            }
+                        }
+                    }
+                } catch (_: Throwable) {}
+            }
+        } catch (_: Throwable) {}
+
         ChrootState(
             isRootGranted = true, // Di No-Root selalu dianggap siap tanpa dialog root
             isRootfsExists = exists,
             isMounted = exists, // Pada PRoot, mount point divirtualisasi secara dinamis saat proses jalan
-            activeProcesses = 0,
+            activeProcesses = activeProcs,
             ramAvailableMb = ramAvailable,
             swapUsedMb = swapUsed,
-            isCodeServerRunning = false,
-            isSshRunning = false,
+            isCodeServerRunning = isCodeServer,
+            isSshRunning = isSsh,
             rootfsPath = rootfs
         )
     }
@@ -319,7 +364,69 @@ class PRootBackend(private val context: Context) : LinuxEnvironment {
     }
 
     override fun killProcessesAndUnmountSync(rootfs: String): Result<String> {
-        return Result.success("Proses PRoot dibersihkan.")
+        val myPid = android.os.Process.myPid()
+        val myUid = android.os.Process.myUid()
+        val prootTmp = File(context.filesDir, "proot_tmp")
+        val killedPids = mutableListOf<Int>()
+
+        // 1. Matikan proses dari file session PID
+        try {
+            prootTmp.listFiles()?.filter { it.name.startsWith(".devbox_pid_") }?.forEach { f ->
+                val pid = try { f.readText().trim().toIntOrNull() } catch (_: Throwable) { null }
+                if (pid != null && pid > 1 && pid != myPid) {
+                    try { android.system.Os.kill(-pid, 9) } catch (_: Throwable) {}
+                    try { android.system.Os.kill(pid, 9) } catch (_: Throwable) {}
+                    killedPids.add(pid)
+                }
+            }
+            val rootfsTmp = File(rootfs, "tmp")
+            if (rootfsTmp.exists()) {
+                rootfsTmp.listFiles()?.filter { it.name.startsWith(".devbox_pid_") }?.forEach { f ->
+                    val pid = try { f.readText().trim().toIntOrNull() } catch (_: Throwable) { null }
+                    if (pid != null && pid > 1 && pid != myPid) {
+                        try { android.system.Os.kill(-pid, 9) } catch (_: Throwable) {}
+                        try { android.system.Os.kill(pid, 9) } catch (_: Throwable) {}
+                        killedPids.add(pid)
+                    }
+                }
+            }
+        } catch (_: Throwable) {}
+
+        // 2. Scan seluruh /proc untuk child/orphaned process milik UID aplikasi
+        try {
+            val procDir = File("/proc")
+            procDir.listFiles()?.forEach { entry ->
+                val pid = entry.name.toIntOrNull() ?: return@forEach
+                if (pid <= 1 || pid == myPid) return@forEach
+                try {
+                    val statusFile = File(entry, "status")
+                    if (statusFile.exists()) {
+                        val uidLine = statusFile.bufferedReader().useLines { lines ->
+                            lines.firstOrNull { it.startsWith("Uid:") }
+                        }
+                        if (uidLine != null) {
+                            val uid = uidLine.substringAfter("Uid:").trim().split("\\s+".toRegex()).firstOrNull()?.toIntOrNull()
+                            if (uid == myUid) {
+                                try { android.system.Os.kill(-pid, 9) } catch (_: Throwable) {}
+                                try { android.system.Os.kill(pid, 9) } catch (_: Throwable) {}
+                                killedPids.add(pid)
+                            }
+                        }
+                    }
+                } catch (_: Throwable) {}
+            }
+        } catch (_: Throwable) {}
+
+        // 3. Bersihkan file soket dan file sementara PRoot
+        try {
+            prootTmp.listFiles()?.forEach { file ->
+                if (file.name.startsWith(".devbox_") || file.name.startsWith("proot-") || file.name.endsWith(".sock")) {
+                    file.delete()
+                }
+            }
+        } catch (_: Throwable) {}
+
+        return Result.success("Proses PRoot dihentikan: ${killedPids.distinct().size} proses dibersihkan.")
     }
 
     override suspend fun ensureEnvironmentReady(rootfs: String): Result<Unit> = withContext(Dispatchers.IO) {

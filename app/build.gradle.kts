@@ -13,8 +13,8 @@ android {
         applicationId = "com.arbdev.devbox"
         minSdk = 26
         targetSdk = 36
-        versionCode = 10224
-        versionName = "1.2.24" // v1.2.24: multi-line indented URL reconstruction and native TIOCSWINSZ window resize
+        versionCode = 10225
+        versionName = "1.2.25" // v1.2.25: complete container PID cleanup and robust Shutdown & Exit for No-Root and Root
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables {

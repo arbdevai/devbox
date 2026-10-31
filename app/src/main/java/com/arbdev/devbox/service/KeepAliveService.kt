@@ -127,6 +127,9 @@ class KeepAliveService : Service() {
                         ChrootManager.killDevboxProcessesAndUnmountSync()
                     } catch (_: Exception) {}
                     stopSelf()
+                    kotlinx.coroutines.delay(200)
+                    android.os.Process.killProcess(android.os.Process.myPid())
+                    kotlin.system.exitProcess(0)
                 }
                 return START_NOT_STICKY
             }

@@ -1001,6 +1001,9 @@ fun DashboardScreen(
                                 exitStatusText = "Shutdown complete. Exiting DevBox..."
                                 kotlinx.coroutines.delay(200)
                                 (context as? Activity)?.finishAndRemoveTask()
+                                kotlinx.coroutines.delay(100)
+                                android.os.Process.killProcess(android.os.Process.myPid())
+                                kotlin.system.exitProcess(0)
                             }
                         },
                         colors = ButtonDefaults.buttonColors(containerColor = DevError),
