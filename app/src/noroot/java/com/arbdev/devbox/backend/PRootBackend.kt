@@ -597,56 +597,56 @@ exit 0
 
             // Setup bwrap bypass shim untuk Agent CLI (Claude Code, Codex, dll.) di PRoot / No-Root
             val bwrapFile = File(base, "usr/local/bin/bwrap")
-            bwrapFile.writeText("""
+            val bwrapShim = """
 #!/bin/bash
 # PRoot bwrap bypass shim for Devbox / Android No-Root
 
-args=("$@")
+args=("§@")
 i=0
 target_dir=""
 env_vars=()
 
-if [ "$1" = "--version" ]; then
+if [ "§1" = "--version" ]; then
     echo "bubblewrap 0.9.0 (devbox-noroot-shim)"
     exit 0
 fi
 
-while [ $i -lt ${'$'}{#args[@]} ]; do
-    arg="${'$'}{args[$i]}"
-    case "${'$'}arg" in
+while [ §i -lt §{#args[@]} ]; do
+    arg="§{args[§i]}"
+    case "§arg" in
         --)
-            i=$((i + 1))
+            i=§((i + 1))
             break
             ;;
         --chdir)
-            target_dir="${'$'}{args[$((i + 1))]}"
-            i=$((i + 2))
+            target_dir="§{args[§((i + 1))]}"
+            i=§((i + 2))
             ;;
         --setenv)
-            env_vars+=("${'$'}{args[$((i + 1))]}=${'$'}{args[$((i + 2))]}")
-            i=$((i + 3))
+            env_vars+=("§{args[§((i + 1))]}=§{args[§((i + 2))]}")
+            i=§((i + 3))
             ;;
         --unsetenv)
-            unset "${'$'}{args[$((i + 1))]}"
-            i=$((i + 2))
+            unset "§{args[§((i + 1))]}"
+            i=§((i + 2))
             ;;
         --ro-bind|--bind|--dev-bind|--ro-bind-try|--bind-try)
-            i=$((i + 3))
+            i=§((i + 3))
             ;;
         --dev|--proc|--tmpfs|--dir|--file|--bind-data|--ro-bind-data)
-            i=$((i + 2))
+            i=§((i + 2))
             ;;
         --symlink)
-            i=$((i + 3))
+            i=§((i + 3))
             ;;
         --unshare-*|--die-with-parent|--new-session|--as-pid-1|--clearenv)
-            i=$((i + 1))
+            i=§((i + 1))
             ;;
         --uid|--gid|--hostname)
-            i=$((i + 2))
+            i=§((i + 2))
             ;;
         -*)
-            i=$((i + 1))
+            i=§((i + 1))
             ;;
         *)
             break
@@ -654,22 +654,23 @@ while [ $i -lt ${'$'}{#args[@]} ]; do
     esac
 done
 
-cmd=("${'$'}{args[@]:$i}")
+cmd=("§{args[@]:§i}")
 
-if [ ${'$'}{#cmd[@]} -eq 0 ]; then
+if [ §{#cmd[@]} -eq 0 ]; then
     exit 0
 fi
 
-if [ -n "${'$'}target_dir" ] && [ -d "${'$'}target_dir" ]; then
-    cd "${'$'}target_dir" || true
+if [ -n "§target_dir" ] && [ -d "§target_dir" ]; then
+    cd "§target_dir" || true
 fi
 
-for ev in "${'$'}{env_vars[@]}"; do
-    export "${'$'}ev"
+for ev in "§{env_vars[@]}"; do
+    export "§ev"
 done
 
-exec "${'$'}{cmd[@]}"
-            """.trimIndent())
+exec "§{cmd[@]}"
+            """.trimIndent().replace('§', '$')
+            bwrapFile.writeText(bwrapShim)
             bwrapFile.setExecutable(true, false)
 
             // Setup /etc/environment dengan TMPDIR, locale UTF-8, GLIBC_TUNABLES, dan sandbox bypass

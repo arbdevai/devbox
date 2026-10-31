@@ -327,38 +327,7 @@ BRIDGE_EOF
 
             if [ ! -f "${'$'}rf/usr/local/bin/bwrap" ]; then
                 mkdir -p "${'$'}rf/usr/local/bin"
-                cat <<'BWRAP_EOF' > "${'$'}rf/usr/local/bin/bwrap"
-#!/bin/bash
-args=("$@")
-i=0
-target_dir=""
-env_vars=()
-if [ "$1" = "--version" ]; then
-    echo "bubblewrap 0.9.0 (devbox-chroot-shim)"
-    exit 0
-fi
-while [ $i -lt ${'$'}{#args[@]} ]; do
-    arg="${'$'}{args[$i]}"
-    case "$arg" in
-        --) i=$((i + 1)); break ;;
-        --chdir) target_dir="${'$'}{args[$((i + 1))]}"; i=$((i + 2)) ;;
-        --setenv) env_vars+=("${'$'}{args[$((i + 1))]}=${'$'}{args[$((i + 2))]}"); i=$((i + 3)) ;;
-        --unsetenv) unset "${'$'}{args[$((i + 1))]}"; i=$((i + 2)) ;;
-        --ro-bind|--bind|--dev-bind|--ro-bind-try|--bind-try) i=$((i + 3)) ;;
-        --dev|--proc|--tmpfs|--dir|--file|--bind-data|--ro-bind-data) i=$((i + 2)) ;;
-        --symlink) i=$((i + 3)) ;;
-        --unshare-*|--die-with-parent|--new-session|--as-pid-1|--clearenv) i=$((i + 1)) ;;
-        --uid|--gid|--hostname) i=$((i + 2)) ;;
-        -*) i=$((i + 1)) ;;
-        *) break ;;
-    esac
-done
-cmd=("${'$'}{args[@]:$i}")
-[ ${'$'}{#cmd[@]} -eq 0 ] && exit 0
-[ -n "$target_dir" ] && [ -d "$target_dir" ] && cd "$target_dir" || true
-for ev in "${'$'}{env_vars[@]}"; do export "$ev"; done
-exec "${'$'}{cmd[@]}"
-BWRAP_EOF
+                echo "IyEvYmluL2Jhc2gKYXJncz0oIiRAIikKaT0wCnRhcmdldF9kaXI9IiIKZW52X3ZhcnM9KCkKaWYgWyAiJDEiID0gIi0tdmVyc2lvbiIgXTsgdGhlbgogICAgZWNobyAiYnViYmxld3JhcCAwLjkuMCAoZGV2Ym94LWNocm9vdC1zaGltKSIKICAgIGV4aXQgMApmaQp3aGlsZSBbICRpIC1sdCAkeyNhcmdzW0BdfSBdOyBkbwogICAgYXJnPSIke2FyZ3NbJGldfSIKICAgIGNhc2UgIiRhcmciIGluCiAgICAgICAgLS0pIGk9JCgoaSArIDEpKTsgYnJlYWsgOzsKICAgICAgICAtLWNoZGlyKSB0YXJnZXRfZGlyPSIke2FyZ3NbJCgoaSArIDEpKV19IjsgaT0kKChpICsgMikpIDs7CiAgICAgICAgLS1zZXRlbnYpIGVudl92YXJzKz0oIiR7YXJnc1skKChpICsgMSkpXX09JHthcmdzWyQoKGkgKyAyKSldfSIpOyBpPSQoKGkgKyAzKSkgOzsKICAgICAgICAtLXVuc2V0ZW52KSB1bnNldCAiJHthcmdzWyQoKGkgKyAxKSldfSI7IGk9JCgoaSArIDIpKSA7OwogICAgICAgIC0tcm8tYmluZHwtLWJpbmR8LS1kZXYtYmluZHwtLXJvLWJpbmQtdHJ5fC0tYmluZC10cnkpIGk9JCgoaSArIDMpKSA7OwogICAgICAgIC0tZGV2fC0tcHJvY3wtLXRtcGZzfC0tZGlyfC0tZmlsZXwtLWJpbmQtZGF0YXwtLXJvLWJpbmQtZGF0YSkgaT0kKChpICsgMikpIDs7CiAgICAgICAgLS1zeW1saW5rKSBpPSQoKGkgKyAzKSkgOzsKICAgICAgICAtLXVuc2hhcmUtKnwtLWRpZS13aXRoLXBhcmVudHwtLW5ldy1zZXNzaW9ufC0tYXMtcGlkLTF8LS1jbGVhcmVudikgaT0kKChpICsgMSkpIDs7CiAgICAgICAgLS11aWR8LS1naWR8LS1ob3N0bmFtZSkgaT0kKChpICsgMikpIDs7CiAgICAgICAgLSopIGk9JCgoaSArIDEpKSA7OwogICAgICAgICopIGJyZWFrIDs7CiAgICBlc2FjCmRvbmUKY21kPSgiJHthcmdzW0BdOiRpfSIpClsgJHsjY21kW0BdfSAtZXEgMCBdICYmIGV4aXQgMApbIC1uICIkdGFyZ2V0X2RpciIgXSAmJiBbIC1kICIkdGFyZ2V0X2RpciIgXSAmJiBjZCAiJHRhcmdldF9kaXIiIHx8IHRydWUKZm9yIGV2IGluICIke2Vudl92YXJzW0BdfSI7IGRvIGV4cG9ydCAiJGV2IjsgZG9uZQpleGVjICIke2NtZFtAXX0iCg==" | base64 -d > "${'$'}rf/usr/local/bin/bwrap"
                 chmod 755 "${'$'}rf/usr/local/bin/bwrap" 2>/dev/null || true
             fi
             echo 'SUCCESS'
