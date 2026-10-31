@@ -13,8 +13,8 @@ android {
         applicationId = "com.arbdev.devbox"
         minSdk = 26
         targetSdk = 36
-        versionCode = 10228
-        versionName = "1.2.28" // v1.2.28: fix PRoot /tmp & /dev/shm, request external storage, precision URL click & clamped selection menu
+        versionCode = 10229
+        versionName = "1.2.29" // v1.2.29: bwrap bypass shim, CLAUDE_CODE_DISABLE_SANDBOX, and git safe.directory for Agent CLI
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables {

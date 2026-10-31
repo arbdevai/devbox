@@ -58,7 +58,7 @@ class ChrootBackend(private val context: Context) : LinuxEnvironment {
                 "mountpoint -q '$targetRootfs/sys' || mount -t sysfs sysfs '$targetRootfs/sys' 2>/dev/null; " +
                 "mountpoint -q '$targetRootfs/mnt/sdcard' || { mount --bind /sdcard '$targetRootfs/mnt/sdcard' 2>/dev/null && mount --make-private '$targetRootfs/mnt/sdcard' 2>/dev/null; }; " +
                 "chown 1000:1000 '$targetRootfs/home/coder' 2>/dev/null; " +
-                "cd '$targetRootfs' && exec chroot '$targetRootfs' /usr/bin/env -i HOME=/home/coder USER=coder LOGNAME=sahal SHELL=/bin/bash TERM=xterm-256color COLORTERM=truecolor TMPDIR=/tmp TEMP=/tmp TMP=/tmp LANG=C.UTF-8 LC_ALL=C.UTF-8 DEBIAN_FRONTEND=noninteractive DEVBOX=1 DEVBOX_SESSION_ID='$sessionId' GH_NO_KEYRING=1 PATH=/home/coder/.local/bin:/home/coder/.cargo/bin:/home/coder/go/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin /bin/bash -c 'cd /home/coder 2>/dev/null || cd /; export TMPDIR=/tmp TEMP=/tmp TMP=/tmp LANG=C.UTF-8 LC_ALL=C.UTF-8 DEBIAN_FRONTEND=noninteractive; if [ -f /var/lib/dpkg/status ] && grep -q \"half-configured\" /var/lib/dpkg/status 2>/dev/null; then dpkg --configure -a 2>/dev/null || true; fi; if [ ! -f /etc/ssl/certs/ca-certificates.crt ] && [ -x /usr/sbin/update-ca-certificates ]; then update-ca-certificates --fresh 2>/dev/null || true; fi; if [ -x /usr/bin/script ]; then exec /usr/bin/script -qefc \"shopt -s checkwinsize 2>/dev/null; echo \\\$\\\$ > /tmp/.devbox_pid_$sessionId 2>/dev/null; tty > /tmp/.devbox_pts_$sessionId 2>/dev/null; echo \\\$(tty) > /home/coder/.devbox_pts_$sessionId 2>/dev/null; ws=\\\$(cat /tmp/.devbox_ws_$sessionId 2>/dev/null); if [ -n \\\"\\\$ws\\\" ]; then stty \\\$ws opost onlcr 2>/dev/null; else stty rows $initRows cols $initCols opost onlcr 2>/dev/null; fi; exec /bin/bash -l\" /dev/null; else exec /bin/bash -l; fi'"
+                "cd '$targetRootfs' && exec chroot '$targetRootfs' /usr/bin/env -i HOME=/home/coder USER=coder LOGNAME=sahal SHELL=/bin/bash TERM=xterm-256color COLORTERM=truecolor TMPDIR=/tmp TEMP=/tmp TMP=/tmp LANG=C.UTF-8 LC_ALL=C.UTF-8 DEBIAN_FRONTEND=noninteractive CLAUDE_CODE_DISABLE_SANDBOX=1 CHROMIUM_FLAGS=\"--no-sandbox --disable-setuid-sandbox\" DEVBOX=1 DEVBOX_SESSION_ID='$sessionId' GH_NO_KEYRING=1 PATH=/home/coder/.local/bin:/home/coder/.cargo/bin:/home/coder/go/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin /bin/bash -c 'cd /home/coder 2>/dev/null || cd /; export TMPDIR=/tmp TEMP=/tmp TMP=/tmp LANG=C.UTF-8 LC_ALL=C.UTF-8 DEBIAN_FRONTEND=noninteractive CLAUDE_CODE_DISABLE_SANDBOX=1 CHROMIUM_FLAGS=\"--no-sandbox --disable-setuid-sandbox\"; git config --system --add safe.directory \"*\" 2>/dev/null || true; if [ -f /var/lib/dpkg/status ] && grep -q \"half-configured\" /var/lib/dpkg/status 2>/dev/null; then dpkg --configure -a 2>/dev/null || true; fi; if [ ! -f /etc/ssl/certs/ca-certificates.crt ] && [ -x /usr/sbin/update-ca-certificates ]; then update-ca-certificates --fresh 2>/dev/null || true; fi; if [ -x /usr/bin/script ]; then exec /usr/bin/script -qefc \"shopt -s checkwinsize 2>/dev/null; echo \\\$\\\$ > /tmp/.devbox_pid_$sessionId 2>/dev/null; tty > /tmp/.devbox_pts_$sessionId 2>/dev/null; echo \\\$(tty) > /home/coder/.devbox_pts_$sessionId 2>/dev/null; ws=\\\$(cat /tmp/.devbox_ws_$sessionId 2>/dev/null); if [ -n \\\"\\\$ws\\\" ]; then stty \\\$ws opost onlcr 2>/dev/null; else stty rows $initRows cols $initCols opost onlcr 2>/dev/null; fi; exec /bin/bash -l\" /dev/null; else exec /bin/bash -l; fi'"
 
         val pb = ProcessBuilder(suBinary, "-c", chrootCmd)
         pb.redirectErrorStream(true)
@@ -323,6 +323,43 @@ BRIDGE_EOF
                 chmod 755 "${'$'}rf/usr/local/bin/devbox-bridge" 2>/dev/null || true
                 ln -sf /usr/local/bin/devbox-bridge "${'$'}rf/usr/bin/devbox-bridge" 2>/dev/null || true
                 ln -sf /usr/local/bin/devbox-bridge "${'$'}rf/usr/local/bin/devbox-clip" 2>/dev/null || true
+            fi
+
+            if [ ! -f "${'$'}rf/usr/local/bin/bwrap" ]; then
+                mkdir -p "${'$'}rf/usr/local/bin"
+                cat <<'BWRAP_EOF' > "${'$'}rf/usr/local/bin/bwrap"
+#!/bin/bash
+args=("$@")
+i=0
+target_dir=""
+env_vars=()
+if [ "$1" = "--version" ]; then
+    echo "bubblewrap 0.9.0 (devbox-chroot-shim)"
+    exit 0
+fi
+while [ $i -lt ${'$'}{#args[@]} ]; do
+    arg="${'$'}{args[$i]}"
+    case "$arg" in
+        --) i=$((i + 1)); break ;;
+        --chdir) target_dir="${'$'}{args[$((i + 1))]}"; i=$((i + 2)) ;;
+        --setenv) env_vars+=("${'$'}{args[$((i + 1))]}=${'$'}{args[$((i + 2))]}"); i=$((i + 3)) ;;
+        --unsetenv) unset "${'$'}{args[$((i + 1))]}"; i=$((i + 2)) ;;
+        --ro-bind|--bind|--dev-bind|--ro-bind-try|--bind-try) i=$((i + 3)) ;;
+        --dev|--proc|--tmpfs|--dir|--file|--bind-data|--ro-bind-data) i=$((i + 2)) ;;
+        --symlink) i=$((i + 3)) ;;
+        --unshare-*|--die-with-parent|--new-session|--as-pid-1|--clearenv) i=$((i + 1)) ;;
+        --uid|--gid|--hostname) i=$((i + 2)) ;;
+        -*) i=$((i + 1)) ;;
+        *) break ;;
+    esac
+done
+cmd=("${'$'}{args[@]:$i}")
+[ ${'$'}{#cmd[@]} -eq 0 ] && exit 0
+[ -n "$target_dir" ] && [ -d "$target_dir" ] && cd "$target_dir" || true
+for ev in "${'$'}{env_vars[@]}"; do export "$ev"; done
+exec "${'$'}{cmd[@]}"
+BWRAP_EOF
+                chmod 755 "${'$'}rf/usr/local/bin/bwrap" 2>/dev/null || true
             fi
             echo 'SUCCESS'
         """.trimIndent()

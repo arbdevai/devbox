@@ -158,7 +158,7 @@ class PRootBackend(private val context: Context) : LinuxEnvironment {
             debugLog.createNewFile()
         } catch (_: Exception) {}
 
-        val shellCmd = """export TMPDIR=/tmp TEMP=/tmp TMP=/tmp LANG=C.UTF-8 LC_ALL=C.UTF-8 DEBIAN_FRONTEND=noninteractive; chmod 1777 /tmp /dev/shm 2>/dev/null || true; if [ -f /var/lib/dpkg/status ] && grep -q "half-configured" /var/lib/dpkg/status 2>/dev/null; then dpkg --configure -a 2>/dev/null || true; fi; if [ ! -f /etc/ssl/certs/ca-certificates.crt ] && [ -x /usr/sbin/update-ca-certificates ]; then update-ca-certificates --fresh 2>/dev/null || true; fi; if [ -x /usr/bin/script ] && /usr/bin/script -qefc "exit 0" /dev/null 2>/dev/null; then exec /usr/bin/script -qefc "shopt -s checkwinsize 2>/dev/null; tty > /tmp/.devbox_pts_$sessionId 2>/dev/null; echo ${'$'}${'$'} > /tmp/.devbox_pid_$sessionId 2>/dev/null; stty rows $initRows cols $initCols opost onlcr icrnl 2>/dev/null; exec /bin/bash -l" /dev/null; else exec /bin/bash -l -i; fi"""
+        val shellCmd = """export TMPDIR=/tmp TEMP=/tmp TMP=/tmp LANG=C.UTF-8 LC_ALL=C.UTF-8 DEBIAN_FRONTEND=noninteractive CLAUDE_CODE_DISABLE_SANDBOX=1 CHROMIUM_FLAGS="--no-sandbox --disable-setuid-sandbox"; chmod 1777 /tmp /dev/shm 2>/dev/null || true; git config --system --add safe.directory "*" 2>/dev/null || true; if [ -f /var/lib/dpkg/status ] && grep -q "half-configured" /var/lib/dpkg/status 2>/dev/null; then dpkg --configure -a 2>/dev/null || true; fi; if [ ! -f /etc/ssl/certs/ca-certificates.crt ] && [ -x /usr/sbin/update-ca-certificates ]; then update-ca-certificates --fresh 2>/dev/null || true; fi; if [ -x /usr/bin/script ] && /usr/bin/script -qefc "exit 0" /dev/null 2>/dev/null; then exec /usr/bin/script -qefc "shopt -s checkwinsize 2>/dev/null; tty > /tmp/.devbox_pts_$sessionId 2>/dev/null; echo ${'$'}${'$'} > /tmp/.devbox_pid_$sessionId 2>/dev/null; stty rows $initRows cols $initCols opost onlcr icrnl 2>/dev/null; exec /bin/bash -l" /dev/null; else exec /bin/bash -l -i; fi"""
 
         val pbArgs = mutableListOf(
             prootBin,
@@ -218,6 +218,8 @@ class PRootBackend(private val context: Context) : LinuxEnvironment {
             put("LANG", "C.UTF-8")
             put("LC_ALL", "C.UTF-8")
             put("DEBIAN_FRONTEND", "noninteractive")
+            put("CLAUDE_CODE_DISABLE_SANDBOX", "1")
+            put("CHROMIUM_FLAGS", "--no-sandbox --disable-setuid-sandbox")
             put("PROOT_TMP_DIR", prootTmp)
             val loaderPath = getProotLoaderPath()
             if (loaderPath != null) {
@@ -593,7 +595,84 @@ exit 0
                 sudoersCoder.writeText("coder ALL=(ALL:ALL) NOPASSWD:ALL\n")
             }
 
-            // Setup /etc/environment dengan TMPDIR, locale UTF-8, dan GLIBC_TUNABLES
+            // Setup bwrap bypass shim untuk Agent CLI (Claude Code, Codex, dll.) di PRoot / No-Root
+            val bwrapFile = File(base, "usr/local/bin/bwrap")
+            bwrapFile.writeText("""
+#!/bin/bash
+# PRoot bwrap bypass shim for Devbox / Android No-Root
+
+args=("$@")
+i=0
+target_dir=""
+env_vars=()
+
+if [ "$1" = "--version" ]; then
+    echo "bubblewrap 0.9.0 (devbox-noroot-shim)"
+    exit 0
+fi
+
+while [ $i -lt ${'$'}{#args[@]} ]; do
+    arg="${'$'}{args[$i]}"
+    case "${'$'}arg" in
+        --)
+            i=$((i + 1))
+            break
+            ;;
+        --chdir)
+            target_dir="${'$'}{args[$((i + 1))]}"
+            i=$((i + 2))
+            ;;
+        --setenv)
+            env_vars+=("${'$'}{args[$((i + 1))]}=${'$'}{args[$((i + 2))]}")
+            i=$((i + 3))
+            ;;
+        --unsetenv)
+            unset "${'$'}{args[$((i + 1))]}"
+            i=$((i + 2))
+            ;;
+        --ro-bind|--bind|--dev-bind|--ro-bind-try|--bind-try)
+            i=$((i + 3))
+            ;;
+        --dev|--proc|--tmpfs|--dir|--file|--bind-data|--ro-bind-data)
+            i=$((i + 2))
+            ;;
+        --symlink)
+            i=$((i + 3))
+            ;;
+        --unshare-*|--die-with-parent|--new-session|--as-pid-1|--clearenv)
+            i=$((i + 1))
+            ;;
+        --uid|--gid|--hostname)
+            i=$((i + 2))
+            ;;
+        -*)
+            i=$((i + 1))
+            ;;
+        *)
+            break
+            ;;
+    esac
+done
+
+cmd=("${'$'}{args[@]:$i}")
+
+if [ ${'$'}{#cmd[@]} -eq 0 ]; then
+    exit 0
+fi
+
+if [ -n "${'$'}target_dir" ] && [ -d "${'$'}target_dir" ]; then
+    cd "${'$'}target_dir" || true
+fi
+
+for ev in "${'$'}{env_vars[@]}"; do
+    export "${'$'}ev"
+done
+
+exec "${'$'}{cmd[@]}"
+            """.trimIndent())
+            bwrapFile.setExecutable(true, false)
+
+            // Setup /etc/environment dengan TMPDIR, locale UTF-8, GLIBC_TUNABLES, dan sandbox bypass
             val etcEnv = File(base, "etc/environment")
             val defaultEnv = """
                 TMPDIR="/tmp"
@@ -603,6 +682,8 @@ exit 0
                 LC_ALL="C.UTF-8"
                 DEBIAN_FRONTEND="noninteractive"
                 GLIBC_TUNABLES="glibc.pthread.rseq=0"
+                CLAUDE_CODE_DISABLE_SANDBOX="1"
+                CHROMIUM_FLAGS="--no-sandbox --disable-setuid-sandbox"
                 PATH="/home/coder/.local/bin:/home/coder/.cargo/bin:/home/coder/go/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
             """.trimIndent() + "\n"
             etcEnv.writeText(defaultEnv)
