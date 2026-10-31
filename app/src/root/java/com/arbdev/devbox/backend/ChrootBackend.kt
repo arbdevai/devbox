@@ -58,7 +58,7 @@ class ChrootBackend(private val context: Context) : LinuxEnvironment {
                 "mountpoint -q '$targetRootfs/sys' || mount -t sysfs sysfs '$targetRootfs/sys' 2>/dev/null; " +
                 "mountpoint -q '$targetRootfs/mnt/sdcard' || { mount --bind /sdcard '$targetRootfs/mnt/sdcard' 2>/dev/null && mount --make-private '$targetRootfs/mnt/sdcard' 2>/dev/null; }; " +
                 "chown 1000:1000 '$targetRootfs/home/coder' 2>/dev/null; " +
-                "cd '$targetRootfs' && exec chroot '$targetRootfs' /usr/bin/env -i HOME=/home/coder USER=coder LOGNAME=sahal SHELL=/bin/bash TERM=xterm-256color COLORTERM=truecolor TMPDIR=/tmp TEMP=/tmp TMP=/tmp LANG=C.UTF-8 LC_ALL=C.UTF-8 DEBIAN_FRONTEND=noninteractive CLAUDE_CODE_DISABLE_SANDBOX=1 CHROMIUM_FLAGS=\"--no-sandbox --disable-setuid-sandbox\" DEVBOX=1 DEVBOX_SESSION_ID='$sessionId' GH_NO_KEYRING=1 PATH=/home/coder/.local/bin:/home/coder/.cargo/bin:/home/coder/go/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin /bin/bash -c 'cd /home/coder 2>/dev/null || cd /; export TMPDIR=/tmp TEMP=/tmp TMP=/tmp LANG=C.UTF-8 LC_ALL=C.UTF-8 DEBIAN_FRONTEND=noninteractive CLAUDE_CODE_DISABLE_SANDBOX=1 CHROMIUM_FLAGS=\"--no-sandbox --disable-setuid-sandbox\"; git config --system --add safe.directory \"*\" 2>/dev/null || true; if [ -f /var/lib/dpkg/status ] && grep -q \"half-configured\" /var/lib/dpkg/status 2>/dev/null; then dpkg --configure -a 2>/dev/null || true; fi; if [ ! -f /etc/ssl/certs/ca-certificates.crt ] && [ -x /usr/sbin/update-ca-certificates ]; then update-ca-certificates --fresh 2>/dev/null || true; fi; if [ -x /usr/bin/script ]; then exec /usr/bin/script -qefc \"shopt -s checkwinsize 2>/dev/null; echo \\\$\\\$ > /tmp/.devbox_pid_$sessionId 2>/dev/null; tty > /tmp/.devbox_pts_$sessionId 2>/dev/null; echo \\\$(tty) > /home/coder/.devbox_pts_$sessionId 2>/dev/null; ws=\\\$(cat /tmp/.devbox_ws_$sessionId 2>/dev/null); if [ -n \\\"\\\$ws\\\" ]; then stty \\\$ws opost onlcr 2>/dev/null; else stty rows $initRows cols $initCols opost onlcr 2>/dev/null; fi; exec /bin/bash -l\" /dev/null; else exec /bin/bash -l; fi'"
+                "cd '$targetRootfs' && exec chroot '$targetRootfs' /usr/bin/env -i HOME=/home/coder USER=coder LOGNAME=sahal SHELL=/bin/bash TERM=xterm-256color COLORTERM=truecolor TMPDIR=/tmp TEMP=/tmp TMP=/tmp LANG=C.UTF-8 LC_ALL=C.UTF-8 DEBIAN_FRONTEND=noninteractive CLAUDE_CODE_DISABLE_SANDBOX=1 CHROMIUM_FLAGS=\"--no-sandbox --disable-setuid-sandbox --disable-gpu --disable-dev-shm-usage\" PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH=/usr/local/bin/chromium PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1 PUPPETEER_EXECUTABLE_PATH=/usr/local/bin/chromium PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true CHROME_PATH=/usr/local/bin/chromium DEVBOX=1 DEVBOX_FLAVOR=root DEVBOX_SESSION_ID='$sessionId' GH_NO_KEYRING=1 PATH=/home/coder/.local/bin:/home/coder/.cargo/bin:/home/coder/go/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin /bin/bash -c 'cd /home/coder 2>/dev/null || cd /; export TMPDIR=/tmp TEMP=/tmp TMP=/tmp LANG=C.UTF-8 LC_ALL=C.UTF-8 DEBIAN_FRONTEND=noninteractive CLAUDE_CODE_DISABLE_SANDBOX=1 CHROMIUM_FLAGS=\"--no-sandbox --disable-setuid-sandbox --disable-gpu --disable-dev-shm-usage\" PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH=/usr/local/bin/chromium PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1 PUPPETEER_EXECUTABLE_PATH=/usr/local/bin/chromium PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true CHROME_PATH=/usr/local/bin/chromium; git config --system --add safe.directory \"*\" 2>/dev/null || true; if [ -f /var/lib/dpkg/status ] && grep -q \"half-configured\" /var/lib/dpkg/status 2>/dev/null; then dpkg --configure -a 2>/dev/null || true; fi; if [ ! -f /etc/ssl/certs/ca-certificates.crt ] && [ -x /usr/sbin/update-ca-certificates ]; then update-ca-certificates --fresh 2>/dev/null || true; fi; if [ -x /usr/bin/script ]; then exec /usr/bin/script -qefc \"shopt -s checkwinsize 2>/dev/null; echo \\\$\\\$ > /tmp/.devbox_pid_$sessionId 2>/dev/null; tty > /tmp/.devbox_pts_$sessionId 2>/dev/null; echo \\\$(tty) > /home/coder/.devbox_pts_$sessionId 2>/dev/null; ws=\\\$(cat /tmp/.devbox_ws_$sessionId 2>/dev/null); if [ -n \\\"\\\$ws\\\" ]; then stty \\\$ws opost onlcr 2>/dev/null; else stty rows $initRows cols $initCols opost onlcr 2>/dev/null; fi; exec /bin/bash -l\" /dev/null; else exec /bin/bash -l; fi'"
 
         val pb = ProcessBuilder(suBinary, "-c", chrootCmd)
         pb.redirectErrorStream(true)
@@ -184,7 +184,13 @@ class ChrootBackend(private val context: Context) : LinuxEnvironment {
 
             if [ "${'$'}status" = "EXISTS" ]; then
                 grep -q " ${'$'}rf/proc " /proc/mounts 2>/dev/null && mnt=1 || mnt=0
-                procs=${'$'}(grep -sl "DEVBOX" /proc/[0-9]*/environ 2>/dev/null | wc -l)
+                procs=0
+                for p in /proc/[0-9]*; do
+                    [ -d "${'$'}p" ] || continue
+                    if [ "${'$'}(readlink "${'$'}p/root" 2>/dev/null)" = "${'$'}rf" ]; then
+                        procs=${'$'}((procs + 1))
+                    fi
+                done
                 ram=0; st=0; sf=0
                 while read -r key val rest; do
                     case "${'$'}key" in
@@ -376,7 +382,7 @@ BRIDGE_EOF
             for p in /proc/[0-9]*; do
                 if [ -d "${'$'}p" ]; then
                     rootlink=${'$'}(readlink "${'$'}p/root" 2>/dev/null)
-                    if [ "${'$'}rootlink" = "${'$'}rf" ] || grep -q 'DEVBOX' "${'$'}p/environ" 2>/dev/null; then
+                    if [ "${'$'}rootlink" = "${'$'}rf" ]; then
                         pid=${'$'}(basename "${'$'}p")
                         kill -9 "${'$'}pid" 2>/dev/null || true
                     fi

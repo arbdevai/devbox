@@ -198,7 +198,7 @@ object ChrootManager {
 
             echo "[1/4] Menghentikan seluruh proses container DevBox..."
             for p in /proc/[0-9]*; do
-                if grep -q "DEVBOX" "${'$'}p/environ" 2>/dev/null; then
+                if [ "${'$'}(readlink "${'$'}p/root" 2>/dev/null)" = '$rootfs' ]; then
                     pid=${'$'}(basename "${'$'}p" 2>/dev/null || true)
                     echo "Menghentikan PID DevBox ${'$'}pid..."
                     kill -9 "${'$'}pid" 2>/dev/null || true
@@ -332,6 +332,7 @@ object ChrootManager {
             fg_sids=""
             for pid in ${'$'}pids; do
                 [ -d "/proc/${'$'}pid" ] || continue
+                [ "${'$'}(readlink "/proc/${'$'}pid/root" 2>/dev/null)" = '$rootfs' ] || continue
                 comm=${'$'}(cat "/proc/${'$'}pid/comm" 2>/dev/null || true)
                 if [ "${'$'}comm" = "agy" ] || [ "${'$'}comm" = "antigravity" ]; then
                     ppid=${'$'}(awk '/^PPid:/{print ${'$'}2}' "/proc/${'$'}pid/status" 2>/dev/null || echo 0)
@@ -344,6 +345,7 @@ object ChrootManager {
 
             for pid in ${'$'}pids; do
                 if [ -d "/proc/${'$'}pid" ]; then
+                    [ "${'$'}(readlink "/proc/${'$'}pid/root" 2>/dev/null)" = '$rootfs' ] || continue
                     comm=${'$'}(cat "/proc/${'$'}pid/comm" 2>/dev/null || true)
                     cmdline=${'$'}(tr '\0' ' ' < "/proc/${'$'}pid/cmdline" 2>/dev/null || true)
                     if [ "${'$'}comm" = "agy" ] || [ "${'$'}comm" = "antigravity" ] || [ "${'$'}{cmdline#*antigravity}" != "${'$'}cmdline" ]; then

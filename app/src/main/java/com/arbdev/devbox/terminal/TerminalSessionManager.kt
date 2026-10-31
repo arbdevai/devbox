@@ -553,18 +553,19 @@ object TerminalSessionManager {
     fun closeSession(index: Int) {
         if (sessions.size <= 1) return // Jangan tutup sesi terakhir
         if (index in sessions.indices) {
-            val sessionToClose = sessions[index]
-            sessionToClose.finish()
-            sessions.removeAt(index)
+            val sessionToClose = sessions.removeAt(index)
 
             val current = activeIndex.intValue
             when {
                 index < current -> activeIndex.intValue = current - 1
                 index == current -> activeIndex.intValue = current.coerceAtMost(sessions.size - 1)
             }
-            val activeIds = sessions.map { it.id }
-            val activePids = sessions.mapNotNull { it.getProcessPid() }
-            managerScope.launch {
+
+            // Cleanup proses dan buffer secara asynchronous di background IO thread (Anti-Freeze / Anti-ANR)
+            managerScope.launch(Dispatchers.IO) {
+                sessionToClose.finish()
+                val activeIds = sessions.map { it.id }
+                val activePids = sessions.mapNotNull { it.getProcessPid() }
                 com.arbdev.devbox.data.ChrootManager.cleanDeadTmpSessions(activeIds, activePids)
             }
         }
@@ -575,9 +576,12 @@ object TerminalSessionManager {
     }
 
     fun destroyAll() {
-        sessions.forEach { it.finish() }
+        val oldSessions = ArrayList(sessions)
         sessions.clear()
         activeIndex.intValue = 0
+        managerScope.launch(Dispatchers.IO) {
+            oldSessions.forEach { it.finish() }
+        }
     }
 
     fun terminateAll() {

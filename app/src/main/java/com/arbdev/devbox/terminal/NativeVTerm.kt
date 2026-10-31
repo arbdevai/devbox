@@ -4,65 +4,87 @@ class NativeVTerm(
     var rows: Int,
     var cols: Int
 ) {
+    @Volatile
     private var nativePtr: Long = 0
+    private val vtermLock = Any()
 
     init {
         nativePtr = nativeCreate(rows, cols)
     }
 
     fun feed(bytes: ByteArray, offset: Int, length: Int) {
-        if (nativePtr != 0L && length > 0) {
-            nativeFeed(nativePtr, bytes, offset, length)
+        synchronized(vtermLock) {
+            if (nativePtr != 0L && length > 0) {
+                nativeFeed(nativePtr, bytes, offset, length)
+            }
         }
     }
 
     fun resize(newRows: Int, newCols: Int) {
-        if (nativePtr != 0L) {
-            rows = newRows
-            cols = newCols
-            nativeResize(nativePtr, newRows, newCols)
+        synchronized(vtermLock) {
+            if (nativePtr != 0L) {
+                rows = newRows
+                cols = newCols
+                nativeResize(nativePtr, newRows, newCols)
+            }
         }
     }
 
     fun clearScrollback() {
-        if (nativePtr != 0L) {
-            nativeClearScrollback(nativePtr)
+        synchronized(vtermLock) {
+            if (nativePtr != 0L) {
+                nativeClearScrollback(nativePtr)
+            }
         }
     }
 
     fun getScrollbackSize(): Int {
-        return if (nativePtr != 0L) nativeGetScrollbackSize(nativePtr) else 0
+        synchronized(vtermLock) {
+            return if (nativePtr != 0L) nativeGetScrollbackSize(nativePtr) else 0
+        }
     }
 
     fun isAltScreen(): Boolean {
-        return if (nativePtr != 0L) nativeIsAltScreen(nativePtr) else false
+        synchronized(vtermLock) {
+            return if (nativePtr != 0L) nativeIsAltScreen(nativePtr) else false
+        }
     }
 
     fun getCursor(outPos: IntArray) {
-        if (nativePtr != 0L) {
-            nativeGetCursor(nativePtr, outPos)
+        synchronized(vtermLock) {
+            if (nativePtr != 0L) {
+                nativeGetCursor(nativePtr, outPos)
+            }
         }
     }
 
     fun getRowData(lineIdx: Int, outData: IntArray): Int {
-        return if (nativePtr != 0L) nativeGetRowData(nativePtr, lineIdx, outData) else 0
+        synchronized(vtermLock) {
+            return if (nativePtr != 0L) nativeGetRowData(nativePtr, lineIdx, outData) else 0
+        }
     }
 
     fun getModes(outModes: IntArray) {
-        if (nativePtr != 0L) {
-            nativeGetModes(nativePtr, outModes)
+        synchronized(vtermLock) {
+            if (nativePtr != 0L) {
+                nativeGetModes(nativePtr, outModes)
+            }
         }
     }
 
     fun getTitle(): String? {
-        return if (nativePtr != 0L) nativeGetTitle(nativePtr) else null
+        synchronized(vtermLock) {
+            return if (nativePtr != 0L) nativeGetTitle(nativePtr) else null
+        }
     }
 
     fun destroy() {
-        if (nativePtr != 0L) {
-            val ptr = nativePtr
-            nativePtr = 0L
-            nativeDestroy(ptr)
+        synchronized(vtermLock) {
+            if (nativePtr != 0L) {
+                val ptr = nativePtr
+                nativePtr = 0L
+                nativeDestroy(ptr)
+            }
         }
     }
 
