@@ -13,8 +13,8 @@ android {
         applicationId = "com.arbdev.devbox"
         minSdk = 26
         targetSdk = 36
-        versionCode = 10225
-        versionName = "1.2.25" // v1.2.25: complete container PID cleanup and robust Shutdown & Exit for No-Root and Root
+        versionCode = 10226
+        versionName = "1.2.26" // v1.2.26: fix trailing quote in No-Root shell startup command
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables {
