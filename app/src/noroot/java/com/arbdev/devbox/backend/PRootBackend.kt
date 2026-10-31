@@ -141,7 +141,7 @@ class PRootBackend(private val context: Context) : LinuxEnvironment {
             debugLog.createNewFile()
         } catch (_: Exception) {}
 
-        val shellCmd = """if [ -x /usr/bin/script ] && /usr/bin/script -qefc "exit 0" /dev/null 2>/dev/null; then exec /usr/bin/script -qefc "shopt -s checkwinsize 2>/dev/null; stty rows $initRows cols $initCols opost onlcr icrnl 2>/dev/null; exec /bin/bash -l" /dev/null; else exec /bin/bash -l -i; fi"""
+        val shellCmd = """export TMPDIR=/tmp TEMP=/tmp TMP=/tmp LANG=C.UTF-8 LC_ALL=C.UTF-8 DEBIAN_FRONTEND=noninteractive; if [ -f /var/lib/dpkg/status ] && grep -q "half-configured" /var/lib/dpkg/status 2>/dev/null; then dpkg --configure -a 2>/dev/null || true; fi; if [ ! -f /etc/ssl/certs/ca-certificates.crt ] && [ -x /usr/sbin/update-ca-certificates ]; then update-ca-certificates --fresh 2>/dev/null || true; fi; if [ -x /usr/bin/script ] && /usr/bin/script -qefc "exit 0" /dev/null 2>/dev/null; then exec /usr/bin/script -qefc "shopt -s checkwinsize 2>/dev/null; stty rows $initRows cols $initCols opost onlcr icrnl 2>/dev/null; exec /bin/bash -l" /dev/null; else exec /bin/bash -l -i; fi"""
 
         val pbArgs = mutableListOf(
             prootBin,
@@ -157,10 +157,26 @@ class PRootBackend(private val context: Context) : LinuxEnvironment {
             "-b", "/proc/self/fd/0:/dev/stdin",
             "-b", "/proc/self/fd/1:/dev/stdout",
             "-b", "/proc/self/fd/2:/dev/stderr",
-            "-b", "$prootTmp:/tmp",
+            "-b", "$prootTmp:/tmp"
+        )
+
+        // Binding penyimpanan internal Android (/sdcard)
+        try {
+            val sdcardDir = android.os.Environment.getExternalStorageDirectory()
+            if (sdcardDir != null && sdcardDir.exists()) {
+                File(targetRootfs, "sdcard").mkdirs()
+                File(targetRootfs, "mnt/sdcard").mkdirs()
+                pbArgs.add("-b")
+                pbArgs.add("${sdcardDir.absolutePath}:/sdcard")
+                pbArgs.add("-b")
+                pbArgs.add("${sdcardDir.absolutePath}:/mnt/sdcard")
+            }
+        } catch (_: Exception) {}
+
+        pbArgs.addAll(listOf(
             "-w", "/home/coder",
             "/bin/bash", "-c", shellCmd
-        )
+        ))
 
         val pb = ProcessBuilder(pbArgs)
         val nativeLibDir = context.applicationInfo.nativeLibraryDir
@@ -178,6 +194,12 @@ class PRootBackend(private val context: Context) : LinuxEnvironment {
             put("DEVBOX_SESSION_ID", sessionId)
             put("GH_NO_KEYRING", "1")
             put("PATH", "/home/coder/.local/bin:/home/coder/.cargo/bin:/home/coder/go/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin")
+            put("TMPDIR", "/tmp")
+            put("TEMP", "/tmp")
+            put("TMP", "/tmp")
+            put("LANG", "C.UTF-8")
+            put("LC_ALL", "C.UTF-8")
+            put("DEBIAN_FRONTEND", "noninteractive")
             put("PROOT_TMP_DIR", prootTmp)
             val loaderPath = getProotLoaderPath()
             if (loaderPath != null) {
@@ -188,6 +210,15 @@ class PRootBackend(private val context: Context) : LinuxEnvironment {
             put("COLUMNS", initCols.toString())
             put("LINES", initRows.toString())
             remove("LD_PRELOAD")
+            remove("ANDROID_DATA")
+            remove("ANDROID_ROOT")
+            remove("ANDROID_RUNTIME_ROOT")
+            remove("ANDROID_I18N_ROOT")
+            remove("ANDROID_TZDATA_ROOT")
+            remove("EXTERNAL_STORAGE")
+            remove("BOOTCLASSPATH")
+            remove("DEX2OATBOOTCLASSPATH")
+            remove("ASEC_MOUNTPOINT")
         }
         pb.redirectError(ProcessBuilder.Redirect.to(debugLog))
         return pb.start()
@@ -415,13 +446,38 @@ exit 0
                 sudoersCoder.writeText("coder ALL=(ALL:ALL) NOPASSWD:ALL\n")
             }
 
-            // Setup /etc/environment dengan GLIBC_TUNABLES untuk cegah SIGSYS seccomp
+            // Setup /etc/environment dengan TMPDIR, locale UTF-8, dan GLIBC_TUNABLES
             val etcEnv = File(base, "etc/environment")
-            if (!etcEnv.exists()) {
-                etcEnv.writeText("GLIBC_TUNABLES=\"glibc.pthread.rseq=0\"\n")
-            } else if (!etcEnv.readText().contains("GLIBC_TUNABLES")) {
-                etcEnv.appendText("GLIBC_TUNABLES=\"glibc.pthread.rseq=0\"\n")
-            }
+            val defaultEnv = """
+                TMPDIR="/tmp"
+                TEMP="/tmp"
+                TMP="/tmp"
+                LANG="C.UTF-8"
+                LC_ALL="C.UTF-8"
+                DEBIAN_FRONTEND="noninteractive"
+                GLIBC_TUNABLES="glibc.pthread.rseq=0"
+                PATH="/home/coder/.local/bin:/home/coder/.cargo/bin:/home/coder/go/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+            """.trimIndent() + "\n"
+            etcEnv.writeText(defaultEnv)
+
+            // Aktifkan universe repository jika ada ubuntu.sources
+            try {
+                val ubuntuSources = File(base, "etc/apt/sources.list.d/ubuntu.sources")
+                if (ubuntuSources.exists()) {
+                    val srcText = ubuntuSources.readText()
+                    if (srcText.contains("Components: main\n") || srcText.contains("Components: main ")) {
+                        ubuntuSources.writeText(srcText.replace("Components: main", "Components: main universe restricted multiverse"))
+                    }
+                }
+            } catch (_: Exception) {}
+
+            // Setup shortcut link ~/storage ke /sdcard
+            try {
+                val storageLink = File(base, "home/coder/storage")
+                if (!storageLink.exists()) {
+                    android.system.Os.symlink("/sdcard", storageLink.absolutePath)
+                }
+            } catch (_: Exception) {}
 
             // Setup .bashrc, .profile, .bash_profile modern DevBox untuk user coder
             val homeCoder = File(base, "home/coder").apply { mkdirs() }

@@ -13,8 +13,8 @@ android {
         applicationId = "com.arbdev.devbox"
         minSdk = 26
         targetSdk = 36
-        versionCode = 10221
-        versionName = "1.2.21" // v1.2.21: scrollback clear and viewport sync
+        versionCode = 10222
+        versionName = "1.2.22" // v1.2.22: fix TMPDIR, auto-repair ca-certificates, bind /sdcard
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables {
