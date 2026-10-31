@@ -24,6 +24,12 @@ class NativeVTerm(
         }
     }
 
+    fun clearScrollback() {
+        if (nativePtr != 0L) {
+            nativeClearScrollback(nativePtr)
+        }
+    }
+
     fun getScrollbackSize(): Int {
         return if (nativePtr != 0L) nativeGetScrollbackSize(nativePtr) else 0
     }
@@ -77,6 +83,9 @@ class NativeVTerm(
 
         @JvmStatic
         private external fun nativeResize(ptr: Long, rows: Int, cols: Int)
+
+        @JvmStatic
+        private external fun nativeClearScrollback(ptr: Long)
 
         @JvmStatic
         private external fun nativeGetScrollbackSize(ptr: Long): Int

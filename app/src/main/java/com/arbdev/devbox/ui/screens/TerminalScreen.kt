@@ -353,8 +353,13 @@ fun TerminalScreen(
     var previousLineCount by remember(activeSession.id) { mutableIntStateOf(activeSession.buffer.lineCountState.intValue) }
     LaunchedEffect(activeSession.buffer.lineCountState.intValue) {
         val currentLines = activeSession.buffer.lineCountState.intValue
-        if (!activeSession.buffer.isAltBuffer && autoScrollEnabled && currentLines > previousLineCount) {
-            verticalScrollState.scrollTo(verticalScrollState.maxValue)
+        if (!activeSession.buffer.isAltBuffer) {
+            if (currentLines < previousLineCount) {
+                // Scrollback dibersihkan (CSI 3 J / clear command) -> reset viewport ke baris 0
+                verticalScrollState.scrollTo(0)
+            } else if (autoScrollEnabled && currentLines > previousLineCount) {
+                verticalScrollState.scrollTo(verticalScrollState.maxValue)
+            }
         }
         previousLineCount = currentLines
     }
@@ -864,18 +869,20 @@ fun TerminalScreen(
                             text = {
                                 Row(verticalAlignment = Alignment.CenterVertically) {
                                     Icon(
-                                        imageVector = Icons.Default.Refresh,
+                                        imageVector = Icons.Default.DeleteSweep,
                                         contentDescription = null,
                                         tint = DevOnSurfaceVariant,
                                         modifier = Modifier.size(18.dp)
                                     )
                                     Spacer(modifier = Modifier.width(10.dp))
-                                    Text("Clear Screen (Ctrl+L)", color = DevOnSurface, fontSize = 13.sp)
+                                    Text("Clear Screen & Buffer (Ctrl+L)", color = DevOnSurface, fontSize = 13.sp)
                                 }
                             },
                             onClick = {
                                 showOverflowMenu = false
-                                TerminalSessionManager.getActiveSession().sendBytes(byteArrayOf(12))
+                                val active = TerminalSessionManager.getActiveSession()
+                                active.clearTerminal()
+                                active.sendBytes(byteArrayOf(12))
                             }
                         )
                     }
@@ -1212,17 +1219,17 @@ fun TerminalScreen(
                         val visibleBottom = currentScroll + visibleViewportPx
 
                         val isAlt = activeSession.buffer.isAltBuffer
-                        if (isImeVisible && autoScrollEnabled) {
+                        if (autoScrollEnabled) {
                             if (!isAlt && historyCount == 0 && cursorYPx + charHeightPx <= visibleViewportPx) {
                                 // Layar aktif belum penuh scrollback dan kursor masih muat di atas keyboard (HANYA UNTUK BASH):
                                 // Kunci posisi scroll di 0 agar prompt bash di atas TIDAK PERNAH tertarik ke atas!
                                 if (verticalScrollState.value != 0) {
                                     verticalScrollState.scrollTo(0)
                                 }
-                            } else if (cursorYPx >= visibleTop && cursorYPx + charHeightPx <= visibleBottom) {
+                            } else if (isImeVisible && cursorYPx >= visibleTop && cursorYPx + charHeightPx <= visibleBottom) {
                                 // Kursor sudah sepenuhnya terlihat di viewport aktif di atas keyboard:
                                 // Pertahankan posisi scroll saat ini, jangan ubah apa pun (anti-geser)!
-                            } else if (cursorYPx + charHeightPx > visibleBottom) {
+                            } else if (isImeVisible && cursorYPx + charHeightPx > visibleBottom) {
                                 // Kursor / menu TUI di bawah viewport (terhalang keyboard) -> scroll presisi agar kursor/menu terlihat tepat di atas keyboard
                                 val targetScroll = (cursorYPx + charHeightPx - visibleViewportPx).toInt().coerceAtLeast(0)
                                 if (targetScroll != verticalScrollState.value) {

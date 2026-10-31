@@ -432,6 +432,10 @@ class NativeTerminalSession(
         sendText("$trimmed\r")
     }
 
+    fun clearTerminal() {
+        buffer.clearScrollback()
+    }
+
     fun getDisplayDir(): String {
         return when {
             currentDir == "/home/coder" -> "~"

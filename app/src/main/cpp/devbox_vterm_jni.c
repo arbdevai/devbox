@@ -186,6 +186,22 @@ static int cb_sb_popline(int cols, VTermScreenCell *cells, void *user) {
     return 1;
 }
 
+static int cb_sb_clear(void *user) {
+    DevBoxTerminal *term = (DevBoxTerminal *)user;
+    if (!term) return 1;
+
+    for (int i = 0; i < MAX_SCROLLBACK; i++) {
+        if (term->scrollback[i].cells) {
+            free(term->scrollback[i].cells);
+            term->scrollback[i].cells = NULL;
+        }
+        term->scrollback[i].cols = 0;
+    }
+    term->sb_head = 0;
+    term->sb_size = 0;
+    return 1;
+}
+
 static VTermScreenCallbacks screen_callbacks = {
     .damage = cb_damage,
     .moverect = cb_moverect,
@@ -194,6 +210,7 @@ static VTermScreenCallbacks screen_callbacks = {
     .bell = cb_bell,
     .sb_pushline = cb_sb_pushline,
     .sb_popline = cb_sb_popline,
+    .sb_clear = cb_sb_clear,
 };
 
 JNIEXPORT jlong JNICALL
@@ -248,6 +265,15 @@ Java_com_arbdev_devbox_terminal_NativeVTerm_nativeResize(JNIEnv *env, jclass cla
     term->rows = rows;
     term->cols = cols;
     vterm_set_size(term->vt, rows, cols);
+}
+
+JNIEXPORT void JNICALL
+Java_com_arbdev_devbox_terminal_NativeVTerm_nativeClearScrollback(JNIEnv *env, jclass clazz, jlong ptr) {
+    (void)env;
+    (void)clazz;
+    DevBoxTerminal *term = (DevBoxTerminal *)(intptr_t)ptr;
+    if (!term) return;
+    cb_sb_clear(term);
 }
 
 JNIEXPORT jint JNICALL
