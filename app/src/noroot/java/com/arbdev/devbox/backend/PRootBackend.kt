@@ -673,7 +673,47 @@ exec "§{cmd[@]}"
             bwrapFile.writeText(bwrapShim)
             bwrapFile.setExecutable(true, false)
 
-            // Setup /etc/environment dengan TMPDIR, locale UTF-8, GLIBC_TUNABLES, dan sandbox bypass
+            // Setup Chromium wrapper anti-sandbox & GPU bypass
+            val chromWrapper = File(base, "usr/local/bin/chromium")
+            chromWrapper.writeText("""
+#!/bin/bash
+# DevBox Chromium wrapper with sandbox & GPU flags
+for bin in /usr/bin/chromium /usr/bin/chromium-browser; do
+    if [ -x "§bin" ]; then
+        exec "§bin" --no-sandbox --disable-setuid-sandbox --disable-gpu --disable-dev-shm-usage "§@"
+    fi
+done
+echo "DevBox: Chromium belum terpasang. Pasang dengan: devbox-install-chromium" >&2
+exit 1
+            """.trimIndent().replace('§', '$') + "\n")
+            chromWrapper.setExecutable(true, false)
+
+            try {
+                val chromLink1 = File(base, "usr/local/bin/chromium-browser")
+                if (!chromLink1.exists()) android.system.Os.symlink("/usr/local/bin/chromium", chromLink1.absolutePath)
+                val chromLink2 = File(base, "usr/local/bin/google-chrome")
+                if (!chromLink2.exists()) android.system.Os.symlink("/usr/local/bin/chromium", chromLink2.absolutePath)
+                val chromLink3 = File(base, "usr/local/bin/chrome")
+                if (!chromLink3.exists()) android.system.Os.symlink("/usr/local/bin/chromium", chromLink3.absolutePath)
+            } catch (_: Exception) {}
+
+            val chromInstall = File(base, "usr/local/bin/devbox-install-chromium")
+            chromInstall.writeText("""
+#!/bin/bash
+# DevBox Chromium Installer via xtradeb/apps PPA
+set -e
+echo "DevBox: Menyiapkan repositori Chromium native ARM64 (non-snap)..."
+export DEBIAN_FRONTEND=noninteractive
+apt-get update
+apt-get install -y software-properties-common
+add-apt-repository -y ppa:xtradeb/apps
+apt-get update
+apt-get install -y chromium
+echo "DevBox: Chromium berhasil dipasang! Siap digunakan dengan Playwright/Puppeteer."
+            """.trimIndent() + "\n")
+            chromInstall.setExecutable(true, false)
+
+            // Setup /etc/environment dengan TMPDIR, locale UTF-8, GLIBC_TUNABLES, sandbox & browser bypass
             val etcEnv = File(base, "etc/environment")
             val defaultEnv = """
                 TMPDIR="/tmp"
@@ -684,7 +724,12 @@ exec "§{cmd[@]}"
                 DEBIAN_FRONTEND="noninteractive"
                 GLIBC_TUNABLES="glibc.pthread.rseq=0"
                 CLAUDE_CODE_DISABLE_SANDBOX="1"
-                CHROMIUM_FLAGS="--no-sandbox --disable-setuid-sandbox"
+                CHROMIUM_FLAGS="--no-sandbox --disable-setuid-sandbox --disable-gpu --disable-dev-shm-usage"
+                PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH="/usr/local/bin/chromium"
+                PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD="1"
+                PUPPETEER_EXECUTABLE_PATH="/usr/local/bin/chromium"
+                PUPPETEER_SKIP_CHROMIUM_DOWNLOAD="true"
+                CHROME_PATH="/usr/local/bin/chromium"
                 PATH="/home/coder/.local/bin:/home/coder/.cargo/bin:/home/coder/go/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
             """.trimIndent() + "\n"
             etcEnv.writeText(defaultEnv)
@@ -711,7 +756,7 @@ exec "§{cmd[@]}"
             // Setup .bashrc, .profile, .bash_profile modern DevBox untuk user coder
             val homeCoder = File(base, "home/coder").apply { mkdirs() }
             val bashrcFile = File(homeCoder, ".bashrc")
-            if (!bashrcFile.exists() || !bashrcFile.readText().contains("Environment v4")) {
+            if (!bashrcFile.exists() || !bashrcFile.readText().contains("Environment v5")) {
                 bashrcFile.writeText(com.arbdev.devbox.data.ChrootManager.getBashrcContent())
                 bashrcFile.setReadable(true, false)
                 bashrcFile.setWritable(true, true)

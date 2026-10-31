@@ -330,6 +330,21 @@ BRIDGE_EOF
                 echo "IyEvYmluL2Jhc2gKYXJncz0oIiRAIikKaT0wCnRhcmdldF9kaXI9IiIKZW52X3ZhcnM9KCkKaWYgWyAiJDEiID0gIi0tdmVyc2lvbiIgXTsgdGhlbgogICAgZWNobyAiYnViYmxld3JhcCAwLjkuMCAoZGV2Ym94LWNocm9vdC1zaGltKSIKICAgIGV4aXQgMApmaQp3aGlsZSBbICRpIC1sdCAkeyNhcmdzW0BdfSBdOyBkbwogICAgYXJnPSIke2FyZ3NbJGldfSIKICAgIGNhc2UgIiRhcmciIGluCiAgICAgICAgLS0pIGk9JCgoaSArIDEpKTsgYnJlYWsgOzsKICAgICAgICAtLWNoZGlyKSB0YXJnZXRfZGlyPSIke2FyZ3NbJCgoaSArIDEpKV19IjsgaT0kKChpICsgMikpIDs7CiAgICAgICAgLS1zZXRlbnYpIGVudl92YXJzKz0oIiR7YXJnc1skKChpICsgMSkpXX09JHthcmdzWyQoKGkgKyAyKSldfSIpOyBpPSQoKGkgKyAzKSkgOzsKICAgICAgICAtLXVuc2V0ZW52KSB1bnNldCAiJHthcmdzWyQoKGkgKyAxKSldfSI7IGk9JCgoaSArIDIpKSA7OwogICAgICAgIC0tcm8tYmluZHwtLWJpbmR8LS1kZXYtYmluZHwtLXJvLWJpbmQtdHJ5fC0tYmluZC10cnkpIGk9JCgoaSArIDMpKSA7OwogICAgICAgIC0tZGV2fC0tcHJvY3wtLXRtcGZzfC0tZGlyfC0tZmlsZXwtLWJpbmQtZGF0YXwtLXJvLWJpbmQtZGF0YSkgaT0kKChpICsgMikpIDs7CiAgICAgICAgLS1zeW1saW5rKSBpPSQoKGkgKyAzKSkgOzsKICAgICAgICAtLXVuc2hhcmUtKnwtLWRpZS13aXRoLXBhcmVudHwtLW5ldy1zZXNzaW9ufC0tYXMtcGlkLTF8LS1jbGVhcmVudikgaT0kKChpICsgMSkpIDs7CiAgICAgICAgLS11aWR8LS1naWR8LS1ob3N0bmFtZSkgaT0kKChpICsgMikpIDs7CiAgICAgICAgLSopIGk9JCgoaSArIDEpKSA7OwogICAgICAgICopIGJyZWFrIDs7CiAgICBlc2FjCmRvbmUKY21kPSgiJHthcmdzW0BdOiRpfSIpClsgJHsjY21kW0BdfSAtZXEgMCBdICYmIGV4aXQgMApbIC1uICIkdGFyZ2V0X2RpciIgXSAmJiBbIC1kICIkdGFyZ2V0X2RpciIgXSAmJiBjZCAiJHRhcmdldF9kaXIiIHx8IHRydWUKZm9yIGV2IGluICIke2Vudl92YXJzW0BdfSI7IGRvIGV4cG9ydCAiJGV2IjsgZG9uZQpleGVjICIke2NtZFtAXX0iCg==" | base64 -d > "${'$'}rf/usr/local/bin/bwrap"
                 chmod 755 "${'$'}rf/usr/local/bin/bwrap" 2>/dev/null || true
             fi
+
+            if [ ! -f "${'$'}rf/usr/local/bin/chromium" ]; then
+                mkdir -p "${'$'}rf/usr/local/bin"
+                echo "IyEvYmluL2Jhc2gKIyBEZXZCb3ggQ2hyb21pdW0gd3JhcHBlciB3aXRoIHNhbmRib3ggJiBHUFUgZmxhZ3MKZm9yIGJpbiBpbiAvdXNyL2Jpbi9jaHJvbWl1bSAvdXNyL2Jpbi9jaHJvbWl1bS1icm93c2VyOyBkbwogICAgaWYgWyAteCAiJGJpbiIgXTsgdGhlbgogICAgICAgIGV4ZWMgIiRiaW4iIC0tbm8tc2FuZGJveCAtLWRpc2FibGUtc2V0dWlkLXNhbmRib3ggLS1kaXNhYmxlLWdwdSAtLWRpc2FibGUtZGV2LXNobS11c2FnZSAiJEAiCiAgICBmaQpkb25lCmVjaG8gIkRldkJveDogQ2hyb21pdW0gYmVsdW0gdGVycGFzYW5nLiBQYXNhbmcgZGVuZ2FuOiBkZXZib3gtaW5zdGFsbC1jaHJvbWl1bSIgPiYyCmV4aXQgMQo=" | base64 -d > "${'$'}rf/usr/local/bin/chromium"
+                chmod 755 "${'$'}rf/usr/local/bin/chromium" 2>/dev/null || true
+                ln -sf /usr/local/bin/chromium "${'$'}rf/usr/local/bin/chromium-browser" 2>/dev/null || true
+                ln -sf /usr/local/bin/chromium "${'$'}rf/usr/local/bin/google-chrome" 2>/dev/null || true
+                ln -sf /usr/local/bin/chromium "${'$'}rf/usr/local/bin/chrome" 2>/dev/null || true
+            fi
+
+            if [ ! -f "${'$'}rf/usr/local/bin/devbox-install-chromium" ]; then
+                mkdir -p "${'$'}rf/usr/local/bin"
+                echo "IyEvYmluL2Jhc2gKIyBEZXZCb3ggQ2hyb21pdW0gSW5zdGFsbGVyIHZpYSB4dHJhZGViL2FwcHMgUFBBCnNldCAtZQplY2hvICJEZXZCb3g6IE1lbnlpYXBrYW4gcmVwb3NpdG9yaSBDaHJvbWl1bSBuYXRpdmUgQVJNNjQgKG5vbi1zbmFwKS4uLiIKZXhwb3J0IERFQklBTl9GUk9OVEVORD1ub25pbnRlcmFjdGl2ZQphcHQtZ2V0IHVwZGF0ZQphcHQtZ2V0IGluc3RhbGwgLXkgc29mdHdhcmUtcHJvcGVydGllcy1jb21tb24KYWRkLWFwdC1yZXBvc2l0b3J5IC15IHBwYTp4dHJhZGViL2FwcHMKYXB0LWdldCB1cGRhdGUKYXB0LWdldCBpbnN0YWxsIC15IGNocm9taXVtCmVjaG8gIkRldkJveDogQ2hyb21pdW0gYmVyaGFzaWwgZGlwYXNhbmchIFNpYXAgZGlndW5ha2FuIGRlbmdhbiBQbGF5d3JpZ2h0L1B1cHBldGVlci4iCg==" | base64 -d > "${'$'}rf/usr/local/bin/devbox-install-chromium"
+                chmod 755 "${'$'}rf/usr/local/bin/devbox-install-chromium" 2>/dev/null || true
+            fi
             echo 'SUCCESS'
         """.trimIndent()
         val res = RootExecutor.execute(script)
