@@ -2337,28 +2337,22 @@ fun TerminalCanvas(
                                     val maxLine = (if (isAltBuffer) session.buffer.maxRows else session.buffer.getLineCount()) - 1
                                     val line = (offset.y / charHeight).toInt().coerceIn(0, maxLine.coerceAtLeast(0))
 
-                                    val detectedUrl = session.buffer.getUrlAt(line, col)
-                                    if (detectedUrl != null) {
+                                    val wordBounds = findWordBounds(line, col)
+                                    if (wordBounds != null) {
                                         haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                                        onTapUrl(detectedUrl)
+                                        pasteMenuOffset = null
+                                        selectionStart = GridPoint(line, wordBounds.first)
+                                        selectionEnd = GridPoint(line, wordBounds.second)
+                                        showSelectionMenu = true
                                     } else {
-                                        val wordBounds = findWordBounds(line, col)
-                                        if (wordBounds != null) {
+                                        // Long-press di sel kosong / kursor: Tampilkan menu Tempel jika ada isi clipboard
+                                        val clip = clipboardManager.getText()?.text
+                                        if (!clip.isNullOrEmpty()) {
                                             haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                                            pasteMenuOffset = null
-                                            selectionStart = GridPoint(line, wordBounds.first)
-                                            selectionEnd = GridPoint(line, wordBounds.second)
-                                            showSelectionMenu = true
-                                        } else {
-                                            // Long-press di sel kosong / kursor: Tampilkan menu Tempel jika ada isi clipboard
-                                            val clip = clipboardManager.getText()?.text
-                                            if (!clip.isNullOrEmpty()) {
-                                                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                                                selectionStart = null
-                                                selectionEnd = null
-                                                showSelectionMenu = false
-                                                pasteMenuOffset = offset
-                                            }
+                                            selectionStart = null
+                                            selectionEnd = null
+                                            showSelectionMenu = false
+                                            pasteMenuOffset = offset
                                         }
                                     }
                                 }
@@ -2626,15 +2620,31 @@ fun TerminalCanvas(
             val menuWidthPx = with(density) { 260.dp.toPx() }
             val marginPx = with(density) { 8.dp.toPx() }
 
-            // Hitung posisi Y: Letakkan di atas teks jika ada ruang.
-            // Jika teks di baris 0 (dekat tepi atas layar), letakkan di bawah kedua pin (di bawah 44dp touch area pin).
-            val menuY = if (topTextScreenY >= menuHeightPx + marginPx) {
-                (topTextScreenY - menuHeightPx - marginPx).toInt()
+            val visibleViewportHeight = if (verticalScrollState.viewportSize > 0) {
+                verticalScrollState.viewportSize.toFloat()
             } else {
-                (bottomTextScreenY + handleTouchSizePx + marginPx).toInt()
+                totalHeightPx.toFloat()
+            }
+            val visibleViewportWidth = if (horizontalScrollState.viewportSize > 0) {
+                horizontalScrollState.viewportSize.toFloat()
+            } else {
+                totalWidthPx.toFloat()
             }
 
-            val maxMenuX = (totalWidthPx - menuWidthPx - marginPx).toInt().coerceAtLeast(marginPx.toInt())
+            // Hitung posisi Y: Letakkan di atas teks jika ada ruang.
+            // Jika teks di baris 0 atau seleksi melebihi layar atas, posisikan di dalam viewport yang terlihat.
+            val rawMenuY = if (topTextScreenY >= menuHeightPx + marginPx) {
+                (topTextScreenY - menuHeightPx - marginPx).toInt()
+            } else if (bottomTextScreenY + handleTouchSizePx + marginPx <= visibleViewportHeight - menuHeightPx) {
+                (bottomTextScreenY + handleTouchSizePx + marginPx).toInt()
+            } else {
+                marginPx.toInt() + 16
+            }
+
+            val maxMenuY = (visibleViewportHeight - menuHeightPx - marginPx).toInt().coerceAtLeast(marginPx.toInt())
+            val menuY = rawMenuY.coerceIn(marginPx.toInt(), maxMenuY)
+
+            val maxMenuX = (visibleViewportWidth - menuWidthPx - marginPx).toInt().coerceAtLeast(marginPx.toInt())
             val menuX = startScreenX.toInt().coerceIn(marginPx.toInt(), maxMenuX)
 
             Surface(
@@ -2751,16 +2761,30 @@ fun TerminalCanvas(
             val screenX = pastePos.x - scrollX
             val screenY = pastePos.y - scrollY
 
+            val visibleViewportHeight = if (verticalScrollState.viewportSize > 0) {
+                verticalScrollState.viewportSize.toFloat()
+            } else {
+                totalHeightPx.toFloat()
+            }
+            val visibleViewportWidth = if (horizontalScrollState.viewportSize > 0) {
+                horizontalScrollState.viewportSize.toFloat()
+            } else {
+                totalWidthPx.toFloat()
+            }
+
             val pasteMenuHeightPx = with(density) { 40.dp.toPx() }
             val pasteMenuWidthPx = with(density) { 130.dp.toPx() }
             val marginPx = with(density) { 8.dp.toPx() }
 
-            val pasteMenuY = if (screenY >= pasteMenuHeightPx + marginPx) {
+            val rawPasteY = if (screenY >= pasteMenuHeightPx + marginPx) {
                 (screenY - pasteMenuHeightPx - marginPx).toInt()
             } else {
                 (screenY + marginPx + 16f).toInt()
             }
-            val maxPasteX = (totalWidthPx - pasteMenuWidthPx - marginPx).toInt().coerceAtLeast(marginPx.toInt())
+            val maxPasteY = (visibleViewportHeight - pasteMenuHeightPx - marginPx).toInt().coerceAtLeast(marginPx.toInt())
+            val pasteMenuY = rawPasteY.coerceIn(marginPx.toInt(), maxPasteY)
+
+            val maxPasteX = (visibleViewportWidth - pasteMenuWidthPx - marginPx).toInt().coerceAtLeast(marginPx.toInt())
             val pasteMenuX = screenX.toInt().coerceIn(marginPx.toInt(), maxPasteX)
 
             Surface(

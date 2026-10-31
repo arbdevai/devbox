@@ -823,22 +823,11 @@ class TerminalGridBuffer(
 
             if (stitchedTargetOffset >= 0 && matches.isNotEmpty()) {
                 val encompassing = matches.firstOrNull { m ->
-                    stitchedTargetOffset in (m.range.first - 15)..(m.range.last + 15)
+                    stitchedTargetOffset in m.range.first..(m.range.last + 1)
                 }
                 if (encompassing != null) {
                     return cleanUrl(encompassing.value)
                 }
-                val closest = matches.minByOrNull { m ->
-                    val mid = (m.range.first + m.range.last) / 2
-                    kotlin.math.abs(mid - stitchedTargetOffset)
-                }
-                if (closest != null) {
-                    return cleanUrl(closest.value)
-                }
-            }
-
-            if (matches.isNotEmpty()) {
-                return cleanUrl(matches.first().value)
             }
 
             return null

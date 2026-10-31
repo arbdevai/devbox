@@ -13,8 +13,8 @@ android {
         applicationId = "com.arbdev.devbox"
         minSdk = 26
         targetSdk = 36
-        versionCode = 10227
-        versionName = "1.2.27" // v1.2.27: robust OkHttp streaming updater with .part temp file and deep APK verification
+        versionCode = 10228
+        versionName = "1.2.28" // v1.2.28: fix PRoot /tmp & /dev/shm, request external storage, precision URL click & clamped selection menu
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables {

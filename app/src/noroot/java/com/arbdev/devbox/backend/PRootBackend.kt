@@ -130,9 +130,26 @@ class PRootBackend(private val context: Context) : LinuxEnvironment {
             setWritable(true, false)
             setExecutable(true, false)
         }.absolutePath
+        val prootShm = File(context.filesDir, "proot_shm").apply {
+            mkdirs()
+            setReadable(true, false)
+            setWritable(true, false)
+            setExecutable(true, false)
+        }.absolutePath
+
         File(targetRootfs, "home/coder").mkdirs()
-        File(targetRootfs, "tmp").mkdirs()
-        File(targetRootfs, "dev").mkdirs()
+        File(targetRootfs, "tmp").apply {
+            mkdirs()
+            setReadable(true, false)
+            setWritable(true, false)
+            setExecutable(true, false)
+        }
+        File(targetRootfs, "dev/shm").apply {
+            mkdirs()
+            setReadable(true, false)
+            setWritable(true, false)
+            setExecutable(true, false)
+        }
         File(targetRootfs, "proc").mkdirs()
 
         val debugLog = File(context.filesDir, "proot_debug.log")
@@ -141,7 +158,7 @@ class PRootBackend(private val context: Context) : LinuxEnvironment {
             debugLog.createNewFile()
         } catch (_: Exception) {}
 
-        val shellCmd = """export TMPDIR=/tmp TEMP=/tmp TMP=/tmp LANG=C.UTF-8 LC_ALL=C.UTF-8 DEBIAN_FRONTEND=noninteractive; if [ -f /var/lib/dpkg/status ] && grep -q "half-configured" /var/lib/dpkg/status 2>/dev/null; then dpkg --configure -a 2>/dev/null || true; fi; if [ ! -f /etc/ssl/certs/ca-certificates.crt ] && [ -x /usr/sbin/update-ca-certificates ]; then update-ca-certificates --fresh 2>/dev/null || true; fi; if [ -x /usr/bin/script ] && /usr/bin/script -qefc "exit 0" /dev/null 2>/dev/null; then exec /usr/bin/script -qefc "shopt -s checkwinsize 2>/dev/null; tty > /tmp/.devbox_pts_$sessionId 2>/dev/null; echo ${'$'}${'$'} > /tmp/.devbox_pid_$sessionId 2>/dev/null; stty rows $initRows cols $initCols opost onlcr icrnl 2>/dev/null; exec /bin/bash -l" /dev/null; else exec /bin/bash -l -i; fi"""
+        val shellCmd = """export TMPDIR=/tmp TEMP=/tmp TMP=/tmp LANG=C.UTF-8 LC_ALL=C.UTF-8 DEBIAN_FRONTEND=noninteractive; chmod 1777 /tmp /dev/shm 2>/dev/null || true; if [ -f /var/lib/dpkg/status ] && grep -q "half-configured" /var/lib/dpkg/status 2>/dev/null; then dpkg --configure -a 2>/dev/null || true; fi; if [ ! -f /etc/ssl/certs/ca-certificates.crt ] && [ -x /usr/sbin/update-ca-certificates ]; then update-ca-certificates --fresh 2>/dev/null || true; fi; if [ -x /usr/bin/script ] && /usr/bin/script -qefc "exit 0" /dev/null 2>/dev/null; then exec /usr/bin/script -qefc "shopt -s checkwinsize 2>/dev/null; tty > /tmp/.devbox_pts_$sessionId 2>/dev/null; echo ${'$'}${'$'} > /tmp/.devbox_pid_$sessionId 2>/dev/null; stty rows $initRows cols $initCols opost onlcr icrnl 2>/dev/null; exec /bin/bash -l" /dev/null; else exec /bin/bash -l -i; fi"""
 
         val pbArgs = mutableListOf(
             prootBin,
@@ -157,7 +174,8 @@ class PRootBackend(private val context: Context) : LinuxEnvironment {
             "-b", "/proc/self/fd/0:/dev/stdin",
             "-b", "/proc/self/fd/1:/dev/stdout",
             "-b", "/proc/self/fd/2:/dev/stderr",
-            "-b", "$prootTmp:/tmp"
+            "-b", "$prootTmp:/tmp",
+            "-b", "$prootShm:/dev/shm"
         )
 
         // Binding penyimpanan internal Android (/sdcard)
@@ -436,6 +454,10 @@ class PRootBackend(private val context: Context) : LinuxEnvironment {
     override fun ensureEnvironmentReadySync(rootfs: String): Result<Unit> {
         try {
             val base = File(rootfs)
+            File(context.filesDir, "proot_tmp").apply { mkdirs(); setReadable(true, false); setWritable(true, false); setExecutable(true, false) }
+            File(context.filesDir, "proot_shm").apply { mkdirs(); setReadable(true, false); setWritable(true, false); setExecutable(true, false) }
+            File(base, "tmp").apply { mkdirs(); setReadable(true, false); setWritable(true, false); setExecutable(true, false) }
+            File(base, "dev/shm").apply { mkdirs(); setReadable(true, false); setWritable(true, false); setExecutable(true, false) }
             File(base, "home/coder/projects").mkdirs()
             File(base, "tmp/devbox-bridge").mkdirs()
             File(base, "etc").mkdirs()
