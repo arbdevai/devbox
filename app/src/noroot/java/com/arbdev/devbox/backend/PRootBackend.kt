@@ -369,13 +369,45 @@ exit 0
                 passwdFile.writeText("root:x:0:0:root:/root:/bin/bash\ncoder:x:1000:1000:DevBox User:/home/coder:/bin/bash\n")
             }
             val groupFile = File(etcDir, "group")
-            if (groupFile.exists()) {
-                val content = groupFile.readText()
-                if (!content.contains("coder:")) {
-                    groupFile.appendText("coder:x:1000:\n")
+            val existingGroupText = if (groupFile.exists()) groupFile.readText() else ""
+            val groupSb = StringBuilder(existingGroupText)
+            if (!existingGroupText.contains("root:x:0:")) {
+                groupSb.append("root:x:0:\n")
+            }
+            if (!existingGroupText.contains("coder:")) {
+                groupSb.append("coder:x:1000:\n")
+            }
+
+            // Daftarkan seluruh supplementary GID Android ke /etc/group agar 'groups' tidak mengeluarkan pesan error
+            try {
+                val statusFile = File("/proc/self/status")
+                if (statusFile.exists()) {
+                    statusFile.forEachLine { line ->
+                        if (line.startsWith("Groups:")) {
+                            val gids = line.substringAfter("Groups:").trim().split("\\s+".toRegex())
+                            for (gid in gids) {
+                                val g = gid.trim()
+                                if (g.isNotEmpty() && g.all { it.isDigit() }) {
+                                    val gidPattern = ":$g:"
+                                    if (!groupSb.contains(gidPattern)) {
+                                        val groupName = when (g) {
+                                            "3003" -> "aid_inet"
+                                            "1079" -> "aid_sdcard"
+                                            "9997" -> "aid_everybody"
+                                            else -> "aid_$g"
+                                        }
+                                        groupSb.append("$groupName:x:$g:coder\n")
+                                    }
+                                }
+                            }
+                        }
+                    }
                 }
-            } else {
-                groupFile.writeText("root:x:0:\ncoder:x:1000:\n")
+            } catch (_: Exception) {}
+
+            val finalGroupText = groupSb.toString()
+            if (finalGroupText != existingGroupText) {
+                groupFile.writeText(finalGroupText)
             }
             val sudoersDir = File(etcDir, "sudoers.d").apply { mkdirs() }
             val sudoersCoder = File(sudoersDir, "coder")
