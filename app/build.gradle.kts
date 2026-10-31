@@ -14,7 +14,7 @@ android {
         minSdk = 26
         targetSdk = 36
         versionCode = 10229
-        versionName = "1.2.29" // v1.2.29: bwrap bypass shim, CLAUDE_CODE_DISABLE_SANDBOX, and git safe.directory for Agent CLI
+        versionName = "1.2.29" // Agent CLI support: bwrap bypass shim & sandbox envs // v1.2.29: bwrap bypass shim, CLAUDE_CODE_DISABLE_SANDBOX, and git safe.directory for Agent CLI
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables {
