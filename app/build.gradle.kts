@@ -13,8 +13,8 @@ android {
         applicationId = "com.arbdev.devbox"
         minSdk = 26
         targetSdk = 36
-        versionCode = 10226
-        versionName = "1.2.26" // v1.2.26: fix trailing quote in No-Root shell startup command
+        versionCode = 10227
+        versionName = "1.2.27" // v1.2.27: robust OkHttp streaming updater with .part temp file and deep APK verification
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables {
