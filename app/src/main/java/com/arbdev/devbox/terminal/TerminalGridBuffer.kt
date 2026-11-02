@@ -138,12 +138,10 @@ class TerminalGridBuffer(
     private var activeGrid = Array(maxRows) { Array(maxCols) { TerminalCell() } }
     private val scrollbackCache = Array(128) { Array(maxCols) { TerminalCell() } }
 
-    // Lightweight Stream Scanner Buffers
+    // Lightweight Stream Scanner State Machine (Persistent across chunk boundaries)
+    private var scanState = SCAN_NORMAL
+    private var decStep = 0
     private val oscBuffer = StringBuilder()
-    private var inOsc = false
-
-    // Kitty Graphics Protocol Accumulator
-    private var inApc = false
     private val apcBuffer = StringBuilder()
     private val kittyChunkBuffer = StringBuilder()
     private var kittyChunkAction: Char = 't'
@@ -213,8 +211,8 @@ class TerminalGridBuffer(
             isApplicationCursorKeys = false
             isSynchronizedUpdate = false
             syncStartTime = 0L
-            inOsc = false
-            inApc = false
+            scanState = SCAN_NORMAL
+            decStep = 0
             oscBuffer.setLength(0)
             apcBuffer.setLength(0)
             kittyChunkBuffer.setLength(0)
@@ -302,82 +300,192 @@ class TerminalGridBuffer(
     }
 
     private fun scanEscapeSequences(bytes: ByteArray, offset: Int, count: Int) {
-        var i = offset
         val end = offset + count
-        while (i < end) {
+        for (i in offset until end) {
             val b = bytes[i].toInt() and 0xFF
-            if (!inOsc && !inApc) {
-                if (b == 0x1B && i + 1 < end) {
-                    val next = bytes[i + 1]
-                    if (next == ']'.code.toByte()) {
-                        inOsc = true
-                        oscBuffer.setLength(0)
-                        i += 2
-                        continue
-                    } else if (next == '_'.code.toByte()) {
-                        inApc = true
-                        apcBuffer.setLength(0)
-                        i += 2
-                        continue
-                    } else if (i + 7 < end && next == '['.code.toByte() && bytes[i + 2] == '?'.code.toByte()
-                        && bytes[i + 3] == '2'.code.toByte() && bytes[i + 4] == '0'.code.toByte()
-                        && bytes[i + 5] == '2'.code.toByte() && bytes[i + 6] == '6'.code.toByte()
-                    ) {
-                        // DEC Mode 2026: Synchronized Update (Bubble Tea / agy atomic frame rendering)
-                        val modeChar = bytes[i + 7].toInt().toChar()
-                        if (modeChar == 'h') {
+            when (scanState) {
+                SCAN_NORMAL -> {
+                    if (b == 0x1B) {
+                        scanState = SCAN_ESC
+                    }
+                }
+                SCAN_ESC -> {
+                    when (b) {
+                        ']'.code -> {
+                            scanState = SCAN_OSC
+                            oscBuffer.setLength(0)
+                        }
+                        '_'.code -> {
+                            scanState = SCAN_APC
+                            apcBuffer.setLength(0)
+                        }
+                        '['.code -> {
+                            scanState = SCAN_DEC
+                            decStep = 2 // Already matched \x1b and '['
+                        }
+                        0x1B -> {
+                            // Consecutive ESC (e.g. \x1b\x1b), stay in SCAN_ESC
+                            scanState = SCAN_ESC
+                        }
+                        else -> {
+                            scanState = SCAN_NORMAL
+                        }
+                    }
+                }
+                SCAN_DEC -> {
+                    if (decStep < DEC_2026_PATTERN.size) {
+                        if (b == (DEC_2026_PATTERN[decStep].toInt() and 0xFF)) {
+                            decStep++
+                        } else if (b == 0x1B) {
+                            scanState = SCAN_ESC
+                            decStep = 0
+                        } else {
+                            scanState = SCAN_NORMAL
+                            decStep = 0
+                        }
+                    } else if (decStep == DEC_2026_PATTERN.size) {
+                        // All 7 prefix bytes matched (\x1b[?2026), expecting mode char 'h' or 'l'
+                        if (b == 'h'.code) {
                             isSynchronizedUpdate = true
                             syncStartTime = System.currentTimeMillis()
-                        } else if (modeChar == 'l') {
+                        } else if (b == 'l'.code) {
                             isSynchronizedUpdate = false
                             notifyUpdate()
                         }
-                        i += 8
-                        continue
+                        scanState = if (b == 0x1B) SCAN_ESC else SCAN_NORMAL
+                        decStep = 0
+                    } else {
+                        scanState = SCAN_NORMAL
+                        decStep = 0
                     }
                 }
-            } else if (inOsc) {
-                if (b == 0x07) { // BEL terminates OSC
-                    inOsc = false
-                    try {
-                        handleOscCommand(oscBuffer.toString())
-                    } catch (_: Exception) {}
-                    oscBuffer.setLength(0)
-                } else if (b == 0x1B && i + 1 < end && bytes[i + 1] == '\\'.code.toByte()) { // ST (ESC \) terminates OSC
-                    inOsc = false
-                    try {
-                        handleOscCommand(oscBuffer.toString())
-                    } catch (_: Exception) {}
-                    oscBuffer.setLength(0)
-                    i += 2
-                    continue
-                } else {
-                    if (oscBuffer.length < 4096) {
-                        oscBuffer.append(b.toChar())
+                SCAN_OSC -> {
+                    when (b) {
+                        0x07 -> { // BEL terminates OSC
+                            scanState = SCAN_NORMAL
+                            try {
+                                handleOscCommand(oscBuffer.toString())
+                            } catch (_: Exception) {}
+                            oscBuffer.setLength(0)
+                        }
+                        0x1B -> { // Possible start of ST (\x1b\)
+                            scanState = SCAN_OSC_ESC
+                        }
+                        else -> {
+                            if (oscBuffer.length < MAX_OSC_LEN) {
+                                oscBuffer.append(b.toChar())
+                            } else {
+                                // Buffer overflow recovery: drop malformed sequence
+                                oscBuffer.setLength(0)
+                                scanState = SCAN_NORMAL
+                            }
+                        }
                     }
                 }
-            } else if (inApc) {
-                if (b == 0x07) { // BEL terminates APC
-                    inApc = false
-                    try {
-                        handleApcCommand(apcBuffer.toString())
-                    } catch (_: Exception) {}
-                    apcBuffer.setLength(0)
-                } else if (b == 0x1B && i + 1 < end && bytes[i + 1] == '\\'.code.toByte()) { // ST terminates APC
-                    inApc = false
-                    try {
-                        handleApcCommand(apcBuffer.toString())
-                    } catch (_: Exception) {}
-                    apcBuffer.setLength(0)
-                    i += 2
-                    continue
-                } else {
-                    if (apcBuffer.length < 1000000) { // Limit chunk to 1MB per packet
-                        apcBuffer.append(b.toChar())
+                SCAN_OSC_ESC -> {
+                    when (b) {
+                        '\\'.code -> { // ST (ESC \) terminates OSC
+                            scanState = SCAN_NORMAL
+                            try {
+                                handleOscCommand(oscBuffer.toString())
+                            } catch (_: Exception) {}
+                            oscBuffer.setLength(0)
+                        }
+                        0x07 -> { // BEL immediately after ESC terminates OSC
+                            scanState = SCAN_NORMAL
+                            try {
+                                handleOscCommand(oscBuffer.toString())
+                            } catch (_: Exception) {}
+                            oscBuffer.setLength(0)
+                        }
+                        ']'.code -> { // New OSC immediately starting
+                            oscBuffer.setLength(0)
+                            scanState = SCAN_OSC
+                        }
+                        '_'.code -> { // New APC immediately starting
+                            apcBuffer.setLength(0)
+                            scanState = SCAN_APC
+                        }
+                        0x1B -> { // Another ESC
+                            if (oscBuffer.length < MAX_OSC_LEN) {
+                                oscBuffer.append('\u001B')
+                            }
+                            scanState = SCAN_OSC_ESC
+                        }
+                        else -> { // ESC followed by arbitrary character within OSC payload
+                            if (oscBuffer.length + 2 <= MAX_OSC_LEN) {
+                                oscBuffer.append('\u001B')
+                                oscBuffer.append(b.toChar())
+                                scanState = SCAN_OSC
+                            } else {
+                                oscBuffer.setLength(0)
+                                scanState = SCAN_NORMAL
+                            }
+                        }
+                    }
+                }
+                SCAN_APC -> {
+                    when (b) {
+                        0x07 -> { // BEL terminates APC
+                            scanState = SCAN_NORMAL
+                            try {
+                                handleApcCommand(apcBuffer.toString())
+                            } catch (_: Exception) {}
+                            apcBuffer.setLength(0)
+                        }
+                        0x1B -> { // Possible start of ST (\x1b\)
+                            scanState = SCAN_APC_ESC
+                        }
+                        else -> {
+                            if (apcBuffer.length < MAX_APC_LEN) {
+                                apcBuffer.append(b.toChar())
+                            } else {
+                                // Buffer overflow recovery: drop malformed/oversized packet
+                                apcBuffer.setLength(0)
+                                scanState = SCAN_NORMAL
+                            }
+                        }
+                    }
+                }
+                SCAN_APC_ESC -> {
+                    when (b) {
+                        '\\'.code -> { // ST (ESC \) terminates APC
+                            scanState = SCAN_NORMAL
+                            try {
+                                handleApcCommand(apcBuffer.toString())
+                            } catch (_: Exception) {}
+                            apcBuffer.setLength(0)
+                        }
+                        0x07 -> { // BEL terminates APC
+                            scanState = SCAN_NORMAL
+                            try {
+                                handleApcCommand(apcBuffer.toString())
+                            } catch (_: Exception) {}
+                            apcBuffer.setLength(0)
+                        }
+                        '_'.code -> {
+                            apcBuffer.setLength(0)
+                            scanState = SCAN_APC
+                        }
+                        0x1B -> {
+                            if (apcBuffer.length < MAX_APC_LEN) {
+                                apcBuffer.append('\u001B')
+                            }
+                            scanState = SCAN_APC_ESC
+                        }
+                        else -> {
+                            if (apcBuffer.length + 2 <= MAX_APC_LEN) {
+                                apcBuffer.append('\u001B')
+                                apcBuffer.append(b.toChar())
+                                scanState = SCAN_APC
+                            } else {
+                                apcBuffer.setLength(0)
+                                scanState = SCAN_NORMAL
+                            }
+                        }
                     }
                 }
             }
-            i++
         }
     }
 
@@ -891,5 +999,28 @@ class TerminalGridBuffer(
             clearImages()
             vterm.destroy()
         }
+    }
+
+    companion object {
+        private const val SCAN_NORMAL = 0
+        private const val SCAN_ESC = 1
+        private const val SCAN_DEC = 2
+        private const val SCAN_OSC = 3
+        private const val SCAN_OSC_ESC = 4
+        private const val SCAN_APC = 5
+        private const val SCAN_APC_ESC = 6
+
+        private const val MAX_OSC_LEN = 4096
+        private const val MAX_APC_LEN = 1000000
+
+        private val DEC_2026_PATTERN = byteArrayOf(
+            0x1B,
+            '['.code.toByte(),
+            '?'.code.toByte(),
+            '2'.code.toByte(),
+            '0'.code.toByte(),
+            '2'.code.toByte(),
+            '6'.code.toByte()
+        )
     }
 }
