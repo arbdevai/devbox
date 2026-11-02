@@ -514,42 +514,43 @@ object ChrootManager {
                 done
             done
 
+            rf='$rootfs'
+            rf="${'$'}{rf%/}"
+            chroot_pids=${'$'}(ls -l /proc/[0-9]*/root 2>/dev/null | grep -E " -> ${'$'}rf/?${'$'}" | awk -F'/' '{print ${'$'}3}')
+
             # Deteksi sesi mana saja yang masih menjalankan foreground agy (PPID > 1)
             fg_agy_sids=""
-            for p in /proc/[0-9]*; do
+            for pid in ${'$'}chroot_pids; do
+              p="/proc/${'$'}pid"
               [ -d "${'$'}p" ] || continue
-              if [ "$(readlink ${'$'}p/root 2>/dev/null)" = '$rootfs' ]; then
-                comm=${'$'}(cat ${'$'}p/comm 2>/dev/null)
-                if [ "${'$'}comm" = "agy" ] || [ "${'$'}comm" = "antigravity" ]; then
-                  ppid=${'$'}(awk '/^PPid:/{print ${'$'}2}' ${'$'}p/status 2>/dev/null || echo 0)
-                  if [ "${'$'}ppid" -gt 1 ] 2>/dev/null; then
-                    sid=${'$'}(grep -s -a -z '^DEVBOX_SESSION_ID=' ${'$'}p/environ 2>/dev/null | tr -d '\0' | cut -d= -f2)
-                    [ -n "${'$'}sid" ] && fg_agy_sids="${'$'}fg_agy_sids ${'$'}sid"
-                  fi
+              comm=${'$'}(cat "${'$'}p/comm" 2>/dev/null)
+              if [ "${'$'}comm" = "agy" ] || [ "${'$'}comm" = "antigravity" ]; then
+                ppid=${'$'}(awk '/^PPid:/{print ${'$'}2}' "${'$'}p/status" 2>/dev/null || echo 0)
+                if [ "${'$'}ppid" -gt 1 ] 2>/dev/null; then
+                  sid=${'$'}(grep -s -a -z '^DEVBOX_SESSION_ID=' "${'$'}p/environ" 2>/dev/null | tr -d '\0' | cut -d= -f2)
+                  [ -n "${'$'}sid" ] && fg_agy_sids="${'$'}fg_agy_sids ${'$'}sid"
                 fi
               fi
             done
 
-            for p in /proc/[0-9]*; do
+            for pid in ${'$'}chroot_pids; do
+              p="/proc/${'$'}pid"
               [ -d "${'$'}p" ] || continue
-              if [ "$(readlink ${'$'}p/root 2>/dev/null)" = '$rootfs' ]; then
-                pid=${'$'}(basename ${'$'}p)
 
-                # Proteksi 1: Lewati jika PID termasuk di pohon proses sesi aktif (Cek cepat O(1))
-                case " ${'$'}active_pids ${'$'}active_descendants " in
-                    *" ${'$'}pid "*) continue ;;
-                esac
+              # Proteksi 1: Lewati jika PID termasuk di pohon proses sesi aktif (Cek cepat O(1))
+              case " ${'$'}active_pids ${'$'}active_descendants " in
+                  *" ${'$'}pid "*) continue ;;
+              esac
 
-                comm=${'$'}(cat ${'$'}p/comm 2>/dev/null)
-                sid=${'$'}(grep -s -a -z '^DEVBOX_SESSION_ID=' ${'$'}p/environ 2>/dev/null | tr -d '\0' | cut -d= -f2)
-                rss=${'$'}(awk '/VmRSS/{print ${'$'}2}' ${'$'}p/status 2>/dev/null || echo 0)
-                ppid=${'$'}(awk '/^PPid:/{print ${'$'}2}' ${'$'}p/status 2>/dev/null || echo 0)
-                has_fg=0
-                case " ${'$'}fg_agy_sids " in
-                    *" ${'$'}sid "*) has_fg=1 ;;
-                esac
-                echo "${'$'}pid|${'$'}comm|${'$'}sid|${'$'}rss|${'$'}ppid|${'$'}has_fg"
-              fi
+              comm=${'$'}(cat "${'$'}p/comm" 2>/dev/null)
+              sid=${'$'}(grep -s -a -z '^DEVBOX_SESSION_ID=' "${'$'}p/environ" 2>/dev/null | tr -d '\0' | cut -d= -f2)
+              rss=${'$'}(awk '/VmRSS/{print ${'$'}2}' "${'$'}p/status" 2>/dev/null || echo 0)
+              ppid=${'$'}(awk '/^PPid:/{print ${'$'}2}' "${'$'}p/status" 2>/dev/null || echo 0)
+              has_fg=0
+              case " ${'$'}fg_agy_sids " in
+                  *" ${'$'}sid "*) has_fg=1 ;;
+              esac
+              echo "${'$'}pid|${'$'}comm|${'$'}sid|${'$'}rss|${'$'}ppid|${'$'}has_fg"
             done
         """.trimIndent()
 

@@ -152,13 +152,14 @@ class ChrootBackend(private val context: Context) : LinuxEnvironment {
     }
 
     override fun sendInterruptSignal(sessionId: String, targetRootfs: String) {
-        val cmd = "for p in /proc/[0-9]*; do " +
-                "if [ \"\$(readlink \$p/root 2>/dev/null)\" = '$targetRootfs' ]; then " +
+        val cmd = "rf='$targetRootfs'; rf=\"\${rf%/}\"; " +
+                "chroot_pids=\$(ls -l /proc/[0-9]*/root 2>/dev/null | grep -E \" -> \$rf/?\$\" | awk -F'/' '{print \$3}'); " +
+                "for pid in \$chroot_pids; do p=\"/proc/\$pid\"; [ -d \"\$p\" ] || continue; " +
                 "if grep -z '^DEVBOX_SESSION_ID=$sessionId' \"\$p/environ\" 2>/dev/null >/dev/null; then " +
-                "comm=\$(cat \$p/comm 2>/dev/null); " +
+                "comm=\$(cat \"\$p/comm\" 2>/dev/null); " +
                 "if [ \"\$comm\" != 'script' ] && [ \"\$comm\" != 'bash' ] && [ \"\$comm\" != 'stty' ] && [ \"\$comm\" != 'su' ]; then " +
-                "kill -2 \${p##*/} 2>/dev/null || true; " +
-                "fi; fi; fi; done"
+                "kill -2 \$pid 2>/dev/null || true; " +
+                "fi; fi; done"
         RootExecutor.executeSync(cmd, silent = true)
     }
 
@@ -170,6 +171,7 @@ class ChrootBackend(private val context: Context) : LinuxEnvironment {
 
         val script = """
             rf='$rootfs'
+            rf="${'$'}{rf%/}"
             if [ -d "${'$'}rf" ] && { [ -x "${'$'}rf/bin/bash" ] || [ -x "${'$'}rf/usr/bin/bash" ] || [ -x "${'$'}rf/bin/sh" ]; }; then
                 status="EXISTS"
             else
@@ -184,13 +186,7 @@ class ChrootBackend(private val context: Context) : LinuxEnvironment {
 
             if [ "${'$'}status" = "EXISTS" ]; then
                 grep -q " ${'$'}rf/proc " /proc/mounts 2>/dev/null && mnt=1 || mnt=0
-                procs=0
-                for p in /proc/[0-9]*; do
-                    [ -d "${'$'}p" ] || continue
-                    if [ "${'$'}(readlink "${'$'}p/root" 2>/dev/null)" = "${'$'}rf" ]; then
-                        procs=${'$'}((procs + 1))
-                    fi
-                done
+                procs=${'$'}(ls -l /proc/[0-9]*/root 2>/dev/null | grep -E " -> ${'$'}rf/?${'$'}" | wc -l)
                 ram=0; st=0; sf=0
                 while read -r key val rest; do
                     case "${'$'}key" in
