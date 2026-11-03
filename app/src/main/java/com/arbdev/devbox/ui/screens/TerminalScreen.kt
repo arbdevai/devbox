@@ -361,6 +361,14 @@ fun TerminalScreen(
         previousLineCount = currentLines
     }
 
+    // Auto-scroll instan sinkron: Segera setelah layout Canvas mengukur tinggi baris baru (maxValue bertambah),
+    // langsung gulir ke posisi paling bawah tanpa jeda / lag 1 frame.
+    LaunchedEffect(verticalScrollState.maxValue) {
+        if (autoScrollEnabled && !activeSession.buffer.isAltBuffer && verticalScrollState.maxValue > 0) {
+            verticalScrollState.scrollTo(verticalScrollState.maxValue)
+        }
+    }
+
     // DEC Mode 1049 Alternate Screen Buffer switching (Agent CLI full screen isolation & clean Bash restoration)
     LaunchedEffect(activeSession.id, activeSession.buffer.isAltBufferState.value) {
         if (activeSession.buffer.isAltBufferState.value) {
@@ -858,6 +866,45 @@ fun TerminalScreen(
                             }
                         }
 
+                        // Presets ukuran font (Anti-Pinch Tidak Sengaja):
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 14.dp, vertical = 2.dp),
+                            horizontalArrangement = Arrangement.spacedBy(6.dp, Alignment.End)
+                        ) {
+                            Surface(
+                                shape = RoundedCornerShape(6.dp),
+                                color = if (kotlin.math.abs(terminalFontSize - 8.0f) < 0.2f) DevPrimary.copy(alpha = 0.22f) else DevSurface,
+                                border = BorderStroke(1.dp, if (kotlin.math.abs(terminalFontSize - 8.0f) < 0.2f) DevPrimary else DevBorder),
+                                modifier = Modifier.clickable { updateFontSize(8.0f) }
+                            ) {
+                                Text(
+                                    text = "Compact 8.0",
+                                    fontSize = 10.sp,
+                                    fontFamily = FontFamily.Monospace,
+                                    fontWeight = if (kotlin.math.abs(terminalFontSize - 8.0f) < 0.2f) FontWeight.Bold else FontWeight.Normal,
+                                    color = if (kotlin.math.abs(terminalFontSize - 8.0f) < 0.2f) DevPrimary else DevOnSurfaceVariant,
+                                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                )
+                            }
+                            Surface(
+                                shape = RoundedCornerShape(6.dp),
+                                color = if (kotlin.math.abs(terminalFontSize - 12.0f) < 0.2f) DevPrimary.copy(alpha = 0.22f) else DevSurface,
+                                border = BorderStroke(1.dp, if (kotlin.math.abs(terminalFontSize - 12.0f) < 0.2f) DevPrimary else DevBorder),
+                                modifier = Modifier.clickable { updateFontSize(12.0f) }
+                            ) {
+                                Text(
+                                    text = "Normal 12.0",
+                                    fontSize = 10.sp,
+                                    fontFamily = FontFamily.Monospace,
+                                    fontWeight = if (kotlin.math.abs(terminalFontSize - 12.0f) < 0.2f) FontWeight.Bold else FontWeight.Normal,
+                                    color = if (kotlin.math.abs(terminalFontSize - 12.0f) < 0.2f) DevPrimary else DevOnSurfaceVariant,
+                                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                )
+                            }
+                        }
+
                         DropdownMenuItem(
                             text = {
                                 Row(verticalAlignment = Alignment.CenterVertically) {
@@ -1080,40 +1127,14 @@ fun TerminalScreen(
                 .alpha(0.01f)
         )
 
-        // Native 2D VT100 Matrix Canvas / Terminal Text Area with Direct Glyph Drawing & Pinch-to-Zoom
+        // Native 2D VT100 Matrix Canvas / Terminal Text Area with Direct Glyph Drawing
+        // Pinch-to-zoom layar dinonaktifkan untuk mencegah gesture sentuhan 2 jari/telapak tangan tidak sengaja mengubah ukuran font.
+        // Ukuran font dikontrol penuh secara presisi melalui menu toolbar dan tombol preset.
         BoxWithConstraints(
             modifier = Modifier
                 .weight(1f)
                 .fillMaxWidth()
                 .background(TerminalBackground)
-                .pointerInput(Unit) {
-                    awaitEachGesture {
-                        awaitFirstDown(requireUnconsumed = false)
-                        do {
-                            val event = awaitPointerEvent()
-                            val activePointers = event.changes.filter { it.pressed }
-                            if (activePointers.size >= 2) {
-                                val p1 = activePointers[0].position
-                                val p2 = activePointers[1].position
-                                val prevP1 = activePointers[0].previousPosition
-                                val prevP2 = activePointers[1].previousPosition
-
-                                val currentDist = kotlin.math.hypot(p1.x - p2.x, p1.y - p2.y)
-                                val prevDist = kotlin.math.hypot(prevP1.x - prevP2.x, prevP1.y - prevP2.y)
-
-                                if (prevDist > 0f) {
-                                    val scale = currentDist / prevDist
-                                    if (scale in 0.7f..1.4f && kotlin.math.abs(scale - 1f) > 0.008f) {
-                                        // Damping factor halus agar zoom in/out bertahap, terkendali, dan nyaman diatur
-                                        val delta = ((scale - 1f) * 6f).coerceIn(-0.35f, 0.35f)
-                                        updateFontSize((terminalFontSize + delta).coerceIn(8f, 26f))
-                                        activePointers.forEach { it.consume() }
-                                    }
-                                }
-                            }
-                        } while (event.changes.any { it.pressed })
-                    }
-                }
         ) {
             val density = LocalDensity.current
             val terminalTypeface = remember(context) {
