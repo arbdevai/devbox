@@ -146,6 +146,8 @@ class TerminalGridBuffer(
     private val kittyChunkBuffer = StringBuilder()
     private var kittyChunkAction: Char = 't'
     private var kittyChunkFormat: Int = 100
+    private var kittyChunkMedium: Char = 'd'
+    private var kittyChunkCompression: Char = ' '
     private var kittyChunkWidth: Int = 0
     private var kittyChunkHeight: Int = 0
     private var kittyChunkCols: Int = 0
@@ -498,6 +500,8 @@ class TerminalGridBuffer(
 
         var action = 't'
         var format = 100
+        var transmissionMedium = 'd' // 'd'=direct, 'f'=file, 't'=temp file
+        var compression = ' ' // 'z'=zlib
         var moreChunks = 0
         var imgId = 0
         var widthPx = 0
@@ -516,6 +520,8 @@ class TerminalGridBuffer(
                     when (k) {
                         'a' -> action = v.firstOrNull() ?: 't'
                         'f' -> format = v.toIntOrNull() ?: 100
+                        't' -> transmissionMedium = v.firstOrNull() ?: 'd'
+                        'o' -> compression = v.firstOrNull() ?: ' '
                         'm' -> moreChunks = v.toIntOrNull() ?: 0
                         'i' -> imgId = v.toIntOrNull() ?: 0
                         's' -> widthPx = v.toIntOrNull() ?: 0
@@ -560,6 +566,8 @@ class TerminalGridBuffer(
                 if (kittyChunkBuffer.isEmpty()) {
                     kittyChunkAction = action
                     kittyChunkFormat = format
+                    kittyChunkMedium = transmissionMedium
+                    kittyChunkCompression = compression
                     kittyChunkWidth = widthPx
                     kittyChunkHeight = heightPx
                     kittyChunkCols = cellCols
@@ -573,7 +581,10 @@ class TerminalGridBuffer(
 
             val fullPayload = if (kittyChunkBuffer.isNotEmpty()) {
                 val res = kittyChunkBuffer.append(payloadStr).toString()
+                action = kittyChunkAction
                 format = kittyChunkFormat
+                transmissionMedium = kittyChunkMedium
+                compression = kittyChunkCompression
                 widthPx = if (widthPx > 0) widthPx else kittyChunkWidth
                 heightPx = if (heightPx > 0) heightPx else kittyChunkHeight
                 cellCols = if (cellCols > 0) cellCols else kittyChunkCols
@@ -592,21 +603,113 @@ class TerminalGridBuffer(
                 val cleanB64 = fullPayload.replace("\r", "").replace("\n", "").trim()
                 val rawBytes = android.util.Base64.decode(cleanB64, android.util.Base64.DEFAULT)
                 if (rawBytes != null && rawBytes.isNotEmpty()) {
-                    val bitmap = decodeBitmap(rawBytes, format, widthPx, heightPx)
-                    if (bitmap != null) {
-                        val finalCols = if (cellCols > 0) cellCols else ((bitmap.width + 19) / 20).coerceIn(1, maxCols)
-                        val finalRows = if (cellRows > 0) cellRows else ((bitmap.height + 39) / 40).coerceIn(1, maxRows)
-                        val startL = getScrollbackSize() + cursorRow
-                        val startC = cursorCol
+                    val imageBytes: ByteArray? = when (transmissionMedium) {
+                        'f', 't' -> {
+                            // Transmisi via path file Linux (Mendukung 100% No-Root & Root)
+                            val filePath = String(rawBytes, Charsets.UTF_8).trim()
+                            val resolvedFile = resolveRootfsPath(filePath)
+                            val fileContent = if (resolvedFile != null && resolvedFile.exists() && resolvedFile.canRead()) {
+                                try { resolvedFile.readBytes() } catch (_: Exception) { null }
+                            } else null
 
-                        addImage(TerminalImage(imgId, bitmap, startL, startC, finalCols, finalRows))
-                        if (quiet < 2 && imgId > 0) {
-                            onSendResponse?.invoke("\u001B_Gi=$imgId;OK\u001B\\")
+                            if (transmissionMedium == 't' && resolvedFile != null) {
+                                try { resolvedFile.delete() } catch (_: Exception) {}
+                            }
+
+                            if (fileContent != null && compression == 'z') {
+                                decompressZlib(fileContent)
+                            } else {
+                                fileContent
+                            }
                         }
-                        notifyUpdate()
+                        else -> {
+                            // Direct payload stream
+                            if (compression == 'z') {
+                                decompressZlib(rawBytes)
+                            } else {
+                                rawBytes
+                            }
+                        }
+                    }
+
+                    if (imageBytes != null && imageBytes.isNotEmpty()) {
+                        val bitmap = decodeBitmap(imageBytes, format, widthPx, heightPx)
+                        if (bitmap != null) {
+                            // Hitung rasio aspek kolom dan baris terminal secara proporsional
+                            val finalCols = if (cellCols > 0) {
+                                cellCols.coerceIn(1, maxCols)
+                            } else {
+                                val maxAllowedCols = (maxCols * 0.9f).toInt().coerceAtLeast(1)
+                                ((bitmap.width + 19) / 20).coerceIn(1, maxAllowedCols)
+                            }
+                            val finalRows = if (cellRows > 0) {
+                                cellRows.coerceIn(1, maxRows * 3)
+                            } else {
+                                val aspect = bitmap.height.toFloat() / bitmap.width.toFloat().coerceAtLeast(1f)
+                                (finalCols * aspect * 0.5f).toInt().coerceIn(1, maxRows)
+                            }
+
+                            val startL = getScrollbackSize() + cursorRow
+                            val startC = cursorCol
+
+                            addImage(TerminalImage(imgId, bitmap, startL, startC, finalCols, finalRows))
+
+                            // Pindahkan kursor terminal ke bawah gambar agar teks selanjutnya tidak tumpang tindih
+                            if (action == 'T' || cellRows > 0) {
+                                val advance = finalRows.coerceIn(1, maxRows)
+                                val nl = StringBuilder()
+                                for (r in 0 until advance) {
+                                    nl.append("\r\n")
+                                }
+                                val nlBytes = nl.toString().toByteArray(Charsets.UTF_8)
+                                vterm.feed(nlBytes, 0, nlBytes.size)
+                                syncNativeState()
+                            }
+
+                            if (quiet < 2 && imgId > 0) {
+                                onSendResponse?.invoke("\u001B_Gi=$imgId;OK\u001B\\")
+                            }
+                            notifyUpdate()
+                        }
                     }
                 }
             } catch (_: Exception) {}
+        }
+    }
+
+    private fun resolveRootfsPath(filePath: String): java.io.File? {
+        return try {
+            val rootfs = com.arbdev.devbox.data.ChrootManager.activeRootfs
+            val clean = if (filePath.startsWith("/")) filePath.substring(1) else filePath
+            val target = java.io.File(rootfs, clean)
+            if (target.exists()) {
+                target
+            } else {
+                val direct = java.io.File(filePath)
+                if (direct.exists()) direct else target
+            }
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    private fun decompressZlib(compressed: ByteArray): ByteArray? {
+        return try {
+            val inflater = java.util.zip.Inflater()
+            inflater.setInput(compressed)
+            val outputStream = java.io.ByteArrayOutputStream(compressed.size * 2)
+            val buffer = ByteArray(4096)
+            while (!inflater.finished()) {
+                val count = inflater.inflate(buffer)
+                if (count == 0) {
+                    if (inflater.needsInput() || inflater.needsDictionary()) break
+                }
+                outputStream.write(buffer, 0, count)
+            }
+            inflater.end()
+            outputStream.toByteArray()
+        } catch (_: Exception) {
+            null
         }
     }
 

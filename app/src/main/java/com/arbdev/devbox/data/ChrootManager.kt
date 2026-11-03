@@ -931,15 +931,68 @@ case "${'$'}CMD" in
             echo "Belum ada riwayat Antigravity CLI."
         fi
         ;;
+    img|image)
+        shift
+        IMG_FILE="${'$'}1"
+        if [ -n "${'$'}IMG_FILE" ]; then
+            /usr/local/bin/devbox-img "${'$'}@"
+        else
+            echo "Usage: devbox-bridge img <path-to-image> [cols] [rows]"
+        fi
+        ;;
     *)
-        echo "DevBox Bridge v1.0.81"
-        echo "Usage: devbox-bridge <copy|notify|open|transcript> [args...]"
+        echo "DevBox Bridge v1.0.82"
+        echo "Usage: devbox-bridge <copy|notify|open|transcript|img> [args...]"
         ;;
 esac
 BRIDGE_EOF
             chmod 755 "${'$'}rf/usr/local/bin/devbox-bridge" 2>/dev/null || true
             ln -sf /usr/local/bin/devbox-bridge "${'$'}rf/usr/bin/devbox-bridge" 2>/dev/null || true
             ln -sf /usr/local/bin/devbox-bridge "${'$'}rf/usr/local/bin/devbox-clip" 2>/dev/null || true
+
+            # Helper devbox-img (Kitty Graphics Image & Pixel-Perfect Terminal Viewer)
+            cat << 'DEVBOX_IMG_EOF' > "${'$'}rf/usr/local/bin/devbox-img"
+#!/bin/bash
+if [ -z "${'$'}1" ] || [ "${'$'}1" = "-h" ] || [ "${'$'}1" = "--help" ]; then
+    echo "Penggunaan: devbox-img <file-gambar> [cols] [rows]"
+    echo "Menampilkan gambar pixel-perfect langsung di terminal DevBox (Root & No-Root via Kitty Graphics)."
+    exit 0
+fi
+
+FILE="${'$'}1"
+if [ ! -f "${'$'}FILE" ]; then
+    echo "devbox-img: File tidak ditemukan: ${'$'}FILE" >&2
+    exit 1
+fi
+
+COLS="${'$'}{2:-}"
+ROWS="${'$'}{3:-}"
+EXTRA=""
+[ -n "${'$'}COLS" ] && EXTRA="${'$'}{EXTRA},c=${'$'}{COLS}"
+[ -n "${'$'}ROWS" ] && EXTRA="${'$'}{EXTRA},r=${'$'}{ROWS}"
+
+# Encode file ke base64 (kompatibel busybox / coreutils)
+B64=${'$'}(base64 -w 0 "${'$'}FILE" 2>/dev/null || base64 "${'$'}FILE" 2>/dev/null | tr -d '\r\n')
+if [ -z "${'$'}B64" ]; then
+    echo "devbox-img: Gagal membaca isi file gambar." >&2
+    exit 1
+fi
+
+PTS_DEV=${'$'}(cat "/tmp/.devbox_pts_${'$'}{DEVBOX_SESSION_ID:-}" 2>/dev/null || true)
+EMIT_OUT="/dev/stdout"
+if [ -n "${'$'}PTS_DEV" ] && [ -w "${'$'}PTS_DEV" ]; then
+    EMIT_OUT="${'$'}PTS_DEV"
+elif [ -w /dev/tty ]; then
+    EMIT_OUT="/dev/tty"
+fi
+
+printf "\033_Ga=T,f=100%s;%s\033\\" "${'$'}EXTRA" "${'$'}B64" > "${'$'}EMIT_OUT"
+printf "\n" > "${'$'}EMIT_OUT"
+DEVBOX_IMG_EOF
+            chmod 755 "${'$'}rf/usr/local/bin/devbox-img" 2>/dev/null || true
+            ln -sf /usr/local/bin/devbox-img "${'$'}rf/usr/bin/devbox-img" 2>/dev/null || true
+            ln -sf /usr/local/bin/devbox-img "${'$'}rf/usr/local/bin/icat" 2>/dev/null || true
+            ln -sf /usr/local/bin/devbox-img "${'$'}rf/usr/bin/icat" 2>/dev/null || true
 
             # bwrap shim untuk bypass sandbox Agent CLI
             if [ ! -f "${'$'}rf/usr/local/bin/bwrap" ]; then
