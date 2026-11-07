@@ -1693,6 +1693,12 @@ fun WebPreviewScreen() {
                                             customViewCallback = null
                                             (context as? Activity)?.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
                                         }
+
+                                        override fun onPermissionRequest(request: android.webkit.PermissionRequest?) {
+                                            try {
+                                                request?.grant(request.resources)
+                                            } catch (_: Exception) {}
+                                        }
                                     }
 
                                     webViewClient = object : WebViewClient() {

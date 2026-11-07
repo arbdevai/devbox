@@ -874,6 +874,19 @@ XDG_EOF
             ln -sf /usr/local/bin/xdg-open "${'$'}rf/usr/local/bin/www-browser" 2>/dev/null || true
             ln -sf /usr/local/bin/xdg-open "${'$'}rf/usr/local/bin/wslview" 2>/dev/null || true
 
+            # 7b. Editor wrapper & symlinks (AGY artifact editor & CLI editor integration)
+            if [ -x "${'$'}rf/usr/bin/micro" ]; then
+                ln -sf /usr/bin/micro "${'$'}rf/usr/local/bin/editor" 2>/dev/null || true
+                ln -sf /usr/bin/micro "${'$'}rf/usr/local/bin/nano" 2>/dev/null || true
+                ln -sf /usr/bin/micro "${'$'}rf/usr/local/bin/vi" 2>/dev/null || true
+                ln -sf /usr/bin/micro "${'$'}rf/usr/local/bin/vim" 2>/dev/null || true
+            elif [ -x "${'$'}rf/usr/bin/nano" ]; then
+                ln -sf /usr/bin/nano "${'$'}rf/usr/local/bin/editor" 2>/dev/null || true
+                ln -sf /usr/bin/nano "${'$'}rf/usr/local/bin/micro" 2>/dev/null || true
+                ln -sf /usr/bin/nano "${'$'}rf/usr/local/bin/vi" 2>/dev/null || true
+                ln -sf /usr/bin/nano "${'$'}rf/usr/local/bin/vim" 2>/dev/null || true
+            fi
+
             mkdir -p "${'$'}rf/tmp/devbox-bridge" 2>/dev/null || true
             chmod 777 "${'$'}rf/tmp/devbox-bridge" 2>/dev/null || true
             cat << 'BRIDGE_EOF' > "${'$'}rf/usr/local/bin/devbox-bridge"
@@ -1093,6 +1106,8 @@ fi
 
 export TERM="${'$'}{TERM:-xterm-256color}"
 export COLORTERM=truecolor
+export EDITOR="${'$'}{EDITOR:-micro}"
+export VISUAL="${'$'}{VISUAL:-micro}"
 export LANG=C.UTF-8
 export LC_ALL=C.UTF-8
 export TMPDIR=/tmp

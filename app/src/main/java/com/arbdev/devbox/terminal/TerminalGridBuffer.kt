@@ -267,6 +267,14 @@ class TerminalGridBuffer(
             // 2. Feed raw bytes into native libvterm C engine
             vterm.feed(bytes, offset, count)
 
+            // 2b. Tangkap respon balik libvterm (CSI ?1;2c DA1, query cursor, dsb) dan kirim ke PTY slave
+            val resp = vterm.readOutput()
+            if (resp != null && resp.isNotEmpty()) {
+                try {
+                    onSendResponse?.invoke(String(resp, Charsets.UTF_8))
+                } catch (_: Exception) {}
+            }
+
             // 3. Sync cursor, modes, and title from native engine
             syncNativeState()
 
@@ -924,16 +932,22 @@ class TerminalGridBuffer(
                 val flags = rowDataBuffer[base + 3]
 
                 val cell = line[c]
-                if (cp == 0) {
+                val isWideCont = (flags and 32) != 0 || cp == -1
+                if (isWideCont || cp <= 0) {
                     cell.char = ' '
                     cell.extraChar = null
                 } else if (cp <= 0xFFFF) {
                     cell.char = cp.toChar()
                     cell.extraChar = null
                 } else {
-                    Character.toChars(cp, surrogateChars, 0)
-                    cell.char = surrogateChars[0]
-                    cell.extraChar = surrogateChars[1]
+                    try {
+                        Character.toChars(cp, surrogateChars, 0)
+                        cell.char = surrogateChars[0]
+                        cell.extraChar = surrogateChars[1]
+                    } catch (_: Exception) {
+                        cell.char = ' '
+                        cell.extraChar = null
+                    }
                 }
 
                 cell.fgColor = if (fg == 0) currentTheme.foreground else Color(fg)
@@ -943,7 +957,7 @@ class TerminalGridBuffer(
                 cell.isDim = false
                 cell.isInverse = (flags and 8) != 0
                 cell.isWide = (flags and 16) != 0
-                cell.isWideContinuation = (flags and 32) != 0
+                cell.isWideContinuation = isWideCont
                 cell.hyperlinkUrl = null
             }
             for (c in effectiveCols until line.size) {

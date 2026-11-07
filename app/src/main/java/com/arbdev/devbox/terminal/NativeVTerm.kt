@@ -72,6 +72,12 @@ class NativeVTerm(
         }
     }
 
+    fun readOutput(): ByteArray? {
+        synchronized(vtermLock) {
+            return if (nativePtr != 0L) nativeReadOutput(nativePtr) else null
+        }
+    }
+
     fun getTitle(): String? {
         synchronized(vtermLock) {
             return if (nativePtr != 0L) nativeGetTitle(nativePtr) else null
@@ -135,6 +141,9 @@ class NativeVTerm(
 
         @JvmStatic
         private external fun nativeGetModes(ptr: Long, outModes: IntArray)
+
+        @JvmStatic
+        private external fun nativeReadOutput(ptr: Long): ByteArray?
 
         @JvmStatic
         private external fun nativeGetTitle(ptr: Long): String?

@@ -3,6 +3,14 @@ package com.arbdev.devbox.ui.screens
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
+import android.Manifest
+import android.os.Bundle
+import android.speech.RecognitionListener
+import android.speech.RecognizerIntent
+import android.speech.SpeechRecognizer
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.core.content.ContextCompat
 import android.view.ActionMode
 import android.view.Menu
 import android.view.MenuItem
@@ -69,6 +77,7 @@ import androidx.compose.material.icons.filled.ContentPaste
 import androidx.compose.material.icons.filled.DeleteSweep
 import androidx.compose.material.icons.filled.Layers
 import androidx.compose.material.icons.filled.Link
+import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.SelectAll
@@ -76,6 +85,7 @@ import androidx.compose.material.icons.filled.Send
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.SmartToy
 import androidx.compose.material.icons.filled.Terminal
+import androidx.compose.material.icons.filled.ViewColumn
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material.icons.filled.ZoomIn
 import androidx.compose.material.icons.filled.ZoomOut
@@ -193,7 +203,83 @@ fun TerminalScreen(
     // Persistensi ukuran font terminal via SharedPreferences (default 12sp, rentang 2.5sp - 28sp)
     val prefs = remember { context.getSharedPreferences("devbox_terminal_prefs", Context.MODE_PRIVATE) }
     var terminalFontSize by remember { mutableFloatStateOf(prefs.getFloat("terminal_font_size", 12f)) }
+    var force80Cols by remember { mutableStateOf(prefs.getBoolean("force_80_cols", true)) }
     var fontToast by remember { mutableStateOf<android.widget.Toast?>(null) }
+
+    val toggleForce80Cols: () -> Unit = {
+        val newVal = !force80Cols
+        force80Cols = newVal
+        prefs.edit().putBoolean("force_80_cols", newVal).apply()
+        Toast.makeText(context, if (newVal) "Force 80 Cols Aktif (Anti-Fallback Chart)" else "Auto Cols Aktif", Toast.LENGTH_SHORT).show()
+    }
+
+    var isListeningVoice by remember { mutableStateOf(false) }
+
+    val recordAudioPermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission()
+    ) { isGranted ->
+        if (isGranted) {
+            Toast.makeText(context, "Izin mikrofon diberikan. Tap tombol MIC untuk berbicara.", Toast.LENGTH_SHORT).show()
+        } else {
+            Toast.makeText(context, "Izin mikrofon ditolak", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    val startVoiceInput: () -> Unit = {
+        val hasPermission = ContextCompat.checkSelfPermission(
+            context,
+            Manifest.permission.RECORD_AUDIO
+        ) == android.content.pm.PackageManager.PERMISSION_GRANTED
+
+        if (!hasPermission) {
+            recordAudioPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+        } else {
+            if (!SpeechRecognizer.isRecognitionAvailable(context)) {
+                Toast.makeText(context, "Speech-to-Text tidak tersedia di perangkat", Toast.LENGTH_SHORT).show()
+            } else {
+                try {
+                    val recognizer = SpeechRecognizer.createSpeechRecognizer(context)
+                    val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
+                        putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
+                        putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
+                        putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 1)
+                    }
+                    recognizer.setRecognitionListener(object : RecognitionListener {
+                        override fun onReadyForSpeech(params: Bundle?) {
+                            isListeningVoice = true
+                        }
+                        override fun onBeginningOfSpeech() {}
+                        override fun onRmsChanged(rmsdB: Float) {}
+                        override fun onBufferReceived(buffer: ByteArray?) {}
+                        override fun onEndOfSpeech() {
+                            isListeningVoice = false
+                        }
+                        override fun onError(error: Int) {
+                            isListeningVoice = false
+                            try { recognizer.destroy() } catch (_: Exception) {}
+                        }
+                        override fun onResults(results: Bundle?) {
+                            isListeningVoice = false
+                            val matches = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
+                            val spokenText = matches?.firstOrNull()?.trim()
+                            if (!spokenText.isNullOrEmpty()) {
+                                TerminalSessionManager.getActiveSession().sendText(spokenText)
+                                Toast.makeText(context, "Suara: $spokenText", Toast.LENGTH_SHORT).show()
+                            }
+                            try { recognizer.destroy() } catch (_: Exception) {}
+                        }
+                        override fun onPartialResults(partialResults: Bundle?) {}
+                        override fun onEvent(eventType: Int, params: Bundle?) {}
+                    })
+                    recognizer.startListening(intent)
+                    Toast.makeText(context, "Mendengarkan suara...", Toast.LENGTH_SHORT).show()
+                } catch (e: Exception) {
+                    isListeningVoice = false
+                    Toast.makeText(context, "Gagal memulai mikrofon: ${e.message}", Toast.LENGTH_SHORT).show()
+                }
+            }
+        }
+    }
 
     // Helper untuk mengubah dan menyimpan ukuran font secara smooth (step 0.5f, min 2.5f)
     val updateFontSize: (Float) -> Unit = { newSize ->
@@ -361,14 +447,6 @@ fun TerminalScreen(
         previousLineCount = currentLines
     }
 
-    // Auto-scroll instan sinkron: Segera setelah layout Canvas mengukur tinggi baris baru (maxValue bertambah),
-    // langsung gulir ke posisi paling bawah tanpa jeda / lag 1 frame.
-    LaunchedEffect(verticalScrollState.maxValue) {
-        if (autoScrollEnabled && !activeSession.buffer.isAltBuffer && verticalScrollState.maxValue > 0) {
-            verticalScrollState.scrollTo(verticalScrollState.maxValue)
-        }
-    }
-
     // DEC Mode 1049 Alternate Screen Buffer switching (Agent CLI full screen isolation & clean Bash restoration)
     LaunchedEffect(activeSession.id, activeSession.buffer.isAltBufferState.value) {
         if (activeSession.buffer.isAltBufferState.value) {
@@ -391,7 +469,6 @@ fun TerminalScreen(
         modifier = Modifier
             .fillMaxSize()
             .background(TerminalBackground)
-            .imePadding()
     ) {
         // 2026 Google M3 Pill Session Tab Bar
         Row(
@@ -866,6 +943,32 @@ fun TerminalScreen(
                             }
                         }
 
+                        DropdownMenuItem(
+                            text = {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Icon(
+                                        imageVector = Icons.Default.ViewColumn,
+                                        contentDescription = null,
+                                        tint = if (force80Cols) DevPrimary else DevOnSurfaceVariant,
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(10.dp))
+                                    Column {
+                                        Text("Force 80 Columns", color = DevOnSurface, fontSize = 13.sp)
+                                        Text(
+                                            text = if (force80Cols) "Aktif: Minimal 80 Kolom (Anti-Fallback Chart)" else "Nonaktif: Auto Kolom Sesuai Layar",
+                                            color = if (force80Cols) DevPrimary else DevOnSurfaceVariant,
+                                            fontSize = 10.sp
+                                        )
+                                    }
+                                }
+                            },
+                            onClick = {
+                                showOverflowMenu = false
+                                toggleForce80Cols()
+                            }
+                        )
+
                         // Presets ukuran font (Anti-Pinch Tidak Sengaja):
                         Row(
                             modifier = Modifier
@@ -1178,7 +1281,7 @@ fun TerminalScreen(
                 }
             }
 
-            LaunchedEffect(activeSession, maxWidth, maxHeight, charWidthPx, charHeightPx, isImeVisible) {
+            LaunchedEffect(activeSession, maxWidth, maxHeight, charWidthPx, charHeightPx, isImeVisible, force80Cols) {
                 val isFontZoom = lastCharWidth > 0f && (lastCharWidth != charWidthPx || lastCharHeight != charHeightPx)
                 lastCharWidth = charWidthPx
                 lastCharHeight = charHeightPx
@@ -1193,7 +1296,8 @@ fun TerminalScreen(
                     val hPaddingPx = 8.dp.toPx() // 4.dp horizontal margin di setiap sisi
                     val vPaddingPx = 4.dp.toPx() // 2.dp vertical margin di setiap sisi
                     if (charWidthPx > 0 && charHeightPx > 0) {
-                        val cols = ((maxWidth.toPx() - hPaddingPx).coerceAtLeast(1f) / charWidthPx).toInt().coerceIn(20, 300)
+                        val rawCols = ((maxWidth.toPx() - hPaddingPx).coerceAtLeast(1f) / charWidthPx).toInt().coerceIn(20, 300)
+                        val cols = if (force80Cols) maxOf(rawCols, 80) else rawCols
                         val isColsChanged = activeSession.lastCols > 0 && cols != activeSession.lastCols
 
                         // KUNCI ROWS LINUX & ANTI-FLICKER AGY:
@@ -1966,6 +2070,16 @@ fun TerminalScreen(
                 }
 
                 TerminalModifierKey(
+                    label = if (isListeningVoice) "LISTENING..." else "MIC",
+                    highlight = isListeningVoice,
+                    onLongClick = {
+                        Toast.makeText(context, "Tap untuk input suara langsung ke shell", Toast.LENGTH_SHORT).show()
+                    }
+                ) {
+                    startVoiceInput()
+                }
+
+                TerminalModifierKey(
                     label = "PASTE",
                     highlight = true,
                     onLongClick = { showClipboardDialog = true }
@@ -2512,7 +2626,7 @@ fun TerminalCanvas(
                         // 2. Gambar karakter teks presisi per sel monospaced (100% akurat, nol kerning drift, nol loncat kursor)
                         for (col in 0 until lineCols) {
                             val cell = line.getOrNull(col) ?: break
-                            if (cell.isWideContinuation || cell.char == ' ') continue
+                            if (cell.isWideContinuation || cell.char == ' ' || cell.char == '\uFFFF' || cell.char == '\u0000') continue
 
                             val pt = GridPoint(lineIdx, col)
                             val isSelected = hasSelection && selMin != null && selMax != null && pt >= selMin && pt <= selMax

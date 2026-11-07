@@ -220,6 +220,12 @@ fun WebIdeScreen() {
                                     isLoading = false
                                 }
                             }
+
+                            override fun onPermissionRequest(request: android.webkit.PermissionRequest?) {
+                                try {
+                                    request?.grant(request.resources)
+                                } catch (_: Exception) {}
+                            }
                         }
 
                         webViewClient = object : WebViewClient() {
@@ -328,9 +334,10 @@ fun WebIdeScreen() {
                                             probeAttempt = attempt
                                             kotlinx.coroutines.delay(500)
                                             val listening = try {
-                                                java.io.File("/proc/net/tcp").takeIf { it.exists() }
-                                                    ?.readLines()
-                                                    ?.any { it.contains(":1F90 ") && it.contains(" 0A ") } == true
+                                                java.net.Socket().use { sock ->
+                                                    sock.connect(java.net.InetSocketAddress("127.0.0.1", 8080), 60)
+                                                    true
+                                                }
                                             } catch (_: Exception) { false }
                                             if (listening) break
                                         }

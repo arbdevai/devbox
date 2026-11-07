@@ -208,6 +208,8 @@ class PRootBackend(private val context: Context) : LinuxEnvironment {
             put("SHELL", "/bin/bash")
             put("TERM", "xterm-256color")
             put("COLORTERM", "truecolor")
+            put("EDITOR", "micro")
+            put("VISUAL", "micro")
             put("DEVBOX", "1")
             put("DEVBOX_FLAVOR", "noroot")
             put("DEVBOX_SESSION_ID", sessionId)

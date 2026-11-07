@@ -120,7 +120,7 @@ static int cb_sb_pushline(int cols, const VTermScreenCell *cells, void *user) {
 
     for (int c = 0; c < cols; c++) {
         DevBoxCell *dst = &term->scrollback[idx].cells[c];
-        dst->codepoint = cells[c].chars[0];
+        uint32_t cp = cells[c].chars[0];
 
         VTermColor fg = cells[c].fg;
         VTermColor bg = cells[c].bg;
@@ -138,7 +138,11 @@ static int cb_sb_pushline(int cols, const VTermScreenCell *cells, void *user) {
         if (cells[c].attrs.italic) flags |= 4;
         if (cells[c].attrs.reverse) flags |= 8;
         if (cells[c].width == 2) flags |= 16;
-        if (cells[c].width == 0) flags |= 32;
+        if (cells[c].width == 0 || cp == (uint32_t)-1) {
+            flags |= 32;
+            cp = 0;
+        }
+        dst->codepoint = cp;
         dst->flags = flags;
     }
     return 1;
@@ -397,7 +401,10 @@ Java_com_arbdev_devbox_terminal_NativeVTerm_nativeGetRowData(JNIEnv *env, jclass
                 if (cell.attrs.italic) flags |= 4;
                 if (cell.attrs.reverse) flags |= 8;
                 if (cell.width == 2) flags |= 16;
-                if (cell.width == 0) flags |= 32;
+                if (cell.width == 0 || cp == (uint32_t)-1) {
+                    flags |= 32;
+                    cp = 0;
+                }
 
                 int base = c * 4;
                 data[base + 0] = (jint)cp;
@@ -435,6 +442,32 @@ Java_com_arbdev_devbox_terminal_NativeVTerm_nativeGetModes(JNIEnv *env, jclass c
     }
 
     (*env)->ReleaseIntArrayElements(env, outModes, arr, 0);
+}
+
+JEXPORT jbyteArray JNICALL
+Java_com_arbdev_devbox_terminal_NativeVTerm_nativeReadOutput(JNIEnv *env, jclass clazz, jlong ptr) {
+    (void)clazz;
+    DevBoxTerminal *term = (DevBoxTerminal *)(intptr_t)ptr;
+    if (!term || !term->vt) return NULL;
+
+    size_t cur = vterm_output_get_buffer_current(term->vt);
+    if (cur == 0) return NULL;
+
+    char *buf = (char *)malloc(cur);
+    if (!buf) return NULL;
+
+    size_t n = vterm_output_read(term->vt, buf, cur);
+    if (n == 0) {
+        free(buf);
+        return NULL;
+    }
+
+    jbyteArray res = (*env)->NewByteArray(env, (jsize)n);
+    if (res) {
+        (*env)->SetByteArrayRegion(env, res, 0, (jsize)n, (const jbyte *)buf);
+    }
+    free(buf);
+    return res;
 }
 
 JNIEXPORT jstring JNICALL
