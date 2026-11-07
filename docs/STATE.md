@@ -1,10 +1,11 @@
 # STATE - DevBox Workstation
 
 ## Status Sesi Saat Ini
-- **Fase**: Hotfix v1.2.37 (Pemulihan imePadding agar Dock CTRL/ALT/MIC Terangkat di Atas Keyboard)
+- **Fase**: Hotfix v1.2.37 Berhasil Dipublikasikan (CI Build & Auto-Release Sukses)
 - **Target Versi**: v1.2.37 (versionCode 10237)
 - **Device Mode**: Root Native (Chroot ARM64)
-- **Kondisi Codebase**: Lolos Pre-Flight Check
+- **CI Runner**: GitHub Actions Run ID `42397015742` (Sukses 3m 7s)
+- **Release URL**: https://github.com/arbdevai/devbox/releases/tag/v1.2.37
 
 ## Rekapitulasi Solusi & Eksekusi
 1. [x] **Pemulihan imePadding Dock Extra Keys (v1.2.37)**: Mengembalikan `Modifier.imePadding()` pada root `Column` `TerminalScreen.kt` agar dock tombol pembantu (CTRL, ALT, TAB, ESC, MIC, dll) otomatis terangkat dan melayang di atas keyboard virtual HP saat IME muncul.
