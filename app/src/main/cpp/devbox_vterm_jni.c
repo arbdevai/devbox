@@ -444,7 +444,7 @@ Java_com_arbdev_devbox_terminal_NativeVTerm_nativeGetModes(JNIEnv *env, jclass c
     (*env)->ReleaseIntArrayElements(env, outModes, arr, 0);
 }
 
-JEXPORT jbyteArray JNICALL
+JNIEXPORT jbyteArray JNICALL
 Java_com_arbdev_devbox_terminal_NativeVTerm_nativeReadOutput(JNIEnv *env, jclass clazz, jlong ptr) {
     (void)clazz;
     DevBoxTerminal *term = (DevBoxTerminal *)(intptr_t)ptr;
