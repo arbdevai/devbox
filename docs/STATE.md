@@ -1,16 +1,16 @@
 # STATE - DevBox Workstation
 
 ## Status Sesi Saat Ini
-- **Fase**: Hotfix v1.2.37 Berhasil Dipublikasikan (CI Build & Auto-Release Sukses)
-- **Target Versi**: v1.2.37 (versionCode 10237)
+- **Fase**: Rilis v1.2.38 (Integrasi Penuh OSC 52 Clipboard, Universal CLI Wrappers, Dynamic Cursor Shape, & Terminal Bell)
+- **Target Versi**: v1.2.38 (versionCode 10238)
 - **Device Mode**: Root Native (Chroot ARM64)
-- **CI Runner**: GitHub Actions Run ID `42397015742` (Sukses 3m 7s)
-- **Release URL**: https://github.com/arbdevai/devbox/releases/tag/v1.2.37
+- **Kondisi Codebase**: Lolos Pre-Flight Check
 
 ## Rekapitulasi Solusi & Eksekusi
-1. [x] **Pemulihan imePadding Dock Extra Keys (v1.2.37)**: Mengembalikan `Modifier.imePadding()` pada root `Column` `TerminalScreen.kt` agar dock tombol pembantu (CTRL, ALT, TAB, ESC, MIC, dll) otomatis terangkat dan melayang di atas keyboard virtual HP saat IME muncul.
-2. [x] **Anti-Lompat Viewport Keyboard**: Menjaga penghapusan `LaunchedEffect(maxValue)` yang agresif agar kanvas tidak melesat liar saat keyboard muncul atau ditutup.
-3. [x] **Chart / Bagan Fallback Teks**: Mode `Force 80 Columns` (default aktif & toggle menu titik 3) agar TUI `agy` tidak fallback ke plain text.
-4. [x] **Emoji Tofu Kotak Silang**: Perbaikan cell continuation di C NDK libvterm dan buffer Kotlin.
-5. [x] **Editor AGY Artifact**: Environment `$EDITOR=micro` dan symlink binary otomatis di chroot/PRoot.
-6. [x] **Microphone & Voice Input**: Integrasi native `SpeechRecognizer` pada tombol MIC extra keys dock.
+1. [x] **OSC 52 Clipboard Synchronization**: Mengaktifkan `vterm_state_set_selection_callbacks` di `devbox_vterm_jni.c`, `NativeVTerm.kt`, dan `TerminalGridBuffer.kt`. Menyinkronkan clipboard langsung ke `ClipboardManager` Android via `DevBoxApplication.instance`.
+2. [x] **Universal Clipboard Wrappers di Chroot**: Memasang wrapper otomatis untuk `xclip`, `xsel`, `wl-copy`, `wl-paste`, `termux-clipboard-set`, dan `termux-clipboard-get` yang terhubung ke `devbox-bridge copy` di `/usr/local/bin/`.
+3. [x] **Dynamic Cursor Shape (DECSCUSR)**: Mengaktifkan `VTERM_PROP_CURSORSHAPE` di C JNI dan merender kursor dinamis (1: Block, 2: Underline, 3: Bar / I-Beam) di `TerminalCanvas` untuk Neovim, Vi, dan Micro.
+4. [x] **Terminal Bell (ASCII BEL 0x07)**: Menghubungkan trigger BEL di `TerminalGridBuffer.kt` ke getaran haptik Android (`Vibrator` / `HapticFeedback`).
+5. [x] **Ukuran Buffer OSC 52**: Menaikkan `MAX_OSC_LEN` dari 4KB ke 256KB agar tidak terpotong saat menyalin kode berukuran besar.
+6. [x] **Pemulihan imePadding**: Menjaga dock Extra Keys (CTRL, ALT, MIC) tetap melayang di atas keyboard virtual.
+7. [x] **Force 80 Columns**: Anti-fallback chart visual AGY.

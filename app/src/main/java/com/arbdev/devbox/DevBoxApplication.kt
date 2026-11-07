@@ -15,8 +15,15 @@ val devBoxAppModule = module {
 }
 
 class DevBoxApplication : Application() {
+
+    companion object {
+        lateinit var instance: DevBoxApplication
+            private set
+    }
+
     override fun onCreate() {
         super.onCreate()
+        instance = this
         try {
             startKoin {
                 androidLogger(Level.ERROR)

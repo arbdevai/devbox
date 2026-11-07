@@ -102,14 +102,41 @@ class NativeTerminalSession(
         buffer.onClipboardCopy = { text ->
             mainHandler.post {
                 TerminalSessionManager.addToClipboardHistory(text)
+                try {
+                    val app = com.arbdev.devbox.DevBoxApplication.instance
+                    val cm = app.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as? android.content.ClipboardManager
+                    cm?.setPrimaryClip(android.content.ClipData.newPlainText("DevBox", text))
+                } catch (_: Exception) {}
                 onClipboardCopy?.invoke(text)
             }
         }
         buffer.onClipboardRequest = {
-            onClipboardRequest?.invoke()
+            try {
+                val app = com.arbdev.devbox.DevBoxApplication.instance
+                val cm = app.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as? android.content.ClipboardManager
+                cm?.primaryClip?.getItemAt(0)?.text?.toString() ?: onClipboardRequest?.invoke()
+            } catch (_: Exception) {
+                onClipboardRequest?.invoke()
+            }
         }
         buffer.onBell = {
             mainHandler.post {
+                try {
+                    val app = com.arbdev.devbox.DevBoxApplication.instance
+                    val vibrator = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S) {
+                        val vm = app.getSystemService(android.content.Context.VIBRATOR_MANAGER_SERVICE) as? android.os.VibratorManager
+                        vm?.defaultVibrator
+                    } else {
+                        @Suppress("DEPRECATION")
+                        app.getSystemService(android.content.Context.VIBRATOR_SERVICE) as? android.os.Vibrator
+                    }
+                    if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
+                        vibrator?.vibrate(android.os.VibrationEffect.createOneShot(45, android.os.VibrationEffect.DEFAULT_AMPLITUDE))
+                    } else {
+                        @Suppress("DEPRECATION")
+                        vibrator?.vibrate(45)
+                    }
+                } catch (_: Exception) {}
                 onBell?.invoke()
             }
         }

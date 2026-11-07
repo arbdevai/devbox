@@ -37,6 +37,7 @@ typedef struct {
     int cursor_row;
     int cursor_col;
     int cursor_visible;
+    int cursor_shape; // 1: block, 2: underline, 3: bar/ibeam
     int altscreen_active;
     char *title;
 
@@ -44,6 +45,13 @@ typedef struct {
     ScrollbackLine scrollback[MAX_SCROLLBACK];
     int sb_head;
     int sb_size;
+
+    // Clipboard buffer for OSC 52
+    char *clip_buf;
+    size_t clip_len;
+    size_t clip_cap;
+    char *pending_clip;
+    char sel_buffer[4096];
 } DevBoxTerminal;
 
 static int cb_damage(VTermRect rect, void *user) {
@@ -72,6 +80,8 @@ static int cb_settermprop(VTermProp prop, VTermValue *val, void *user) {
     DevBoxTerminal *term = (DevBoxTerminal *)user;
     if (prop == VTERM_PROP_CURSORVISIBLE) {
         term->cursor_visible = val->boolean;
+    } else if (prop == VTERM_PROP_CURSORSHAPE) {
+        term->cursor_shape = val->number;
     } else if (prop == VTERM_PROP_ALTSCREEN) {
         term->altscreen_active = val->boolean;
     } else if (prop == VTERM_PROP_TITLE) {
@@ -96,6 +106,56 @@ static int cb_bell(void *user) {
     (void)user;
     return 1;
 }
+
+static int cb_set_selection(VTermSelectionMask mask, VTermStringFragment frag, void *user) {
+    (void)mask;
+    DevBoxTerminal *term = (DevBoxTerminal *)user;
+    if (!term) return 0;
+
+    if (frag.initial) {
+        term->clip_len = 0;
+    }
+
+    if (frag.str && frag.len > 0) {
+        // Batasi ukuran maksimal clipboard 512KB untuk menjaga kestabilan memori
+        if (term->clip_len + frag.len <= 524288) {
+            if (term->clip_len + frag.len + 1 > term->clip_cap) {
+                size_t new_cap = term->clip_cap ? term->clip_cap * 2 : 4096;
+                while (new_cap < term->clip_len + frag.len + 1) new_cap *= 2;
+                char *new_buf = (char *)realloc(term->clip_buf, new_cap);
+                if (new_buf) {
+                    term->clip_buf = new_buf;
+                    term->clip_cap = new_cap;
+                }
+            }
+            if (term->clip_buf && term->clip_len + frag.len + 1 <= term->clip_cap) {
+                memcpy(term->clip_buf + term->clip_len, frag.str, frag.len);
+                term->clip_len += frag.len;
+                term->clip_buf[term->clip_len] = '\0';
+            }
+        }
+    }
+
+    if (frag.final) {
+        if (term->clip_buf && term->clip_len > 0) {
+            if (term->pending_clip) free(term->pending_clip);
+            term->pending_clip = strdup(term->clip_buf);
+        }
+        term->clip_len = 0;
+    }
+    return 1;
+}
+
+static int cb_query_selection(VTermSelectionMask mask, void *user) {
+    (void)mask;
+    (void)user;
+    return 1;
+}
+
+static VTermSelectionCallbacks selection_callbacks = {
+    .set = cb_set_selection,
+    .query = cb_query_selection,
+};
 
 static int cb_sb_pushline(int cols, const VTermScreenCell *cells, void *user) {
     DevBoxTerminal *term = (DevBoxTerminal *)user;
@@ -232,13 +292,23 @@ Java_com_arbdev_devbox_terminal_NativeVTerm_nativeCreate(JNIEnv *env, jclass cla
     term->cursor_row = 0;
     term->cursor_col = 0;
     term->cursor_visible = 1;
+    term->cursor_shape = 1;
     term->altscreen_active = 0;
     term->title = NULL;
     term->sb_head = 0;
     term->sb_size = 0;
+    term->clip_buf = NULL;
+    term->clip_len = 0;
+    term->clip_cap = 0;
+    term->pending_clip = NULL;
 
     term->vt = vterm_new(rows, cols);
     vterm_set_utf8(term->vt, 1);
+
+    VTermState *state = vterm_obtain_state(term->vt);
+    if (state) {
+        vterm_state_set_selection_callbacks(state, &selection_callbacks, term, term->sel_buffer, sizeof(term->sel_buffer));
+    }
 
     term->screen = vterm_obtain_screen(term->vt);
     vterm_screen_enable_altscreen(term->screen, 1);
@@ -337,8 +407,21 @@ Java_com_arbdev_devbox_terminal_NativeVTerm_nativeGetCursor(JNIEnv *env, jclass 
     arr[0] = term->cursor_row;
     arr[1] = term->cursor_col;
     arr[2] = term->cursor_visible;
+    arr[3] = term->cursor_shape;
 
     (*env)->ReleaseIntArrayElements(env, outPos, arr, 0);
+}
+
+JNIEXPORT jstring JNICALL
+Java_com_arbdev_devbox_terminal_NativeVTerm_nativeReadClipboard(JNIEnv *env, jclass clazz, jlong ptr) {
+    (void)clazz;
+    DevBoxTerminal *term = (DevBoxTerminal *)(intptr_t)ptr;
+    if (!term || !term->pending_clip) return NULL;
+
+    jstring res = (*env)->NewStringUTF(env, term->pending_clip);
+    free(term->pending_clip);
+    term->pending_clip = NULL;
+    return res;
 }
 
 JNIEXPORT jint JNICALL
@@ -495,6 +578,16 @@ Java_com_arbdev_devbox_terminal_NativeVTerm_nativeDestroy(JNIEnv *env, jclass cl
     if (term->title) {
         free(term->title);
         term->title = NULL;
+    }
+
+    if (term->clip_buf) {
+        free(term->clip_buf);
+        term->clip_buf = NULL;
+    }
+
+    if (term->pending_clip) {
+        free(term->pending_clip);
+        term->pending_clip = NULL;
     }
 
     if (term->vt) {

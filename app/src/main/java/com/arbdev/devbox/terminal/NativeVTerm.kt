@@ -78,6 +78,12 @@ class NativeVTerm(
         }
     }
 
+    fun readClipboard(): String? {
+        synchronized(vtermLock) {
+            return if (nativePtr != 0L) nativeReadClipboard(nativePtr) else null
+        }
+    }
+
     fun getTitle(): String? {
         synchronized(vtermLock) {
             return if (nativePtr != 0L) nativeGetTitle(nativePtr) else null
@@ -144,6 +150,9 @@ class NativeVTerm(
 
         @JvmStatic
         private external fun nativeReadOutput(ptr: Long): ByteArray?
+
+        @JvmStatic
+        private external fun nativeReadClipboard(ptr: Long): String?
 
         @JvmStatic
         private external fun nativeGetTitle(ptr: Long): String?

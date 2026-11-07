@@ -82,6 +82,8 @@ class TerminalGridBuffer(
         private set
     var isCursorVisible: Boolean = true
         private set
+    var cursorShape: Int = 1 // 1: block, 2: underline, 3: bar/ibeam
+        private set
 
     // DEC Mode 1049 Alternate Screen Buffer State (Reaktif untuk beralih layar Agent CLI vs Bash secara bersih)
     val isAltBufferState = mutableStateOf(false)
@@ -130,7 +132,7 @@ class TerminalGridBuffer(
 
     // JNI I/O Buffers (Pre-allocated, zero-allocation during rendering)
     private var rowDataBuffer = IntArray(maxCols * 4)
-    private val cursorPos = IntArray(3)
+    private val cursorPos = IntArray(4)
     private val modeArr = IntArray(4)
     private val surrogateChars = CharArray(2)
 
@@ -275,6 +277,12 @@ class TerminalGridBuffer(
                 } catch (_: Exception) {}
             }
 
+            // 2c. Tangkap event salin teks OSC 52 langsung dari parser C native
+            val nativeClip = vterm.readClipboard()
+            if (!nativeClip.isNullOrEmpty()) {
+                onClipboardCopy?.invoke(nativeClip)
+            }
+
             // 3. Sync cursor, modes, and title from native engine
             syncNativeState()
 
@@ -288,6 +296,7 @@ class TerminalGridBuffer(
         cursorRow = cursorPos[0]
         cursorCol = cursorPos[1]
         isCursorVisible = (cursorPos[2] != 0)
+        cursorShape = cursorPos[3].coerceIn(1, 3)
 
         vterm.getModes(modeArr)
         isBracketedPasteMode = (modeArr[0] != 0)
@@ -317,6 +326,9 @@ class TerminalGridBuffer(
                 SCAN_NORMAL -> {
                     if (b == 0x1B) {
                         scanState = SCAN_ESC
+                    } else if (b == 0x07) {
+                        // ASCII BEL (^G) -> trigger haptic/bell feedback
+                        onBell?.invoke()
                     }
                 }
                 SCAN_ESC -> {
@@ -1127,7 +1139,7 @@ class TerminalGridBuffer(
         private const val SCAN_APC = 5
         private const val SCAN_APC_ESC = 6
 
-        private const val MAX_OSC_LEN = 4096
+        private const val MAX_OSC_LEN = 262144 // 256 KB buffer untuk teks besar OSC 52
         private const val MAX_APC_LEN = 1000000
 
         private val DEC_2026_PATTERN = byteArrayOf(

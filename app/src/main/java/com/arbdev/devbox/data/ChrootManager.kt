@@ -963,6 +963,74 @@ BRIDGE_EOF
             ln -sf /usr/local/bin/devbox-bridge "${'$'}rf/usr/bin/devbox-bridge" 2>/dev/null || true
             ln -sf /usr/local/bin/devbox-bridge "${'$'}rf/usr/local/bin/devbox-clip" 2>/dev/null || true
 
+            # Helper xclip wrapper untuk kompatibilitas AGY, Neovim, dan library CLI Linux
+            cat << 'XCLIP_EOF' > "${'$'}rf/usr/local/bin/xclip"
+#!/bin/bash
+is_out=0
+for arg in "$@"; do
+    case "$arg" in
+        -o|-out|--out) is_out=1 ;;
+    esac
+done
+if [ "$is_out" -eq 1 ]; then
+    cat /tmp/devbox-bridge/clipboard.txt 2>/dev/null || true
+else
+    if [ ! -t 0 ]; then
+        /usr/local/bin/devbox-bridge copy
+    else
+        /usr/local/bin/devbox-bridge copy "$@"
+    fi
+fi
+XCLIP_EOF
+            chmod 755 "${'$'}rf/usr/local/bin/xclip" 2>/dev/null || true
+
+            # Helper xsel wrapper
+            cat << 'XSEL_EOF' > "${'$'}rf/usr/local/bin/xsel"
+#!/bin/bash
+is_out=0
+for arg in "$@"; do
+    case "$arg" in
+        -o|--output) is_out=1 ;;
+    esac
+done
+if [ "$is_out" -eq 1 ]; then
+    cat /tmp/devbox-bridge/clipboard.txt 2>/dev/null || true
+else
+    if [ ! -t 0 ]; then
+        /usr/local/bin/devbox-bridge copy
+    else
+        /usr/local/bin/devbox-bridge copy "$@"
+    fi
+fi
+XSEL_EOF
+            chmod 755 "${'$'}rf/usr/local/bin/xsel" 2>/dev/null || true
+
+            # Helper wl-copy & wl-paste
+            cat << 'WLCOPY_EOF' > "${'$'}rf/usr/local/bin/wl-copy"
+#!/bin/bash
+/usr/local/bin/devbox-bridge copy "$@"
+WLCOPY_EOF
+            chmod 755 "${'$'}rf/usr/local/bin/wl-copy" 2>/dev/null || true
+
+            cat << 'WLPASTE_EOF' > "${'$'}rf/usr/local/bin/wl-paste"
+#!/bin/bash
+cat /tmp/devbox-bridge/clipboard.txt 2>/dev/null || true
+WLPASTE_EOF
+            chmod 755 "${'$'}rf/usr/local/bin/wl-paste" 2>/dev/null || true
+
+            # Helper termux-clipboard-set & termux-clipboard-get
+            cat << 'TCSET_EOF' > "${'$'}rf/usr/local/bin/termux-clipboard-set"
+#!/bin/bash
+/usr/local/bin/devbox-bridge copy "$@"
+TCSET_EOF
+            chmod 755 "${'$'}rf/usr/local/bin/termux-clipboard-set" 2>/dev/null || true
+
+            cat << 'TCGET_EOF' > "${'$'}rf/usr/local/bin/termux-clipboard-get"
+#!/bin/bash
+cat /tmp/devbox-bridge/clipboard.txt 2>/dev/null || true
+TCGET_EOF
+            chmod 755 "${'$'}rf/usr/local/bin/termux-clipboard-get" 2>/dev/null || true
+
             # Helper devbox-img (Kitty Graphics Image & Pixel-Perfect Terminal Viewer)
             cat << 'DEVBOX_IMG_EOF' > "${'$'}rf/usr/local/bin/devbox-img"
 #!/bin/bash

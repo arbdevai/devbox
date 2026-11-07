@@ -2534,6 +2534,7 @@ fun TerminalCanvas(
                     val cursorRow = session.buffer.cursorRow
                     val cursorCol = session.buffer.cursorCol
                     val isCursorVisible = session.buffer.isCursorVisible
+                    val cursorShape = session.buffer.cursorShape
                     val historyCount = session.buffer.getScrollbackSize()
 
                     val selStart = selectionStart
@@ -2571,7 +2572,7 @@ fun TerminalCanvas(
                         while (bgCol < lineCols) {
                             val startCol = bgCol
                             val cell = line.getOrNull(bgCol) ?: break
-                            val isCursor = (isCursorVisible && (lineIdx - historyCount) == cursorRow && bgCol == cursorCol)
+                            val isCursor = (isCursorVisible && (lineIdx - historyCount) == cursorRow && bgCol == cursorCol && cursorShape == 1)
                             val pt = GridPoint(lineIdx, bgCol)
                             val isSelected = hasSelection && selMin != null && selMax != null && pt >= selMin && pt <= selMax
                             val invBg = if (cell.isInverse) {
@@ -2592,7 +2593,7 @@ fun TerminalCanvas(
 
                             while (bgCol < lineCols) {
                                 val nextCell = line.getOrNull(bgCol) ?: break
-                                val nextIsCursor = (isCursorVisible && (lineIdx - historyCount) == cursorRow && bgCol == cursorCol)
+                                val nextIsCursor = (isCursorVisible && (lineIdx - historyCount) == cursorRow && bgCol == cursorCol && cursorShape == 1)
                                 val nextPt = GridPoint(lineIdx, bgCol)
                                 val nextIsSelected = hasSelection && selMin != null && selMax != null && nextPt >= selMin && nextPt <= selMax
                                 val nextInvBg = if (nextCell.isInverse) {
@@ -2631,7 +2632,7 @@ fun TerminalCanvas(
 
                             val pt = GridPoint(lineIdx, col)
                             val isSelected = hasSelection && selMin != null && selMax != null && pt >= selMin && pt <= selMax
-                            val isCursor = (isCursorVisible && (lineIdx - historyCount) == cursorRow && col == cursorCol)
+                            val isCursor = (isCursorVisible && (lineIdx - historyCount) == cursorRow && col == cursorCol && cursorShape == 1)
 
                             val rawFg = if (cell.isDim) cell.fgColor.copy(alpha = 0.6f) else cell.fgColor
                             val invFg = if (cell.isInverse) {
@@ -2655,6 +2656,25 @@ fun TerminalCanvas(
                             } else {
                                 singleChar[0] = cell.char
                                 nativeCanvas.drawText(singleChar, 0, 1, cellX, yText, textPaint)
+                            }
+                        }
+
+                        // 2b. Gambar kursor dinamis Underline (2) atau Bar / I-Beam (3)
+                        if (isCursorVisible && (lineIdx - historyCount) == cursorRow && cursorCol < maxCols) {
+                            if (cursorShape == 2) {
+                                val barHeight = with(density) { 2.dp.toPx() }
+                                drawRect(
+                                    color = activeTheme.cursorColor,
+                                    topLeft = Offset(cursorCol * charWidth, yTop + charHeight - barHeight),
+                                    size = Size(charWidth, barHeight)
+                                )
+                            } else if (cursorShape == 3) {
+                                val barWidth = with(density) { 2.dp.toPx() }
+                                drawRect(
+                                    color = activeTheme.cursorColor,
+                                    topLeft = Offset(cursorCol * charWidth, yTop),
+                                    size = Size(barWidth, charHeight)
+                                )
                             }
                         }
 
