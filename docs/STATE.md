@@ -1,10 +1,11 @@
 # STATE - DevBox Workstation
 
 ## Status Sesi Saat Ini
-- **Fase**: Rilis v1.2.38 (Integrasi Penuh OSC 52 Clipboard, Universal CLI Wrappers, Dynamic Cursor Shape, & Terminal Bell)
-- **Target Versi**: v1.2.38 (versionCode 10238)
+- **Fase**: Rilis v1.2.38 Berhasil Dipublikasikan (CI Build & Release Sukses)
+- **Versi Terpasang/Rilis**: v1.2.38 (versionCode 10238)
 - **Device Mode**: Root Native (Chroot ARM64)
-- **Kondisi Codebase**: Lolos Pre-Flight Check
+- **CI Runner**: GitHub Actions Run ID `42400202679` (Sukses 3m 16s)
+- **Release URL**: https://github.com/arbdevai/devbox/releases/tag/v1.2.38
 
 ## Rekapitulasi Solusi & Eksekusi
 1. [x] **OSC 52 Clipboard Synchronization**: Mengaktifkan `vterm_state_set_selection_callbacks` di `devbox_vterm_jni.c`, `NativeVTerm.kt`, dan `TerminalGridBuffer.kt`. Menyinkronkan clipboard langsung ke `ClipboardManager` Android via `DevBoxApplication.instance`.
