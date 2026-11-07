@@ -967,18 +967,18 @@ BRIDGE_EOF
             cat << 'XCLIP_EOF' > "${'$'}rf/usr/local/bin/xclip"
 #!/bin/bash
 is_out=0
-for arg in "$@"; do
-    case "$arg" in
+for arg in "${'$'}@"; do
+    case "${'$'}arg" in
         -o|-out|--out) is_out=1 ;;
     esac
 done
-if [ "$is_out" -eq 1 ]; then
+if [ "${'$'}is_out" -eq 1 ]; then
     cat /tmp/devbox-bridge/clipboard.txt 2>/dev/null || true
 else
     if [ ! -t 0 ]; then
         /usr/local/bin/devbox-bridge copy
     else
-        /usr/local/bin/devbox-bridge copy "$@"
+        /usr/local/bin/devbox-bridge copy "${'$'}@"
     fi
 fi
 XCLIP_EOF
@@ -988,18 +988,18 @@ XCLIP_EOF
             cat << 'XSEL_EOF' > "${'$'}rf/usr/local/bin/xsel"
 #!/bin/bash
 is_out=0
-for arg in "$@"; do
-    case "$arg" in
+for arg in "${'$'}@"; do
+    case "${'$'}arg" in
         -o|--output) is_out=1 ;;
     esac
 done
-if [ "$is_out" -eq 1 ]; then
+if [ "${'$'}is_out" -eq 1 ]; then
     cat /tmp/devbox-bridge/clipboard.txt 2>/dev/null || true
 else
     if [ ! -t 0 ]; then
         /usr/local/bin/devbox-bridge copy
     else
-        /usr/local/bin/devbox-bridge copy "$@"
+        /usr/local/bin/devbox-bridge copy "${'$'}@"
     fi
 fi
 XSEL_EOF
@@ -1008,7 +1008,7 @@ XSEL_EOF
             # Helper wl-copy & wl-paste
             cat << 'WLCOPY_EOF' > "${'$'}rf/usr/local/bin/wl-copy"
 #!/bin/bash
-/usr/local/bin/devbox-bridge copy "$@"
+/usr/local/bin/devbox-bridge copy "${'$'}@"
 WLCOPY_EOF
             chmod 755 "${'$'}rf/usr/local/bin/wl-copy" 2>/dev/null || true
 
@@ -1021,7 +1021,7 @@ WLPASTE_EOF
             # Helper termux-clipboard-set & termux-clipboard-get
             cat << 'TCSET_EOF' > "${'$'}rf/usr/local/bin/termux-clipboard-set"
 #!/bin/bash
-/usr/local/bin/devbox-bridge copy "$@"
+/usr/local/bin/devbox-bridge copy "${'$'}@"
 TCSET_EOF
             chmod 755 "${'$'}rf/usr/local/bin/termux-clipboard-set" 2>/dev/null || true
 
