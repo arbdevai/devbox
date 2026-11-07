@@ -469,6 +469,7 @@ fun TerminalScreen(
         modifier = Modifier
             .fillMaxSize()
             .background(TerminalBackground)
+            .imePadding()
     ) {
         // 2026 Google M3 Pill Session Tab Bar
         Row(
