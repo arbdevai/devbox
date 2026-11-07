@@ -1,10 +1,11 @@
 # STATE - DevBox Workstation
 
 ## Status Sesi Saat Ini
-- **Fase**: Implementasi Selesai & Lolos Verifikasi Sintaksis (Ready for User Testing / CI Push)
-- **Target Versi**: v1.2.36
+- **Fase**: Rilis v1.2.36 Berhasil Dipublikasikan (CI Build & Release Sukses)
+- **Versi Terpasang/Rilis**: v1.2.36 (versionCode 10236)
 - **Device Mode**: Root Native (Chroot ARM64)
-- **Kondisi Codebase**: Lolos Pre-Flight Check (0 Hard Errors, 30 Kotlin & 7 XML valid)
+- **CI Runner**: GitHub Actions Run ID `42395278168` (Sukses 1m 31s)
+- **Release URL**: https://github.com/arbdevai/devbox/releases/tag/v1.2.36
 
 ## Rekapitulasi Solusi & Eksekusi
 1. [x] **Terminal Ketarik ke Atas**: Menghilangkan `.imePadding()` berulang di `TerminalScreen.kt` yang bertabrakan dengan Scaffold insets + `adjustResize`. Menghilangkan `LaunchedEffect(maxValue)` agresif agar viewport tidak melompat saat keyboard muncul.
